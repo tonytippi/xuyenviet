@@ -175,7 +175,7 @@ type AiAskComposerProps = {
   signOutAction?: SignOutAction;
 };
 
-function AnswerUsefulnessFeedbackControl({
+export function AnswerUsefulnessFeedbackControl({
   messageId,
   feedback,
   pending,
@@ -194,16 +194,12 @@ function AnswerUsefulnessFeedbackControl({
   }, [feedback?.comment, messageId]);
 
   return (
-    <section className="mt-4 rounded-2xl border border-[#d8c9ad] bg-white/70 p-4" aria-label="Đánh giá độ hữu ích của câu trả lời">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h3 className="text-sm font-bold uppercase tracking-[0.12em] text-[#1f5f46]">Câu trả lời này hữu ích không?</h3>
-          <p className="mt-1 text-sm leading-6 text-[#4f625a]">Đánh giá là tuỳ chọn và không ảnh hưởng việc tiếp tục chat hoặc mở nguồn.</p>
-        </div>
-        <div className="flex flex-wrap gap-2">
+    <section className="mt-4 flex flex-wrap items-center gap-2 border-t border-[#e6e6e6] pt-3" aria-label="Đánh giá câu trả lời">
+      <span className="text-sm text-[#4f625a]">Câu trả lời này có hữu ích?</span>
+      <div className="flex flex-wrap gap-2">
           <button
             aria-pressed={selectedRating === "useful"}
-            className="min-h-11 rounded-xl border border-[#8fb59f] bg-[#edf7f0] px-3 py-2 text-sm font-semibold text-[#17342c] transition hover:bg-white focus:outline-none focus:ring-4 focus:ring-[#8fb59f]/45 disabled:cursor-not-allowed disabled:opacity-60 aria-pressed:bg-[#1f5f46] aria-pressed:text-white"
+            className="min-h-11 rounded-xl border border-[#8fb59f] bg-[#edf7f0] px-3 py-2 text-sm font-semibold text-[#17342c] transition hover:bg-white motion-reduce:transition-none focus:outline-none focus:ring-4 focus:ring-[#8fb59f]/45 disabled:cursor-not-allowed disabled:opacity-60 aria-pressed:bg-[#1f5f46] aria-pressed:text-white"
             disabled={pending}
             onClick={() => onSubmit(messageId, "useful", comment)}
             type="button"
@@ -212,22 +208,21 @@ function AnswerUsefulnessFeedbackControl({
           </button>
           <button
             aria-pressed={selectedRating === "not_useful"}
-            className="min-h-11 rounded-xl border border-[#d8c9ad] bg-[#fff8ec] px-3 py-2 text-sm font-semibold text-[#17342c] transition hover:bg-white focus:outline-none focus:ring-4 focus:ring-[#e5bd82] disabled:cursor-not-allowed disabled:opacity-60 aria-pressed:bg-[#8c4f13] aria-pressed:text-white"
+            className="min-h-11 rounded-xl border border-[#d8c9ad] bg-[#fff8ec] px-3 py-2 text-sm font-semibold text-[#17342c] transition hover:bg-white motion-reduce:transition-none focus:outline-none focus:ring-4 focus:ring-[#e5bd82] disabled:cursor-not-allowed disabled:opacity-60 aria-pressed:bg-[#8c4f13] aria-pressed:text-white"
             disabled={pending}
             onClick={() => onSubmit(messageId, "not_useful", comment)}
             type="button"
           >
-            Chưa hữu ích
+            Chưa đúng ý
           </button>
         </div>
-      </div>
-      {selectedRating ? (
-        <div className="mt-3">
+      {selectedRating === "not_useful" ? (
+        <div className="w-full">
           <label className="text-sm font-semibold text-[#17342c]" htmlFor={`answer-feedback-comment-${messageId}`}>
             Ghi chú ngắn tuỳ chọn
           </label>
           <textarea
-            className="mt-2 min-h-20 w-full resize-y rounded-xl border border-[#d8c9ad] bg-[#fffdf8] px-3 py-2 text-sm leading-6 text-[#17342c] outline-none transition focus:border-[#1f5f46] focus:ring-4 focus:ring-[#8fb59f]/45"
+            className="mt-2 min-h-20 w-full resize-y rounded-xl border border-[#d8c9ad] bg-[#fffdf8] px-3 py-2 text-sm leading-6 text-[#17342c] outline-none transition motion-reduce:transition-none focus:border-[#1f5f46] focus:ring-4 focus:ring-[#8fb59f]/45"
             disabled={pending}
             id={`answer-feedback-comment-${messageId}`}
             onChange={(event) => setComment(event.target.value)}
@@ -237,7 +232,7 @@ function AnswerUsefulnessFeedbackControl({
           <div className="mt-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <p className="text-xs leading-5 text-[#6b7c75]">Tối đa {answerUsefulnessCommentMaxLength} ký tự. Không nhập thông tin nhạy cảm của trẻ em hoặc giấy tờ cá nhân.</p>
             <button
-              className="min-h-10 rounded-xl border border-[#d8c9ad] bg-white/80 px-3 py-2 text-sm font-semibold text-[#17342c] transition hover:bg-white focus:outline-none focus:ring-4 focus:ring-[#e5bd82] disabled:cursor-not-allowed disabled:opacity-60"
+              className="min-h-11 rounded-xl border border-[#d8c9ad] bg-white/80 px-3 py-2 text-sm font-semibold text-[#17342c] transition hover:bg-white motion-reduce:transition-none focus:outline-none focus:ring-4 focus:ring-[#e5bd82] disabled:cursor-not-allowed disabled:opacity-60"
               disabled={pending}
               onClick={() => onSubmit(messageId, selectedRating, comment)}
               type="button"
@@ -247,24 +242,20 @@ function AnswerUsefulnessFeedbackControl({
           </div>
         </div>
       ) : null}
-      {pending ? <p className="mt-2 text-sm font-semibold text-[#4f625a]">Đang lưu đánh giá...</p> : null}
+      {pending ? <p aria-live="polite" className="text-sm font-semibold text-[#4f625a]">Đang lưu đánh giá...</p> : null}
     </section>
   );
 }
 
 function AiAskConsumerStatusNotice({ statuses }: { statuses?: DisplayMessage["consumerStatuses"] }) {
-  const labels = {
-    context_extraction: "ngữ cảnh kế hoạch",
-    answer_annotation: "chi tiết tham khảo",
-    trip_proposal_draft: "bản nháp đề xuất chuyến đi",
-  };
   const sortedStatuses = [...(statuses ?? [])].sort((left, right) => left.category.localeCompare(right.category) || left.state.localeCompare(right.state));
-  const pending = sortedStatuses.filter((status) => status.state === "pending").map((status) => labels[status.category]);
-  const failed = sortedStatuses.filter((status) => status.state === "failed").map((status) => labels[status.category]);
-  const notice = [
-    pending.length > 0 ? `Đang chuẩn bị thêm ${pending.join(", ")} tuỳ chọn. Câu trả lời này đã sẵn sàng để bạn sử dụng.` : null,
-    failed.length > 0 ? `Chưa thể chuẩn bị thêm ${failed.join(", ")} tuỳ chọn. Câu trả lời đã hoàn tất vẫn sẵn sàng để bạn sử dụng.` : null,
-  ].filter(Boolean).join(" ");
+  const hasPending = sortedStatuses.some((status) => status.state === "pending");
+  const hasFailed = sortedStatuses.some((status) => status.state === "failed");
+  const notice = hasFailed
+    ? "Một số chi tiết bổ sung chưa sẵn sàng. Bạn vẫn có thể dùng câu trả lời này và hỏi tiếp khi cần."
+    : hasPending
+      ? "Một số chi tiết bổ sung sẽ xuất hiện sau. Bạn vẫn có thể dùng câu trả lời này."
+      : "";
   const statusKey = sortedStatuses.map((status) => `${status.category}:${status.state}`).join(",");
   const previousStatusKeyRef = useRef<string | undefined>(undefined);
   const [announcedNotice, setAnnouncedNotice] = useState<string | null>(null);
@@ -284,9 +275,8 @@ function AiAskConsumerStatusNotice({ statuses }: { statuses?: DisplayMessage["co
     <>
       <p aria-live="polite" className="sr-only">{announcedNotice}</p>
       {notice ? (
-        <section aria-label="Trạng thái chi tiết lập kế hoạch tuỳ chọn" className="mt-4 space-y-2">
-          {pending.length > 0 ? <p className="rounded-xl border border-[#d8c9ad] bg-[#fff8ec] px-3 py-2 text-sm leading-6 text-[#6f3f12]">Đang chuẩn bị thêm {pending.join(", ")} tuỳ chọn. Câu trả lời này đã sẵn sàng để bạn sử dụng.</p> : null}
-          {failed.length > 0 ? <p className="rounded-xl border border-[#f0c8a0] bg-[#fff7ed] px-3 py-2 text-sm leading-6 text-[#6f3f12]">Chưa thể chuẩn bị thêm {failed.join(", ")} tuỳ chọn. Câu trả lời đã hoàn tất vẫn sẵn sàng để bạn sử dụng.</p> : null}
+          <section aria-label="Thông báo cho câu trả lời" className="mt-4">
+           <p className="text-sm leading-6 text-[#6f3f12]">{notice}</p>
         </section>
       ) : null}
     </>
@@ -335,9 +325,6 @@ const assistantSectionHeadings = new Set([
   "Kế hoạch gợi ý",
   "Vì sao nên đi như vậy",
   "Lưu ý thực tế",
-  "Cảnh báo cần kiểm tra",
-  "Nguồn và độ tin cậy",
-  "Điều chưa chắc chắn",
   "Bước tiếp theo",
   "Câu hỏi tiếp theo",
 ]);
@@ -408,7 +395,7 @@ export function AssistantMessageContent({ messageId, displayConversationId, cont
           <ul className="flex w-max min-w-full gap-2 px-1">
             {navigableSections.map((section, index) => (
               <li key={`${section.heading}-${index}`}>
-                <a className="block whitespace-nowrap rounded-full border border-[#8fb59f] bg-[#edf7f0] px-3 py-2 text-sm font-semibold text-[#14532d] transition hover:bg-white focus:outline-none focus:ring-4 focus:ring-[#8fb59f]/45" href={`#answer-${messageId}-section-${index}`}>
+                <a className="block min-h-11 whitespace-nowrap rounded-full border border-[#8fb59f] bg-[#edf7f0] px-3 py-2 text-sm font-semibold text-[#14532d] transition hover:bg-white motion-reduce:transition-none focus:outline-none focus:ring-4 focus:ring-[#8fb59f]/45" href={`#answer-${messageId}-section-${index}`}>
                   {normalizeAssistantHeading(section.heading!)}
                 </a>
               </li>
@@ -421,7 +408,7 @@ export function AssistantMessageContent({ messageId, displayConversationId, cont
         const sectionAnnotations = section.bodyStart >= 0 && section.bodyEnd >= 0 ? safeAnnotations.filter((annotation) => annotation.start >= section.bodyStart && annotation.end <= section.bodyEnd).map((annotation) => ({ ...annotation, start: annotation.start - section.bodyStart, end: annotation.end - section.bodyStart })) : [];
 
         return (
-          <section className="rounded-2xl border border-[#eadfc8] bg-white/70 p-4" id={section.heading && messageId ? `answer-${messageId}-section-${navigableSections.indexOf(section)}` : undefined} key={`${section.heading || "intro"}-${index}`}>
+          <section className="scroll-mt-4" id={section.heading && messageId ? `answer-${messageId}-section-${navigableSections.indexOf(section)}` : undefined} key={`${section.heading || "intro"}-${index}`}>
             {section.heading ? <h3 className="text-sm font-bold uppercase tracking-[0.12em] text-[#1f5f46]"><AnnotatedAnswerText messageId={messageId} displayConversationId={displayConversationId} content={section.heading} annotations={headingAnnotations} selectedEntityId={selectedEntityId} detailPanelIds={detailPanelIds} onSelectEntity={onSelectEntity} /></h3> : null}
             {section.body ? <p className="mt-2 whitespace-pre-wrap text-base leading-7"><AnnotatedAnswerText messageId={messageId} displayConversationId={displayConversationId} content={section.body} annotations={sectionAnnotations} selectedEntityId={selectedEntityId} detailPanelIds={detailPanelIds} onSelectEntity={onSelectEntity} /></p> : null}
           </section>
@@ -461,9 +448,9 @@ function AnnotatedAnswerText({ messageId, displayConversationId, content, annota
       <button
         aria-controls={detailPanelIds}
         aria-expanded={isSelected}
-        aria-label={`Mở chi tiết annotation: ${annotation.text}`}
+        aria-label={`Xem chi tiết: ${annotation.text}`}
         aria-pressed={isSelected}
-        className={`mx-0.5 rounded-lg border px-1.5 py-0.5 text-left font-semibold underline decoration-2 underline-offset-4 transition focus:outline-none focus:ring-4 focus:ring-[#8fb59f]/45 ${getAnnotationClassName(annotation)}`}
+        className={`mx-0.5 min-h-11 rounded-lg border px-1.5 py-0.5 text-left font-semibold underline decoration-2 underline-offset-4 transition motion-reduce:transition-none focus:outline-none focus:ring-4 focus:ring-[#8fb59f]/45 ${getAnnotationClassName(annotation)}`}
         key={annotation.id}
         onClick={(event) => onSelectEntity?.(entity, event.currentTarget)}
         type="button"
@@ -566,69 +553,37 @@ function getAnnotationClassName(annotation: AnswerAnnotation) {
 }
 
 export function AssistantProvenanceBlock({ provenance, selectedEntityId, detailPanelIds, onSelectEntity }: { provenance?: AssistantMessageProvenanceItem[]; selectedEntityId?: string; detailPanelIds?: string; onSelectEntity?: (entity: AnswerEntityDescriptor, trigger: HTMLElement) => void }) {
-  const visibleItems = provenance?.filter((item): item is AvailableAssistantMessageProvenanceItem | Extract<AssistantMessageProvenanceItem, { availability: "withdrawn" }> => item.availability === "withdrawn" || (item.usedInPrompt || item.sourceCategory === "general")) ?? [];
+  const visibleItems = provenance?.filter((item): item is AvailableAssistantMessageProvenanceItem | Extract<AssistantMessageProvenanceItem, { availability: "withdrawn" }> => item.availability === "withdrawn" || (item.sourceCategory !== "general" && (item.freshnessSensitive || item.verificationStatus === "unverified" || Boolean(getSafeTravelerUrl(item.url))))) ?? [];
 
   if (visibleItems.length === 0) {
     return null;
   }
 
   return (
-    <section className="mt-4 rounded-2xl border border-[#d8c9ad] bg-[#fff8ec] p-4" aria-label="Nguồn và độ tin cậy">
-      <h3 className="text-sm font-bold uppercase tracking-[0.12em] text-[#8c4f13]">Nguồn và độ tin cậy</h3>
-      <ul className="mt-3 space-y-3">
+    <section className="mt-4" aria-label="Thông tin cần kiểm tra">
+      <ul className="space-y-2">
         {visibleItems.map((item) => {
           if (item.availability === "withdrawn") {
-            return <li className="rounded-xl border border-[#eadfc8] bg-white/80 p-3 text-sm leading-6 text-[#4f625a]" key={item.id}>{item.unavailableLabel}</li>;
+            return <li className="text-sm leading-6 text-[#6f3f12]" key={item.id}>Thông tin tham khảo này hiện không còn mở được. Hãy kiểm tra lại trước khi đi hoặc đặt dịch vụ.</li>;
           }
           const isSelected = selectedEntityId === item.id;
-          const hasActionBlockedProvenance = isActionBlockedProvenance(item);
-          const detailActionLabel = item.sourceCategory === "general" ? "Xem chi tiết suy luận AI" : hasActionBlockedProvenance || item.freshnessSensitive ? "Xem chi tiết cảnh báo" : "Xem chi tiết nguồn";
-          const travelerUrl = getSafeTravelerUrl(item.url);
+          const needsVerification = item.freshnessSensitive || item.verificationStatus === "unverified";
+          const detailActionLabel = item.url ? "Xem nguồn tham khảo" : "Cần kiểm tra gì?";
 
           return (
-          <li className="rounded-xl border border-[#eadfc8] bg-white/80 p-3 text-sm leading-6 text-[#17342c]" key={item.id}>
+          <li className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm leading-6 text-[#6f3f12]" key={item.id}>
+            <span>{needsVerification ? "Thông tin này có thể thay đổi. Kiểm tra lại trước khi đi hoặc đặt dịch vụ." : "Bạn có thể xem thông tin tham khảo trước khi quyết định."}</span>
             <button
               aria-controls={detailPanelIds}
               aria-expanded={isSelected}
               aria-label={`${detailActionLabel}: ${item.title}`}
               aria-pressed={isSelected}
-              className="-m-2 flex w-[calc(100%+1rem)] flex-col gap-2 rounded-xl p-2 text-left transition hover:bg-[#fff8ec] focus:outline-none focus:ring-4 focus:ring-[#8fb59f]/45 aria-pressed:border aria-pressed:border-[#1f5f46] aria-pressed:bg-[#edf7f0] sm:flex-row sm:items-start sm:justify-between"
+              className="min-h-11 rounded-xl px-2 py-2 text-left font-semibold text-[#1f5f46] underline decoration-[#8fb59f] underline-offset-4 transition hover:bg-[#fff8ec] motion-reduce:transition-none focus:outline-none focus:ring-4 focus:ring-[#8fb59f]/45"
               onClick={(event) => onSelectEntity?.(createProvenanceAnswerEntityDescriptor(item), event.currentTarget)}
               type="button"
             >
-              <span className="font-semibold">{item.title}</span>
-              <span className="w-fit rounded-full border border-[#d8c9ad] bg-[#fffdf8] px-2 py-1 text-xs font-semibold uppercase tracking-[0.08em] text-[#4f625a]">
-                {formatProvenanceCategory(item)}
-              </span>
+              {detailActionLabel}
             </button>
-            <div className="mt-2 flex flex-wrap gap-2 text-xs font-semibold text-[#4f625a]">
-              <span>{item.confidenceLabel}</span>
-              <span>{formatProvenanceSourceType(item)}</span>
-              {item.checkedAt ? <span>Kiểm tra: {formatProvenanceDate(item.checkedAt)}</span> : null}
-            </div>
-            <div className="mt-2 flex flex-wrap gap-2 text-xs font-semibold text-[#6f3f12]">
-              {getTrustLabels(item).map((label) => <span className="rounded-full border border-[#e5bd82] bg-[#fff8ec] px-2 py-1" key={label}>{label}</span>)}
-            </div>
-            {travelerUrl ? (
-              <a className="mt-2 block break-words text-sm font-semibold text-[#1f5f46] underline decoration-[#8fb59f] underline-offset-4 focus:outline-none focus:ring-4 focus:ring-[#8fb59f]/45" href={travelerUrl} rel="noreferrer" target="_blank">
-                Mở nguồn tham khảo: {formatProvenanceUrl(travelerUrl)}
-              </a>
-            ) : null}
-            {item.sourceCategory === "general" ? (
-              <p className="mt-2 text-sm leading-6 text-[#6f3f12]">Phần này là suy luận tổng quát của AI, không phải nguồn đã xác minh.</p>
-            ) : null}
-            {item.freshnessSensitive ? (
-              <p className="mt-2 text-sm leading-6 text-[#6f3f12]">Thông tin có thể thay đổi. Kiểm tra lại trước khi đi hoặc đặt dịch vụ.</p>
-            ) : null}
-            {(item.conditions?.length ?? 0) > 0 ? (
-              <p className="mt-2 text-sm leading-6 text-[#4f625a]">Điều kiện: {item.conditions!.join("; ")}</p>
-            ) : null}
-            {item.evidence?.map((evidence, index) => {
-              const evidenceUrl = getSafeTravelerUrl(evidence.url);
-              return <p className="mt-2 text-sm leading-6 text-[#4f625a]" key={`${evidence.sourceLabel}-${index}`}>
-                <span className="font-semibold">{evidence.sourceLabel}</span>{evidence.quote ? `: ${evidence.quote}` : ""}{evidenceUrl ? <>. <a className="font-semibold text-[#1f5f46] underline decoration-[#8fb59f] underline-offset-4 focus:outline-none focus:ring-4 focus:ring-[#8fb59f]/45" href={evidenceUrl} rel="noreferrer" target="_blank">Mở nguồn</a></> : null}
-              </p>;
-            })}
           </li>
           );
         })}
@@ -644,17 +599,16 @@ export function AnswerDetailPanel({ selectedEntity, panelId, panelRef, onClose, 
         <div className="rounded-[1.5rem] border border-dashed border-[#d8c9ad] bg-white/75 p-5">
           <p className="text-sm font-bold text-[#17342c]">Chưa có chi tiết được chọn</p>
           <p className="mt-2 text-sm leading-6 text-[#4f625a]">
-            Chọn một nguồn hoặc cảnh báo trong câu trả lời để xem thông tin kiểm chứng. XuyenViet không tự tạo thông tin chi tiết từ nội dung trả lời tự do.
+            Chọn một mục trong câu trả lời để xem thông tin hữu ích trước khi quyết định.
           </p>
-        </div>
-        <div className="rounded-2xl border border-[#eadfc8] bg-[#fff8ec] p-4 text-sm leading-6 text-[#6f3f12]">
-          Nguồn và độ tin cậy dựa trên provenance đã lưu, không dựa trên việc đọc lại văn bản trợ lý.
         </div>
       </div>
     );
   }
 
-  const detailEntries = selectedEntity.quickFacts ?? Object.entries(selectedEntity.detail ?? {}).map(([label, value]) => ({ label, value }));
+  const detailEntries = selectedEntity.quickFacts ?? [];
+  const travelerUrl = selectedEntity.detail?.URL ? getSafeTravelerUrl(selectedEntity.detail.URL) : null;
+  const checkedDate = selectedEntity.detail?.["Ngày kiểm tra"];
   const DetailIcon = getAnswerEntityIcon(selectedEntity.type);
 
   return (
@@ -664,13 +618,12 @@ export function AnswerDetailPanel({ selectedEntity, panelId, panelRef, onClose, 
           <div className="flex min-w-0 items-start gap-3">
             <span aria-hidden="true" className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-[#e8f3ec] text-xl text-[#14532d]"><DetailIcon /></span>
             <div>
-              <p className="text-xs font-bold uppercase tracking-[0.16em] text-[#8c4f13]">Chi tiết đã chọn</p>
-              <h3 className="mt-1 text-xl font-semibold tracking-[-0.03em] text-[#17342c]">{selectedEntity.label}</h3>
+               <h3 className="mt-1 text-xl font-semibold tracking-[-0.03em] text-[#17342c]">{selectedEntity.label}</h3>
             </div>
           </div>
           <button
             aria-label="Đóng bảng chi tiết"
-            className="min-h-10 rounded-xl border border-[#d8c9ad] bg-[#fffdf8] px-3 py-2 text-sm font-semibold text-[#17342c] transition hover:bg-white focus:outline-none focus:ring-4 focus:ring-[#8fb59f]/45"
+            className="min-h-11 rounded-xl border border-[#d8c9ad] bg-[#fffdf8] px-3 py-2 text-sm font-semibold text-[#17342c] transition hover:bg-white motion-reduce:transition-none focus:outline-none focus:ring-4 focus:ring-[#8fb59f]/45"
             onClick={onClose}
             type="button"
           >
@@ -678,6 +631,8 @@ export function AnswerDetailPanel({ selectedEntity, panelId, panelRef, onClose, 
           </button>
         </div>
         <p className="mt-3 text-sm leading-6 text-[#4f625a]">{selectedEntity.summary ?? formatAnswerEntitySummary(selectedEntity)}</p>
+        {checkedDate ? <p className="mt-2 text-sm text-[#4f625a]">Kiểm tra lần cuối: {checkedDate}</p> : null}
+        {travelerUrl ? <a className="mt-3 inline-flex min-h-11 items-center rounded-xl px-2 py-2 text-sm font-semibold text-[#1f5f46] underline decoration-[#8fb59f] underline-offset-4 transition hover:bg-[#edf7f0] motion-reduce:transition-none focus:outline-none focus:ring-4 focus:ring-[#8fb59f]/45" href={travelerUrl} rel="noreferrer" target="_blank">Mở nguồn tham khảo</a> : null}
       </div>
 
       {detailEntries.length > 0 ? (
@@ -696,16 +651,6 @@ export function AnswerDetailPanel({ selectedEntity, panelId, panelRef, onClose, 
 
       {actionsEnabled && selectedEntity.capability && onExecuteAction ? <button className="min-h-11 rounded-xl bg-[#1f5f46] px-4 py-2 text-sm font-semibold text-white focus:outline-none focus:ring-4 focus:ring-[#8fb59f]/45 disabled:cursor-not-allowed disabled:opacity-60" disabled={actionPending} onClick={() => onExecuteAction(selectedEntity)} type="button">{actionPending ? "Đang cập nhật..." : selectedEntity.capability.command === "trip_change_proposal.apply" ? "Áp dụng đề xuất" : "Giữ kế hoạch hiện tại"}</button> : null}
 
-      {selectedEntity.provenanceIds && selectedEntity.provenanceIds.length > 0 ? (
-        <section className="rounded-2xl border border-[#eadfc8] bg-[#fff8ec] p-4 text-sm leading-6 text-[#6f3f12]" aria-label="Cơ sở gợi ý">
-          <h4 className="text-sm font-bold uppercase tracking-[0.12em] text-[#8c4f13]">Cơ sở gợi ý</h4>
-          <div className="mt-3 flex flex-wrap gap-2">
-            {selectedEntity.provenanceIds.map((id, index) => (
-              <span className="rounded-full border border-[#d8c9ad] bg-white px-3 py-1 text-xs font-semibold text-[#4f625a]" key={id}>Nguồn {index + 1}</span>
-            ))}
-          </div>
-        </section>
-      ) : null}
     </div>
   );
 }
@@ -2033,7 +1978,7 @@ export function AiAskComposer({
                 <article
                   className={
                     message.role === "assistant"
-                      ? "rounded-2xl border border-[#e5e5e5] bg-white p-5 text-[#282828] shadow-[0_1px_3px_rgba(0,0,0,0.04)]"
+                      ? "py-3 text-[#282828]"
                       : "ml-auto rounded-2xl bg-[#f1f1f1] p-4 text-[#292929] sm:max-w-[80%]"
                   }
                   key={message.id}
@@ -2073,15 +2018,15 @@ export function AiAskComposer({
 
           {isPreparing ? (
             <section aria-live="polite" className="mx-auto max-w-[760px] rounded-[1.5rem] border border-dashed border-[#d8c9ad] bg-[#fffdf8] p-4 text-[#17342c] shadow-[0_12px_30px_rgba(41,33,18,0.06)]">
-              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[#1f5f46]">Đang xử lý</p>
-              <p className="mt-2 text-base font-semibold">Trợ lý đang chuẩn bị câu trả lời cho câu hỏi của bạn.</p>
+              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[#1f5f46]">Đang chuẩn bị câu trả lời</p>
+              <p className="mt-2 text-base font-semibold">Bạn có thể chờ trong cuộc trò chuyện này.</p>
               <p className="mt-2 text-sm leading-6 text-[#4f625a]">
-                Mình đang chuẩn bị ngữ cảnh và nguồn liên quan. Nội dung đang nhận chỉ là tạm thời cho đến khi được lưu hoàn chỉnh.
+                Nội dung đang nhận chỉ là tạm thời cho đến khi câu trả lời hoàn tất.
               </p>
               {pendingQuestion ? <p className="mt-3 rounded-2xl bg-white/80 p-3 text-sm leading-6 text-[#4f625a]">“{pendingQuestion}”</p> : null}
               {streamingContent ? (
                 <div className="mt-3 rounded-2xl border border-[#d8c9ad] bg-white/90 p-3 text-sm leading-6 text-[#17342c]">
-                  <p className="mb-2 text-xs font-semibold uppercase tracking-[0.16em] text-[#1f5f46]">Đang nhận từng phần</p>
+                  <p className="mb-2 text-xs font-semibold uppercase tracking-[0.16em] text-[#1f5f46]">Bản nháp đang nhận</p>
                   <p className="whitespace-pre-wrap">{streamingContent}</p>
                 </div>
               ) : null}
@@ -2131,7 +2076,7 @@ export function AiAskComposer({
             ) : null}
             <button
               aria-label={isPending ? "Đang gửi câu hỏi" : "Gửi câu hỏi"}
-              className="absolute bottom-5 right-5 grid h-10 w-10 place-items-center rounded-xl bg-[#202020] text-white transition hover:bg-[#383838] active:translate-y-px disabled:cursor-not-allowed disabled:bg-[#a3a3a3]"
+              className="absolute bottom-5 right-5 grid min-h-11 min-w-11 place-items-center rounded-xl bg-[#202020] text-white transition hover:bg-[#383838] motion-reduce:transition-none active:translate-y-px disabled:cursor-not-allowed disabled:bg-[#a3a3a3] focus:outline-none focus:ring-4 focus:ring-[#8fb59f]/45"
               disabled={askFormDisabled}
               title="Gửi câu hỏi"
               type="submit"
@@ -2487,41 +2432,9 @@ function validateSelectedImage(image: File | null) {
   return null;
 }
 
-function formatProvenanceCategory(item: AvailableAssistantMessageProvenanceItem) {
-  if (item.sourceCategory === "knowledge") {
-    return "XuyenViet";
-  }
-
-  if (item.sourceCategory === "web") {
-    return "Web chưa xác minh";
-  }
-
-  if (item.sourceCategory === "trip_context") {
-    return "Dự án";
-  }
-
-  if (item.sourceCategory === "chat_context") {
-    return "Hội thoại";
-  }
-
-  return "Suy luận";
-}
-
 function createProvenanceAnswerEntityDescriptor(item: AvailableAssistantMessageProvenanceItem): AnswerEntityDescriptor {
   const hasActionBlockedProvenance = isActionBlockedProvenance(item);
-  const detail: Record<string, string> = {
-    "Loại": formatProvenanceCategory(item),
-    "Độ tin cậy": item.confidenceLabel,
-    "Nhãn nguồn": formatProvenanceSourceType(item),
-    "Trạng thái": hasActionBlockedProvenance ? "Không dùng để hành động; cần kiểm tra nguồn hiện hành." : item.verificationStatus === "verified" && item.sourceCategory !== "web" && item.sourceCategory !== "general" ? "đã xác minh" : "chưa xác minh",
-  };
-
-  // Keep the action constraint in bounded quick facts even when URLs and freshness add detail.
-  if (item.usePolicy === "do_not_use") {
-    detail["Cách dùng"] = "Không dùng để hành động; cần kiểm tra nguồn hiện hành.";
-  } else if (item.usePolicy === "caveat_only") {
-    detail["Cách dùng"] = "Chỉ dùng như thông tin có điều kiện; cần kiểm tra trước khi hành động.";
-  }
+  const detail: Record<string, string> = {};
 
   if (item.url) {
     detail["URL"] = item.url;
@@ -2531,21 +2444,10 @@ function createProvenanceAnswerEntityDescriptor(item: AvailableAssistantMessageP
     detail["Ngày kiểm tra"] = formatProvenanceDate(item.checkedAt);
   }
 
-  if (item.freshnessSensitive) {
-    detail["Độ mới"] = "Thông tin có thể thay đổi, cần kiểm tra lại trước khi đi hoặc đặt dịch vụ.";
-  } else {
-    detail["Độ mới"] = "Chưa có cảnh báo riêng về độ mới của nguồn này.";
-  }
-
-  if ((item.conditions?.length ?? 0) > 0) {
-    detail["Điều kiện"] = item.conditions!.join("; ");
-  }
-
   return {
-    type: item.sourceCategory === "general" ? "action" : hasActionBlockedProvenance || item.freshnessSensitive ? "warning" : "source",
+    type: hasActionBlockedProvenance || item.freshnessSensitive ? "warning" : "source",
     label: item.title,
-    section: "Nguồn và độ tin cậy",
-    summary: item.sourceCategory === "general" ? "Đây là suy luận tổng quát của AI, chưa được xác minh như một nguồn." : undefined,
+    summary: hasActionBlockedProvenance || item.freshnessSensitive ? "Thông tin này có thể thay đổi. Kiểm tra lại trước khi đi hoặc đặt dịch vụ." : "Bạn có thể xem thông tin tham khảo trước khi quyết định.",
     sourceCategory: item.sourceCategory,
     owner: { table: "assistant_response_provenance", id: item.id },
     detail,
@@ -2554,42 +2456,15 @@ function createProvenanceAnswerEntityDescriptor(item: AvailableAssistantMessageP
   };
 }
 
-function getTrustLabels(item: AvailableAssistantMessageProvenanceItem) {
-  const labels: string[] = [];
-
-  if (item.knowledgeState === "community_observation") labels.push("Quan sát cộng đồng");
-  if (item.knowledgeState === "community_pattern") labels.push("Mẫu hình cộng đồng");
-  if (item.usePolicy === "caveat_only" || (item.conditions?.length ?? 0) > 0) labels.push("Thông tin có điều kiện");
-  if (item.verificationState === "required" || item.verificationStatus === "unverified") labels.push("Cần xác minh trước khi hành động");
-  if (isActionBlockedProvenance(item)) labels.push("Không dùng để hành động; cần kiểm tra nguồn hiện hành");
-  if (item.sourceCategory === "web") labels.push("Nguồn bên ngoài chưa xác minh");
-  if (item.freshnessSensitive) labels.push("Có thể đã thay đổi");
-
-  return labels;
-}
-
 function isActionBlockedProvenance(item: AvailableAssistantMessageProvenanceItem) {
-  return item.usePolicy === "do_not_use" || item.verificationState === "failed" || item.knowledgeState === "conflicted" || item.knowledgeState === "superseded";
+  return item.verificationStatus === "unverified";
 }
 
 function formatAnswerEntitySummary(entity: AnswerEntityDescriptor) {
-  if (entity.sourceCategory === "general") {
-    return "Đây là suy luận tổng quát của AI. Nội dung này chưa được xác minh như nguồn XuyenViet hoặc nguồn chính thức.";
-  }
-
-  if (entity.sourceCategory === "web") {
-    return "Đây là nguồn web bên ngoài và vẫn chưa xác minh, kể cả khi trang tự ghi là official hoặc provider.";
-  }
-
   if (entity.type === "warning") {
     return "Mục này cần kiểm tra lại trước khi ra quyết định đi, hành động hoặc đặt dịch vụ.";
   }
-
-  if (entity.sourceCategory === "trip_context" || entity.sourceCategory === "chat_context") {
-    return "Chi tiết này đến từ ngữ cảnh người dùng đã cung cấp trong dự án hoặc hội thoại, không phải nguồn bên ngoài đã duyệt.";
-  }
-
-  return "Chi tiết này được dựng từ provenance đã lưu của câu trả lời, không trích xuất từ văn bản tự do của trợ lý.";
+  return "Xem thông tin này để chuẩn bị phù hợp hơn cho chuyến đi.";
 }
 
 function getAnswerEntityIcon(type: AnswerEntityDescriptor["type"]) {
@@ -2603,40 +2478,6 @@ function getAnswerEntityIcon(type: AnswerEntityDescriptor["type"]) {
   return SourceIcon;
 }
 
-function formatProvenanceSourceType(item: AvailableAssistantMessageProvenanceItem) {
-  const sourceType = item.sourceType?.toLocaleLowerCase("vi-VN") ?? null;
-
-  if (item.sourceCategory === "web") {
-    if (sourceType === "community" || sourceType === "facebook" || sourceType === "cộng đồng") {
-      return "Nguồn cộng đồng bên ngoài, chưa xác minh";
-    }
-
-    if (sourceType === "official" || sourceType === "provider") {
-      return `Nguồn web tự ghi ${sourceType}, vẫn chưa được XuyenViet duyệt`;
-    }
-
-    return "Nguồn web bên ngoài, chưa xác minh";
-  }
-
-  if (item.sourceCategory === "general") {
-    return "Không phải nguồn đã xác minh";
-  }
-
-  if (sourceType === "community" || sourceType === "facebook" || sourceType === "cộng đồng") {
-    return "Nguồn cộng đồng";
-  }
-
-  if (item.sourceCategory === "trip_context") {
-    return "Ngữ cảnh dự án do người dùng cung cấp";
-  }
-
-  if (item.sourceCategory === "chat_context") {
-    return "Ngữ cảnh hội thoại do người dùng cung cấp";
-  }
-
-  return item.sourceType ? `Loại nguồn: ${item.sourceType}` : "Loại nguồn: chưa có nhãn";
-}
-
 function formatProvenanceDate(value: string) {
   const date = new Date(value);
 
@@ -2645,15 +2486,6 @@ function formatProvenanceDate(value: string) {
   }
 
   return date.toLocaleDateString("vi-VN");
-}
-
-function formatProvenanceUrl(value: string) {
-  try {
-    const url = new URL(value);
-    return `${url.hostname}${url.pathname === "/" ? "" : url.pathname}`;
-  } catch {
-    return value;
-  }
 }
 
 function getSafeTravelerUrl(value: string | null | undefined) {

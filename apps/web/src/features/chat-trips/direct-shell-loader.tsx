@@ -45,8 +45,8 @@ export function DirectShellLoader({ initialQuestion, conversationId, historyConv
     }).catch((error: DirectApiError) => { if (active) setState({ scopeKey, loading: false, expired: error.code === "unauthorized" || error.code === "forbidden", summaries: [], projects: [] }); });
     return () => { active = false; };
   }, [conversationId, historyConversationId, refreshGeneration, router, scopeKey, tripProjectId]);
-  if (state.loading || state.scopeKey !== scopeKey) return <main className="grid min-h-screen place-items-center text-[#4f625a]"><p>Đang tải hành trình của bạn...</p></main>;
-  if (!state.shell) return <main className="grid min-h-screen place-items-center px-5 text-center"><div><p className="text-[#17342c]">{state.expired ? "Phiên đăng nhập đã hết hạn." : "Không thể tải hành trình lúc này."}</p><a className="mt-4 inline-block rounded-xl bg-[#1f5f46] px-4 py-3 font-semibold text-white" href="/sign-in?next=/ai-ask">Đăng nhập lại</a></div></main>;
+  if (state.loading || state.scopeKey !== scopeKey) return <main aria-live="polite" className="grid min-h-screen place-items-center text-[#4f625a]"><p>Đang mở hành trình của bạn...</p></main>;
+  if (!state.shell) return <main className="grid min-h-screen place-items-center px-5 text-center"><div role="status"><p className="text-[#17342c]">{state.expired ? "Phiên đăng nhập đã hết hạn. Hãy đăng nhập lại để tiếp tục." : "Chưa thể mở hành trình lúc này. Hãy thử lại sau ít phút."}</p><a className="mt-4 inline-flex min-h-11 items-center rounded-xl bg-[#1f5f46] px-4 py-3 font-semibold text-white transition motion-reduce:transition-none focus:outline-none focus:ring-4 focus:ring-[#8fb59f]/45" href="/sign-in?next=/ai-ask">Đăng nhập lại</a></div></main>;
   const conversation = state.shell.shell.conversation;
   async function logout() {
     try {

@@ -4,7 +4,7 @@ baseline_commit: 9161d4e0fca3699fa080686993dad6d158c0e7d7
 
 # Story 16.3: Present Practical Vietnamese Answer, Trust, and Recovery States
 
-Status: ready-for-dev
+Status: review
 
 ## Story
 
@@ -46,44 +46,44 @@ so that I can act on travel guidance without seeing product internals or being p
 
 ## Tasks / Subtasks
 
-- [ ] Simplify the persisted assistant-answer reading path (AC: 1)
-  - [ ] In `apps/web/src/features/ai/ai-ask-composer.tsx`, preserve persisted-message rendering, UTF-16 annotation ranges, and the existing section-chip anchor navigation in `AssistantMessageContent`; remove the mandatory bordered/shadowed answer and per-section card treatment.
-  - [ ] Retain only traveler-oriented section headings in the default hierarchy. Do not use legacy headings such as `Nguồn và độ tin cậy`, `Cảnh báo cần kiểm tra`, or `Điều chưa chắc chắn` as generic technical sections or as a trust-state signal.
-  - [ ] Preserve user-message rendering, typed trip-recommendation behavior, proposal rendering, direct NDJSON framing, and persisted answer reconciliation. This story changes presentation, not AI Ask command, stream, or Trip Project behavior.
+- [x] Simplify the persisted assistant-answer reading path (AC: 1)
+  - [x] In `apps/web/src/features/ai/ai-ask-composer.tsx`, preserve persisted-message rendering, UTF-16 annotation ranges, and the existing section-chip anchor navigation in `AssistantMessageContent`; remove the mandatory bordered/shadowed answer and per-section card treatment.
+  - [x] Retain only traveler-oriented section headings in the default hierarchy. Do not use legacy headings such as `Nguồn và độ tin cậy`, `Cảnh báo cần kiểm tra`, or `Điều chưa chắc chắn` as generic technical sections or as a trust-state signal.
+  - [x] Preserve user-message rendering, typed trip-recommendation behavior, proposal rendering, direct NDJSON framing, and persisted answer reconciliation. This story changes presentation, not AI Ask command, stream, or Trip Project behavior.
 
-- [ ] Replace generic provenance UI with compact persisted disclosures (AC: 1-2)
-  - [ ] Refactor `AssistantProvenanceBlock` to render only a nearby practical verification sentence when the stored projection makes verification relevant, plus an optional action-oriented trigger. Use Vietnamese copy such as `Thông tin này có thể thay đổi. Kiểm tra lại trước khi đi hoặc đặt dịch vụ.`, `Cần kiểm tra gì?`, and `Xem nguồn tham khảo` where appropriate.
-  - [ ] Remove default traveler-visible generic source headings, categories, confidence labels, source types, trust/policy labels, reasoning labels, evidence quotes, conditions, provenance IDs, retrieval terms, and raw URL display. Never disclose `general` as AI reasoning or expose source taxonomy.
-  - [ ] Keep `createProvenanceAnswerEntityDescriptor(...)` identity bindings, `provenanceIds`, message/conversation binding, and safe URL handling intact. A disclosure is selected only from persisted safe `message.provenance` or persisted annotations; never parse answer text to infer a source, warning, or verification need.
-  - [ ] Reuse the existing selected-answer detail panel and `loadAnswerDetail(...)` projection. Do not add a second detail fetch, a browser provenance store, a modal stack, a Next route handler, or browser database access.
-  - [ ] Update `AnswerDetailPanel` as well as `AssistantProvenanceBlock`. For a source/verification disclosure, show only a traveler-safe title, practical verification instruction, optional safe URL with an action label, and safe checked date when present. For `place`, `hotel_area`, `route_segment`, `cost`, `warning`, and `trip_fact` descriptors, retain only bounded server-projected traveler-useful summary and quick facts. Never render `provenanceIds`, generic `detail` object entries, source category/type, confidence or trust labels, evidence/conditions, raw URL text, AI reasoning, or other trust taxonomy.
-  - [ ] For unavailable or withdrawn detail, keep the practical verification instruction and safe label/date only when present. Preserve the safe indistinguishable `detail: null` behavior for missing, foreign, and unavailable detail; never expose raw material as fallback.
-  - [ ] Preserve `DirectShellLoader.enrich(...)`: hydrate each persisted assistant message independently through `loadAnswerDetail(candidate.id, message.id)`, fall back to `detail: null` on a failed read, and merge `content`, `provenance`, and `annotations` only when both returned `conversationId` and `assistantMessageId` match the persisted shell message. A null, foreign, or mismatched detail result leaves the original persisted shell message unchanged.
-  - [ ] Replace implementation-facing annotation accessible names with traveler-oriented action labels while retaining `aria-controls`, `aria-expanded`, `aria-pressed`, and persisted capability gating. A historic action annotation remains inert unless its current owner-scoped capability is available.
+- [x] Replace generic provenance UI with compact persisted disclosures (AC: 1-2)
+  - [x] Refactor `AssistantProvenanceBlock` to render only a nearby practical verification sentence when the stored projection makes verification relevant, plus an optional action-oriented trigger. Use Vietnamese copy such as `Thông tin này có thể thay đổi. Kiểm tra lại trước khi đi hoặc đặt dịch vụ.`, `Cần kiểm tra gì?`, and `Xem nguồn tham khảo` where appropriate.
+  - [x] Remove default traveler-visible generic source headings, categories, confidence labels, source types, trust/policy labels, reasoning labels, evidence quotes, conditions, provenance IDs, retrieval terms, and raw URL display. Never disclose `general` as AI reasoning or expose source taxonomy.
+  - [x] Keep `createProvenanceAnswerEntityDescriptor(...)` identity bindings, `provenanceIds`, message/conversation binding, and safe URL handling intact. A disclosure is selected only from persisted safe `message.provenance` or persisted annotations; never parse answer text to infer a source, warning, or verification need.
+  - [x] Reuse the existing selected-answer detail panel and `loadAnswerDetail(...)` projection. Do not add a second detail fetch, a browser provenance store, a modal stack, a Next route handler, or browser database access.
+  - [x] Update `AnswerDetailPanel` as well as `AssistantProvenanceBlock`. For a source/verification disclosure, show only a traveler-safe title, practical verification instruction, optional safe URL with an action label, and safe checked date when present. For `place`, `hotel_area`, `route_segment`, `cost`, `warning`, and `trip_fact` descriptors, retain only bounded server-projected traveler-useful summary and quick facts. Never render `provenanceIds`, generic `detail` object entries, source category/type, confidence or trust labels, evidence/conditions, raw URL text, AI reasoning, or other trust taxonomy.
+  - [x] For unavailable or withdrawn detail, keep the practical verification instruction and safe label/date only when present. Preserve the safe indistinguishable `detail: null` behavior for missing, foreign, and unavailable detail; never expose raw material as fallback.
+  - [x] Preserve `DirectShellLoader.enrich(...)`: hydrate each persisted assistant message independently through `loadAnswerDetail(candidate.id, message.id)`, fall back to `detail: null` on a failed read, and merge `content`, `provenance`, and `annotations` only when both returned `conversationId` and `assistantMessageId` match the persisted shell message. A null, foreign, or mismatched detail result leaves the original persisted shell message unchanged.
+  - [x] Replace implementation-facing annotation accessible names with traveler-oriented action labels while retaining `aria-controls`, `aria-expanded`, `aria-pressed`, and persisted capability gating. A historic action annotation remains inert unless its current owner-scoped capability is available.
 
-- [ ] Make feedback a compact answer-footer interaction without changing its contract (AC: 1, 4)
-  - [ ] Rework `AnswerUsefulnessFeedbackControl` from a full-width card into quiet answer-footer actions: `Hữu ích` and `Chưa đúng ý`.
-  - [ ] Keep the existing immediate rating save on either footer action. Reveal an optional targeted reason/comment input only after persisted or newly selected negative feedback; switching to `Hữu ích` must not leave the negative-only editor visible. The optional comment remains keyboard/touch reachable and does not block composing, move the composer, or consume card-sized vertical space.
-  - [ ] Preserve `handleSaveAnswerUsefulnessFeedback` in-flight deduplication, message-scoped optimistic update, max-length handling, retryable failure behavior, `saveAnswerUsefulnessFeedbackAction`, direct client parser, CSRF admission, and existing server-side Feedback/Eval ownership. Do not alter database/API contracts or introduce client persistence.
-  - [ ] Provide a polite local or global announcement for feedback save success/failure and pending state. Retain focus on the activated footer or comment-save control after a terminal result unless that control was removed; do not move focus merely because feedback state changed. All footer controls and the optional save action must meet the 44px target floor and visible-focus convention.
+- [x] Make feedback a compact answer-footer interaction without changing its contract (AC: 1, 4)
+  - [x] Rework `AnswerUsefulnessFeedbackControl` from a full-width card into quiet answer-footer actions: `Hữu ích` and `Chưa đúng ý`.
+  - [x] Keep the existing immediate rating save on either footer action. Reveal an optional targeted reason/comment input only after persisted or newly selected negative feedback; switching to `Hữu ích` must not leave the negative-only editor visible. The optional comment remains keyboard/touch reachable and does not block composing, move the composer, or consume card-sized vertical space.
+  - [x] Preserve `handleSaveAnswerUsefulnessFeedback` in-flight deduplication, message-scoped optimistic update, max-length handling, retryable failure behavior, `saveAnswerUsefulnessFeedbackAction`, direct client parser, CSRF admission, and existing server-side Feedback/Eval ownership. Do not alter database/API contracts or introduce client persistence.
+  - [x] Provide a polite local or global announcement for feedback save success/failure and pending state. Retain focus on the activated footer or comment-save control after a terminal result unless that control was removed; do not move focus merely because feedback state changed. All footer controls and the optional save action must meet the 44px target floor and visible-focus convention.
 
-- [ ] Project all traveler states as bounded Vietnamese recovery copy (AC: 3)
-  - [ ] Update `AiAskComposer` preparation, streaming, in-progress/retry, persisted-answer failure, refresh-required, detail-unavailable, and consumer-status presentation to state only the practical effect and permitted next action. A partial streamed answer remains visibly provisional until the persisted terminal answer reconciles; it must not be represented as saved.
-  - [ ] Keep a completed answer usable when optional follow-up work is delayed or unavailable, but hide consumer categories and processing terminology unless an actual traveler action needs a plain-language explanation.
-  - [ ] Remove the legacy technical headings `Cảnh báo cần kiểm tra`, `Nguồn và độ tin cậy`, and `Điều chưa chắc chắn` from `assistantSectionHeadings` rather than renaming them into generic trust sections. Suppress category-derived `AiAskConsumerStatusNotice` copy; when a completed answer needs a follow-up notice, render one bounded practical Vietnamese message without naming consumer category, processing stage, or internal status.
-  - [ ] Update `DirectShellLoader` loading and unavailable/authentication surfaces with polite status semantics, practical Vietnamese copy, visible focus, and safe recovery. Preserve stale scope reconciliation to `/ai-ask`, the generic missing/foreign/unlinked outcome, and sign-in recovery.
-  - [ ] Do not interpolate `DirectApiError.code`, raw error messages, provider payloads, model names, IDs, source/provenance fields, status discriminators, job/consumer names, diagnostics, or server error taxonomy into traveler copy.
+- [x] Project all traveler states as bounded Vietnamese recovery copy (AC: 3)
+  - [x] Update `AiAskComposer` preparation, streaming, in-progress/retry, persisted-answer failure, refresh-required, detail-unavailable, and consumer-status presentation to state only the practical effect and permitted next action. A partial streamed answer remains visibly provisional until the persisted terminal answer reconciles; it must not be represented as saved.
+  - [x] Keep a completed answer usable when optional follow-up work is delayed or unavailable, but hide consumer categories and processing terminology unless an actual traveler action needs a plain-language explanation.
+  - [x] Remove the legacy technical headings `Cảnh báo cần kiểm tra`, `Nguồn và độ tin cậy`, and `Điều chưa chắc chắn` from `assistantSectionHeadings` rather than renaming them into generic trust sections. Suppress category-derived `AiAskConsumerStatusNotice` copy; when a completed answer needs a follow-up notice, render one bounded practical Vietnamese message without naming consumer category, processing stage, or internal status.
+  - [x] Update `DirectShellLoader` loading and unavailable/authentication surfaces with polite status semantics, practical Vietnamese copy, visible focus, and safe recovery. Preserve stale scope reconciliation to `/ai-ask`, the generic missing/foreign/unlinked outcome, and sign-in recovery.
+  - [x] Do not interpolate `DirectApiError.code`, raw error messages, provider payloads, model names, IDs, source/provenance fields, status discriminators, job/consumer names, diagnostics, or server error taxonomy into traveler copy.
 
-- [ ] Preserve detail/sheet focus and reduced-motion behavior (AC: 4-5)
-  - [ ] Reuse `answerEntityTriggerRef`, `closeAnswerDetailPanel()`, existing `Escape` handling, mobile focus trap, body-scroll cleanup, and composer fallback. Do not introduce another dialog or bypass the existing desktop-panel/mobile-sheet single-selection model.
-  - [ ] After disclosure close, terminal feedback/recovery action, or terminal proposal/sheet behavior, return focus to the initiating control when it remains connected; otherwise focus the composer/relevant established fallback. Do not steal focus merely because a disclosure or feedback footer appears.
-  - [ ] Add `motion-reduce:transition-none` to changed section chips, annotation/disclosure triggers, feedback controls, and detail-panel close/action controls that use local `transition`, following existing sheet-close controls. Preserve the global reduced-motion fallback in `apps/web/src/app/globals.css`; do not sweep unrelated sidebar or composer transitions unless their code is otherwise changed.
+- [x] Preserve detail/sheet focus and reduced-motion behavior (AC: 4-5)
+  - [x] Reuse `answerEntityTriggerRef`, `closeAnswerDetailPanel()`, existing `Escape` handling, mobile focus trap, body-scroll cleanup, and composer fallback. Do not introduce another dialog or bypass the existing desktop-panel/mobile-sheet single-selection model.
+  - [x] After disclosure close, terminal feedback/recovery action, or terminal proposal/sheet behavior, return focus to the initiating control when it remains connected; otherwise focus the composer/relevant established fallback. Do not steal focus merely because a disclosure or feedback footer appears.
+  - [x] Add `motion-reduce:transition-none` to changed section chips, annotation/disclosure triggers, feedback controls, and detail-panel close/action controls that use local `transition`, following existing sheet-close controls. Preserve the global reduced-motion fallback in `apps/web/src/app/globals.css`; do not sweep unrelated sidebar or composer transitions unless their code is otherwise changed.
 
-- [ ] Add focused regression coverage (AC: 1-5)
-  - [ ] Extend `tests/ai-ask-direct-api.test.ts` for strict `loadAnswerDetail()` cookie-authenticated/safe-parser behavior and `saveDirectAnswerUsefulnessFeedback()` CSRF request/result behavior, including malformed safe responses.
-  - [ ] Preserve and extend `tests/answer-annotations.test.ts` and `tests/knowledge-source-removal.test.ts` coverage for persisted-provenance-only detail, cross-message/unsafe annotation rejection, withdrawn provenance, and safe unavailable projections. These server-side tests do not replace traveler-rendering coverage.
-  - [ ] Add infrastructure-free component-compatible or source-level web tests using the existing Vitest setup for: available, freshness-sensitive, withdrawn, and `detail: null` disclosure render paths; allowed Vietnamese copy and absence of category, confidence, source type, trust labels, evidence, conditions, raw URL text, and provenance IDs; `DirectShellLoader.enrich(...)` matching, null, and mismatched message/detail identity behavior; negative-only feedback editor, immediate rating submission/retry, pending disablement, message-scoped update, and composer availability; generic Vietnamese streaming/consumer/recovery copy with transient streamed content visibly provisional; connected-trigger and composer fallback focus restoration; and reduced-motion classes on changed controls. Do not introduce a new UI-test framework for this story.
-  - [ ] Run focused unit tests, then `pnpm lint`, `pnpm typecheck`, `pnpm build`, and `git diff --check`. Use `pnpm test:integration` only if a changed test reads/mutates PostgreSQL; keep it serial and call `resetTestDatabase()` in each clean-table suite.
+- [x] Add focused regression coverage (AC: 1-5)
+  - [x] Extend `tests/ai-ask-direct-api.test.ts` for strict `loadAnswerDetail()` cookie-authenticated/safe-parser behavior and `saveDirectAnswerUsefulnessFeedback()` CSRF request/result behavior, including malformed safe responses.
+  - [x] Preserve and extend `tests/answer-annotations.test.ts` and `tests/knowledge-source-removal.test.ts` coverage for persisted-provenance-only detail, cross-message/unsafe annotation rejection, withdrawn provenance, and safe unavailable projections. These server-side tests do not replace traveler-rendering coverage.
+  - [x] Add infrastructure-free component-compatible or source-level web tests using the existing Vitest setup for: available, freshness-sensitive, withdrawn, and `detail: null` disclosure render paths; allowed Vietnamese copy and absence of category, confidence, source type, trust labels, evidence, conditions, raw URL text, and provenance IDs; `DirectShellLoader.enrich(...)` matching, null, and mismatched message/detail identity behavior; negative-only feedback editor, immediate rating submission/retry, pending disablement, message-scoped update, and composer availability; generic Vietnamese streaming/consumer/recovery copy with transient streamed content visibly provisional; connected-trigger and composer fallback focus restoration; and reduced-motion classes on changed controls. Do not introduce a new UI-test framework for this story.
+  - [x] Run focused unit tests, then `pnpm lint`, `pnpm typecheck`, `pnpm build`, and `git diff --check`. Use `pnpm test:integration` only if a changed test reads/mutates PostgreSQL; keep it serial and call `resetTestDatabase()` in each clean-table suite.
 
 ## Dev Notes
 
@@ -171,8 +171,21 @@ gpt-5.6-terra
 - Ultimate context engine analysis completed - comprehensive developer guide created.
 - Status set to `ready-for-dev`.
 - The guide explicitly preserves persisted-provenance-only disclosure, existing usefulness-feedback persistence, direct API/CSRF/parser boundaries, one URL-owned shell, one selected-detail state, and prior Story 16.2 scope/focus repairs.
+- Simplified persisted assistant answers into a calm conversation flow with section chips but no mandatory answer or per-section cards; removed legacy trust headings and category-derived follow-up copy.
+- Replaced generic provenance displays with persisted, practical Vietnamese verification cues. The existing selected detail surface now exposes only safe title, instruction, optional action-labeled URL, checked date, and server-projected quick facts.
+- Converted feedback to compact `Hữu ích` and `Chưa đúng ý` footer actions, retaining immediate direct API saves, negative-only optional comments, live pending feedback, message-scoped updates, and established focus behavior.
+- Added direct-client regressions for strict persisted answer-detail parsing and CSRF feedback results, plus source-level UI boundary coverage for practical copy, taxonomy removal, and reduced-motion controls.
+- Validation passed: `pnpm test:unit` (23 files, 226 tests), `pnpm lint` (0 errors, 45 pre-existing warnings), `pnpm typecheck`, `pnpm build`, and `git diff --check`. No integration test was required because this story changed no PostgreSQL behavior.
 
 ### File List
 
 - `_bmad-output/implementation-artifacts/16-3-present-practical-vietnamese-answer-trust-and-recovery-states.md`
 - `_bmad-output/implementation-artifacts/sprint-status.yaml`
+- `apps/web/src/features/ai/ai-ask-composer.tsx`
+- `apps/web/src/features/chat-trips/direct-shell-loader.tsx`
+- `tests/ai-ask-direct-api.test.ts`
+- `tests/traveler-ui-foundation.test.ts`
+
+### Change Log
+
+- 2026-08-05: Implemented practical Vietnamese answer, persisted verification disclosure, compact feedback, and recovery/accessibility presentation for Story 16.3.

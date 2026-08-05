@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 
-import { acceptDirectTripCreationRecommendation, declineDirectTripCreationRecommendation, loadTravelerShell, loadTripProjectSidebarSummaries, submitDirectAiAskStream } from "../apps/web/src/features/ai/direct-api-client";
+import { acceptDirectTripCreationRecommendation, declineDirectTripCreationRecommendation, loadAnswerDetail, loadTravelerShell, loadTripProjectSidebarSummaries, saveDirectAnswerUsefulnessFeedback, submitDirectAiAskStream } from "../apps/web/src/features/ai/direct-api-client";
 
 describe("direct traveler API client", () => {
   afterEach(() => { vi.unstubAllGlobals(); });
@@ -35,6 +35,20 @@ describe("direct traveler API client", () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ shell }), { status: 200 })));
 
     await expect(loadTravelerShell("conversation-1")).resolves.toEqual({ shell });
+  });
+
+  test("loads only a strict cookie-authenticated persisted answer detail projection", async () => {
+    const detail = { conversationId: "conversation-1", assistantMessageId: "assistant-1", content: "Đi Huế.", provenance: [], annotations: [] };
+    const fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ detail }), { status: 200 }));
+    vi.stubGlobal("fetch", fetch);
+
+    await expect(loadAnswerDetail("conversation-1", "assistant-1")).resolves.toEqual({ detail });
+    expect(fetch).toHaveBeenCalledWith("/v1/conversations/conversation-1/answers/assistant-1", expect.objectContaining({ credentials: "include" }));
+  });
+
+  test("rejects malformed persisted answer detail without exposing a fallback", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ detail: { conversationId: "conversation-1", assistantMessageId: "assistant-1", content: "Đi Huế.", provenance: "unsafe", annotations: [] } }), { status: 200 })));
+    await expect(loadAnswerDetail("conversation-1", "assistant-1")).rejects.toThrow();
   });
 
   test("accepts a non-null production workspace shell", async () => {
@@ -127,5 +141,16 @@ describe("direct traveler API client", () => {
     vi.stubGlobal("fetch", fetch);
 
     await expect(submitDirectAiAskStream({ question: "Đi đâu?", image: null, idempotencyKey: "a".repeat(16), onPreparing: () => undefined, onDelta: () => undefined })).rejects.toThrow("Luồng trả lời bị gián đoạn trước khi hoàn tất.");
+  });
+
+  test("saves direct feedback through the cached CSRF boundary and rejects malformed results", async () => {
+    const fetch = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({ success: true, feedback: { rating: "not_useful", comment: "Thiếu điểm dừng", updatedAt: "2026-08-05T00:00:00.000Z" } }), { status: 200 }));
+    vi.stubGlobal("fetch", fetch);
+
+    await expect(saveDirectAnswerUsefulnessFeedback({ assistantMessageId: "assistant-1", rating: "not_useful", comment: "Thiếu điểm dừng" })).resolves.toMatchObject({ success: true, feedback: { rating: "not_useful" } });
+    expect(fetch).toHaveBeenCalledWith("/v1/answer-usefulness-feedback", expect.objectContaining({ credentials: "include", headers: expect.objectContaining({ "X-XuyenViet-CSRF": "a".repeat(43) }) }));
+
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ success: true, feedback: { rating: "not_useful" } }), { status: 200 })));
+    await expect(saveDirectAnswerUsefulnessFeedback({ assistantMessageId: "assistant-2", rating: "not_useful" })).rejects.toThrow();
   });
 });

@@ -54,4 +54,20 @@ describe("traveler UI foundation", () => {
     expect(renderToStaticMarkup(createElement(icons.SendIcon))).toContain('aria-hidden="true"');
   });
 
+  test("keeps answer, disclosure, feedback, and recovery surfaces practical and free of trust taxonomy", () => {
+    const source = readFileSync("apps/web/src/features/ai/ai-ask-composer.tsx", "utf8");
+
+    expect(source).toContain("Thông tin này có thể thay đổi. Kiểm tra lại trước khi đi hoặc đặt dịch vụ.");
+    expect(source).toContain('const detailEntries = selectedEntity.quickFacts ?? [];');
+    expect(source).toContain('item.sourceCategory !== "general"');
+    expect(source).toContain("Chưa đúng ý");
+    expect(source).toContain("motion-reduce:transition-none");
+    expect(source).not.toContain('"Cảnh báo cần kiểm tra"');
+    expect(source).not.toContain('"Nguồn và độ tin cậy"');
+    expect(source).not.toContain('"Điều chưa chắc chắn"');
+    expect(source).not.toContain("formatProvenanceSourceType");
+    expect(source).not.toContain("getTrustLabels");
+    expect(source).not.toContain("formatProvenanceUrl");
+  });
+
 });
