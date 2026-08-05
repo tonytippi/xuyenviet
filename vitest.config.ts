@@ -6,7 +6,8 @@ import { defineConfig } from "vitest/config";
 const unitTests = [
   "tests/ai-usage-events.test.ts",
   "tests/answer-annotations.test.ts",
-  "tests/audit-actors.test.ts",
+    "tests/audit-actors.test.ts",
+    "tests/facebook-capture-script.test.ts",
     "tests/capture-orchestration.test.ts",
     "tests/contracts-browser-compatibility.test.ts",
   "tests/env-guards.test.ts",
@@ -38,6 +39,11 @@ export default defineConfig({
       "@xuyenviet/contracts": resolve(__dirname, "packages/contracts/src/index.ts"),
       "@xuyenviet/database": resolve(__dirname, "packages/database/src/index.ts"),
       "@xuyenviet/domain": resolve(__dirname, "packages/domain/src/index.ts"),
+      "@xuyenviet/worker-domain/features/knowledge/capture-cache": resolve(__dirname, "packages/worker-domain/src/features/knowledge/capture-cache.ts"),
+      "@xuyenviet/worker-domain/features/knowledge/capture-orchestration": resolve(__dirname, "packages/worker-domain/src/features/knowledge/capture-orchestration.ts"),
+      "@xuyenviet/worker-domain/features/knowledge/capture-identity": resolve(__dirname, "packages/worker-domain/src/features/knowledge/capture-identity.ts"),
+      "@xuyenviet/worker-domain/features/knowledge/facebook-capture": resolve(__dirname, "packages/worker-domain/src/features/knowledge/facebook-capture.ts"),
+      "@xuyenviet/worker-domain/features/knowledge/youtube-capture": resolve(__dirname, "packages/worker-domain/src/features/knowledge/youtube-capture.ts"),
       "@xuyenviet/worker-domain": resolve(__dirname, "packages/worker-domain/src/index.ts"),
       "@/db": resolve(__dirname, "packages/database/src"),
       "@/features": resolve(__dirname, "packages/worker-domain/src/features"),
@@ -46,6 +52,11 @@ export default defineConfig({
     tsconfigPaths: true,
   },
   test: {
+    server: {
+      deps: {
+        inline: ["@xuyenviet/worker-domain"],
+      },
+    },
     projects: [
       {
         extends: true,

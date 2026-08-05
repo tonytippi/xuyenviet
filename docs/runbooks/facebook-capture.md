@@ -1,9 +1,26 @@
 # Facebook Capture Operations
 
-## Status
+`facebook:capture` is an explicit, operator-controlled command. It is not a Worker task and must not be scheduled or used for unattended scraping.
 
-Facebook capture is retired. Story 14.5 removed the root capture CLI and its cache-migration command, so there is no supported `pnpm facebook:capture` or `pnpm capture-cache:migrate` operation.
+## Prerequisites
 
-Do not run source modules, archived commands, Playwright profiles, or ad-hoc database writes as substitutes. The retained Facebook source and capture records are historical product data, not evidence of an active capture runtime.
+- Set distinct PostgreSQL `DATABASE_URL` and `CAPTURE_CACHE_DATABASE_URL` values. The command rejects equivalent databases.
+- Initialize the cache before any capture: `pnpm capture-cache:migrate`.
+- Install Playwright locally with `pnpm exec playwright install` if needed.
+- Keep the headed local browser profile at `.playwright/facebook-profile`; sign in manually when Chromium opens. Never commit, back up, or store this profile in PostgreSQL or application secrets.
 
-The supported background-process owner is the bundled Worker. Its runtime, readiness checks, and operational evidence are documented in [Worker Operations](worker-operations.md). It does not implement Facebook capture.
+## Run
+
+```bash
+pnpm facebook:capture --limit 5
+pnpm facebook:capture --source-id <source-id>
+pnpm facebook:capture --limit 5 --yes
+```
+
+`--limit` accepts 1 through 25. The default is 5. Without `--yes`, the command previews the bounded visible post text and asks before it writes. It first replays a valid cache artifact; only a cache miss opens headed Chromium. Captured material is written through the capture domain API as an immutable version with the fixed `system-facebook-capture` audit actor.
+
+The command stops the run on Facebook login, checkpoint, rate-limit, block, or security-check pages. Refresh the local browser session and investigate before another manually initiated run. Do not substitute direct database writes, source-module invocation, stored browser credentials, feed traversal, or a Worker capture loop.
+
+## Recovery
+
+If cache initialization fails, run `pnpm capture-cache:migrate` against the intended separate cache database. If product persistence fails after an artifact is admitted, rerun the same bounded command to replay the cache rather than reopening Facebook.

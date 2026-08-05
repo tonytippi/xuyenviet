@@ -20,6 +20,9 @@
     "db:seed": "tsx scripts/db-seed.ts",
     "db:reset": "tsx scripts/db-reset.ts",
     "db:reset:local": "APP_ENV=local DB_RESET_DISPOSABLE_CONFIRMATION=confirm-disposable-reset DB_RESET_NO_RUNTIME_OVERLAP=confirm-no-runtime-overlap DB_RESET_EXPECTED_TARGET_IDENTITY='database=xuyenviet;host=127.0.0.1;port=5432' node --env-file=apps/api/.env.local --import tsx scripts/db-reset.ts",
+    "facebook:capture": "node --conditions react-server --import tsx scripts/facebook-capture.ts",
+    "youtube:capture": "node --conditions react-server --import tsx scripts/youtube-capture.ts",
+    "capture-cache:migrate": "node --conditions react-server --import tsx scripts/capture-cache-migrate.ts",
     "trip-proposal-expiry": "node --import tsx scripts/trip-proposal-expiry.ts",
     "knowledge:assistant-provenance-withdrawal-backfill": "node --import tsx scripts/assistant-provenance-withdrawal-backfill.ts"
   },
