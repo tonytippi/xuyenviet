@@ -3,7 +3,7 @@ name: XuyenViet
 status: final
 project: xuyenviet
 created: 2026-07-05
-updated: 2026-08-04
+updated: 2026-08-05
 sources:
   - ../../prds/prd-xuyenviet-2026-07-04/prd.md
   - ../../architecture/architecture-xuyenviet-2026-07-04/ARCHITECTURE-SPINE.md
@@ -42,9 +42,9 @@ Primary audience: Vietnamese road-trip travelers planning by car, initially focu
 | Trip Home | Trip Project workspace | Put the next decision or next planned leg in focus before the plan timeline and conversation |
 | Structured plan | Trip Project workspace | Review anchors, legs, activities, constraints, and `idea` / `planned` / `confirmed` / `backup` states; request all plan changes through the primary conversation |
 | Change proposal review | Assistant answer or Trip Home | Let the owner inspect, apply, dismiss, or refresh a typed AI proposal before any persistent plan state changes |
-| Right contextual detail panel | Selected answer entity in active chat | Show selected place, hotel, route segment, source, cost/warning, or trip fact with quick facts, related details, actions, and provenance chips |
+| Right contextual detail panel | Selected answer entity in active chat | Show selected place, hotel, route segment, source, cost/warning, or trip fact with quick facts, related details, actions, and optional plain-language verification detail |
 | Trip project detail/context panel | Trip project row / selected context | Show trip context, linked chats, correction/delete affordances, usually as right detail panel or mobile sheet |
-| Source detail | Answer source chip / detail panel | Show source title, type, URL when available, collected/checked date, confidence, freshness |
+| Source detail | Relevant verification disclosure / detail panel | Explain what to verify and why; show a safe source title, optional link, and useful checked date without technical taxonomy or diagnostics |
 | Account/privacy | Avatar menu / storage notice | Explain stored chat/trip details, deletion entry points, sign out |
 | Admin shell | Role-protected nav | Separate operator/admin workspace |
 | Knowledge intake | Admin shell | Submit URL, text, copied post, screenshot metadata for AI extraction |
@@ -81,9 +81,9 @@ Right detail panel hierarchy:
 | Selected entity header | Names what the user selected from the answer, such as `Asia Park`, a hotel area, a route segment, or a source, and identifies its category with a semantic icon. |
 | Summary | Gives a short, useful explanation in Vietnamese without duplicating the whole answer. |
 | Actions | Provides contextual actions such as `Dùng trong kế hoạch`, `Xem tuyến đường`, or `Lưu` only when the associated behavior is supported. Unsupported mockup actions must not render as inert controls. |
-| Quick facts | Shows compact facts like family fit, best time, verify status, confidence/source type, or route impact. |
+| Quick facts | Shows compact traveler-relevant facts such as family fit, best time, what to verify, or route impact. |
 | Related details | Shows related route/hotel/driving/source notes. |
-| Provenance | Shows source/confidence/freshness chips without exposing raw operator-only source material. |
+| Verification detail | Uses persisted safe provenance to explain source relevance and freshness without exposing raw material, source taxonomy, confidence codes, or diagnostics. |
 
 ## Voice and Tone
 
@@ -94,9 +94,9 @@ Microcopy is Vietnamese-first, practical, and calm. Brand posture lives in `DESI
 | `Bạn muốn đi đâu, đi mấy ngày, và đi cùng ai?` | `Hãy nhập đầy đủ thông tin để hệ thống hoạt động chính xác.` |
 | `Mình có thể gợi ý trước, rồi hỏi thêm vài chi tiết.` | `Không đủ dữ liệu.` |
 | `Thông tin này có thể thay đổi. Kiểm tra lại trước khi đặt dịch vụ.` | `Cảnh báo: dữ liệu không đáng tin cậy.` |
-| `Nguồn cộng đồng, chưa xác minh` | `Nguồn xấu` |
+| `Thông tin này nên được kiểm tra lại trước khi đi.` | `Nguồn xấu` |
 | `Xóa cuộc trò chuyện này? Nội dung sẽ không còn dùng trong câu trả lời.` | `Bạn có chắc không?` |
-| `Không tìm thấy nguồn phù hợp. Mình sẽ nói rõ phần nào là suy luận chung.` | `Không có dữ liệu.` |
+| `Mình chưa có thông tin đủ chắc để khẳng định điều này. Bạn nên kiểm tra lại trước khi quyết định.` | `Không có dữ liệu. Trạng thái truy xuất: failed.` |
 
 Tone rules:
 
@@ -131,12 +131,12 @@ Behavioral patterns. Visual specs live in `DESIGN.md.Components`.
 | Assistant answer | Chat | Reads as a companion message: short orientation, scannable plan/options, practical next step, and at most three concise follow-ups. Warnings, sources, uncertainty, and trip actions appear only when relevant and use hierarchy before adding card boundaries. The default path has no mandatory outer answer card. |
 | Section chips | Active assistant answer | A compact scrollable row at the top of the answer that jumps to relevant sections such as `Ăn gì?`, `Đi đâu?`, `Ở đâu?`, `Về chuyến đi`, `Cần biết`, and `Chi phí và mẹo`. |
 | Selectable answer entity | Active assistant answer | Persisted, provenance-bound places, hotel areas, route segments, source chips, warnings, costs, and trip facts can be selected/focused to open the right detail panel. The UI must not create entities by parsing answer prose at render time. |
-| Right contextual detail panel | Active AI Ask chat | Opens only when a selected entity exists. Shows title, summary, actions, quick facts, related details, and provenance. It must not appear on the logged-in empty state. |
-| Streaming assistant answer | AI Ask | Shows incremental assistant text after context/source preparation starts generation. Partial text is visually pending and reconciles to the persisted final assistant message when complete. If streaming fails, show retry/recovery and do not imply the partial answer is saved as final. |
+| Right contextual detail panel | Active AI Ask chat | Opens only when a selected entity exists. Shows title, summary, actions, quick facts, related details, and optional plain-language verification detail. It must not appear on the logged-in empty state. |
+| Streaming assistant answer | AI Ask | Shows incremental assistant text after preparation starts generation. Partial text is visually pending and reconciles to the persisted final assistant message when complete. If streaming fails, show a plain-language retry/recovery message and do not imply the partial answer is saved as final; never expose internal preparation, provider, or status terminology. |
 | Follow-up questions | Assistant answer footer | 1-3 concise questions. Tappable suggestions prefill composer; user can edit before sending. They answer the immediate question and are never a generic feature menu. |
 | Trip recommendation | Assistant answer | A compact conversational action offered only when durable trip context makes saving a new trip or continuing in one or more owned trips useful. The traveler explicitly chooses save, continue, private answer, another trip, or decline. |
 | Source summary row | Assistant answer | Shows a compact, action-oriented verification disclosure only when relevant. It opens source detail and never exposes raw operator-only material. Generic source-category chips are not required in the default reading path. |
-| Source detail | Answer/source chips/right detail panel | Lists each source with title/label, type, URL when available, collected/checked date, confidence, freshness-sensitive flag. |
+| Source detail | Relevant verification disclosure/right detail panel | Uses persisted provenance to explain what should be checked and why. It may show safe source title/label, URL, and useful date, but not source categories, confidence codes, provenance IDs, retrieval policy, provider/model details, or audit/process status. |
 | Storage notice | First AI Ask / account privacy | Informs users chat/trip details may be stored for current session/project. Link to details. Must not block asking unless legal policy later requires consent. |
 | Trip context indicator | AI Ask header/composer | Shows whether user is in ordinary chat or selected trip project. Switching project changes context priority visibly. |
 | Context correction hint | AI Ask / trip detail | If extracted context changes, show small confirmation-style note when useful: `Mình đã cập nhật: con 8 tuổi.` |
@@ -159,13 +159,13 @@ Behavioral patterns. Visual specs live in `DESIGN.md.Components`.
 | Streaming AI response | AI Ask | Answer text may appear progressively after source/context preparation. Keep composer guarded, expose stop/retry only if implementation supports safe cancellation, and announce completion through `aria-live`. |
 | Stream retry or reconnect | AI Ask | Reuse the original idempotency key and restore the persisted in-progress or terminal command state. Do not submit a second AI request solely because the connection was ambiguous. |
 | Planning state changed during answer | AI Ask | When final persistence returns `refresh_required`, remove pending partial treatment and show `Kế hoạch hoặc cuộc trò chuyện đã thay đổi. Hãy làm mới rồi hỏi lại.` Do not present partial text as a saved answer. |
-| Post-answer processing delayed or failed | AI Ask | Keep the completed answer intact. Show only a compact, non-blocking pending or recoverable status for context extraction, annotations, or proposal drafting; it never changes the completed answer into a failure. |
-| API-safe failure | AI Ask/admin | Project stable safe error codes to Vietnamese recovery copy. Never reveal provider payloads, tokens, SQL, stack traces, or internal transport diagnostics. |
+| Post-answer processing delayed or failed | AI Ask | Keep the completed answer intact. Show a compact, non-blocking plain-language note only when it changes a traveler action; never expose context extraction, annotations, proposal drafting, consumer, job, or failure-state terminology. |
+| API-safe failure | AI Ask/admin | Traveler UI projects a practical Vietnamese recovery message without provider payloads, model/provider names, tokens, SQL, stack traces, error codes, request IDs, provenance/retrieval terms, or internal transport diagnostics. Authorized admin UI may use separate safe operational projections. |
 | Long AI response | AI Ask | Progress copy after delay: `Mình đang kiểm tra ngữ cảnh và nguồn phù hợp...` Do not imply completion. |
 | Image attached to prompt | AI Ask | Reveal a compact thumbnail/file row with an icon-only remove action, type/size validation, and accessible label. Do not upload or submit unsupported images to the provider. |
 | Image input rejected | AI Ask | Reveal the allowed file types/size beside the validation error and keep the user's text draft intact. No provider call is made. Do not reserve idle composer space for this explanation. |
 | AI provider failure | AI Ask | Keep user draft. Show retry. Do not create misleading assistant message. |
-| No curated knowledge | Assistant answer | Say curated XuyenViet knowledge was not found and whether web/general reasoning was used. |
+| No sufficient information | Assistant answer | State what cannot be confirmed and what the traveler should check next. Do not disclose retrieval/source categories or model reasoning. |
 | Freshness-sensitive answer | Assistant answer | Show freshness warning near relevant section and in source details. |
 | Conflicting sources | Assistant answer | State conflict plainly and ask user to verify; prefer official/provider sources when available. |
 | No selected answer entity | Active AI Ask chat | Do not force an empty detail panel. Keep the right column absent/collapsed until the user selects a supported entity. |
@@ -242,7 +242,7 @@ Rules:
 - The storage notice explains chat/trip detail use before or at first meaningful AI Ask.
 - Deletion copy must say normal UI and retrieval use are removed/disabled; audit metadata may remain only if architecture requires it.
 - A proposal is a suggestion, not a committed booking, route check, weather check, or current-availability claim. UI copy must name unavailable dynamic information rather than implying it was checked.
-- Traveler-facing trust copy explains what should be checked and why. It does not default to system labels such as `Suy luận tổng quát của AI`, `Nguồn và độ tin cậy`, or `Không phải nguồn đã xác minh`.
+- Traveler-facing copy explains what to do, what should be checked, and why. It never exposes system labels, model/provider names, internal status/job/consumer names, source categories, confidence codes, provenance IDs, retrieval policy, audit vocabulary, request IDs, error codes, or implementation diagnostics. This applies equally to normal answers, loading, unavailable, verification, and failure states.
 - Trip history shows only the safe structured effect and actor/time. It must not expose raw model output or make a previously applied proposal editable as if it were current state.
 - Sensitive-data exclusions are not a UX afterthought: when the assistant appears to extract disallowed sensitive data, do not show it as remembered trip context.
 
@@ -286,6 +286,7 @@ Rejected patterns:
 - Map-first UX before Google Maps integration exists. The active mockup's filename is historical; its right region is an inspector, not a map requirement.
 - Booking marketplace UI, partner ranking, credit wallet, rewards, referral payout, or affiliate emphasis in MVP.
 - Overloaded AI answer footers with generic warning cards, full source detail, or expanded feedback forms by default.
+- Technical status, provenance taxonomy, model reasoning, provider diagnostics, request IDs, or implementation error messages in traveler chat.
 - Forcing a traveler to decide between chat and trip management before they can explain their trip.
 - Gamified trip planning or streak-like usage nudges.
 - Admin tools embedded in traveler chat.
@@ -305,21 +306,21 @@ Rejected patterns:
 6. The app creates a new active conversation row and shows a pending state while it prepares context and sources.
 7. Assistant responds in Vietnamese with a short orientation, a scannable plan, and only the concise follow-up questions needed to improve it. A specific verification disclosure appears only if the advice depends on changeable information.
 8. Lan selects a suggested place in the answer.
-9. The right detail panel opens with quick facts, related route/hotel/driving notes, and provenance chips for that selected place.
+9. The right detail panel opens with quick facts, related route/hotel/driving notes, and plain-language verification detail only when it helps with a decision.
 10. **Climax:** Lan gets a useful plan from one chat and can inspect details without leaving the conversation.
 
-Failure: AI provider fails. Lan's message remains visible as retryable draft; no assistant message is created.
+Failure: XuyenViet cannot complete the answer. Lan's message remains visible as a retryable draft; no assistant message is created, and the UI offers a plain-language retry action.
 
 ### Flow 2 — Source confidence inspection (Minh, cautious driver checking a stop)
 
 1. Minh asks whether a rest stop near Vinh is good for children.
 2. Assistant suggests options and adds a compact, specific note that the stop's current hours or availability should be checked before going.
 3. Minh taps `Cần kiểm tra gì?` or `Xem nguồn tham khảo`.
-4. The right detail panel opens with source titles, source type, URL where available, collected/checked date, confidence label, and freshness warning.
-5. One source is community/unverified; one source is official/provider.
+4. The right detail panel opens with safe source titles, links where available, useful checked dates, and an explanation of what should be verified.
+5. The traveler can distinguish which option needs verification before acting without needing to learn source or confidence categories.
 6. **Climax:** Minh understands which suggestion is safer to trust and which one he should verify by phone or official page before committing.
 
-Failure: Source URL missing. The detail panel still shows source label/type/date/confidence and says URL is unavailable rather than hiding the source.
+Failure: A source link is unavailable. The detail panel keeps the practical verification guidance and any safe source label/date, without exposing internal source or confidence fields.
 
 ### Flow 3 — Correct remembered trip detail (Hanh, desktop lunch break)
 

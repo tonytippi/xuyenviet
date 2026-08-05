@@ -4,7 +4,7 @@ description: Responsive web UX for an AI-first Vietnam road-trip planning compan
 status: final
 project: xuyenviet
 created: 2026-07-05
-updated: 2026-08-04
+updated: 2026-08-05
 sources:
   - ../../prds/prd-xuyenviet-2026-07-04/prd.md
   - ../../architecture/architecture-xuyenviet-2026-07-04/ARCHITECTURE-SPINE.md
@@ -206,7 +206,7 @@ The primary chat should feel as simple as a familiar ChatGPT conversation while 
 - **Hero Paper (`{colors.hero-paper}`)** is the warm public-entry surface behind the restrained green and purple radial washes. It is not used as a global app background.
 - **Map Paper (`{colors.map-paper}`)** gives travel-plan cards and operator knowledge cards a warmer surface than pure white. Do not use it as the entire authenticated workspace.
 - **Road Ink (`{colors.road-ink}`)** is the main readable text color when custom cards sit on map paper.
-- **Source colors** map to confidence labels: curated, community, unverified, partner, official. These labels appear as chips or compact metadata, never as decorative color blocks.
+- **Source colors** map to internal confidence categories used by authorized admin/operations surfaces. Traveler-facing chat does not render these categories as chips; it uses plain-language verification guidance instead.
 - **Freshness Amber (`{colors.freshness}`)** marks facts that may change: prices, opening hours, roads, weather, availability, promotions, and schedules.
 - **Warning Red (`{colors.warning}`)** is reserved for safety, access denial, destructive delete confirmation, and unsupported/failure states.
 - **Shell Sidebar (`{colors.shell-sidebar}`)** is the flat, pale-stone left app shell surface for conversation history and trip projects. It should feel quiet and tool-like, not like a floating card or marketing panel.
@@ -234,7 +234,7 @@ Use a responsive AI planning shell.
 - Tablet: sidebar may collapse to `{spacing.sidebar-rail}`; right detail panel can stack below or open as sheet depending on available width.
 - Mobile: no persistent sidebar; use top/menu sheet for history/projects, single-column chat, bottom-safe composer, and selected detail as a drawer/sheet.
 
-Chat answers use `{spacing.answer-gap}` between major sections. A single answer should read as a stack of scannable blocks: plan/options, rationale, practical tips, warnings, sources, uncertainty, and next steps. Do not present every section as equal weight; warnings and next steps should be easier to find than raw source metadata.
+Chat answers use `{spacing.answer-gap}` between major sections. A single answer should read as a natural, scannable flow: orientation, plan/options, rationale, practical tips, concise verification guidance when needed, and next steps. Do not present source metadata, uncertainty taxonomy, processing status, or technical diagnostics as peer sections in the default reading path.
 
 Maximum reading width for chat answer content: 760px. Admin review tables may use wider layouts, but Trip Project authoring happens through the primary conversation and owner confirmation of typed proposals rather than spreadsheet-like editors.
 
@@ -266,7 +266,7 @@ Shape language is soft but not playful.
 - **Primary button** uses `{components.button-primary}`. Label with action verbs: `Đăng nhập bằng Google`, `Hỏi AI`, `Lưu bản nháp`, `Phê duyệt`.
 - **Brand mark** uses `{components.brand-mark}`: a compact `XV` monogram in a green-to-route-teal rounded square. It appears at the public header and sidebar brand position; it is not a replacement for semantic icons.
 - **Icon system** uses one consistent outline or lightly colored icon family for route, stay, stop, source, project, chat, menu, send, attachment, close, and account actions. Replace an unambiguous compact control label with its icon. Icons retain accessible names and expose a tooltip on hover/focus; do not mix emoji, arbitrary bullets, text glyphs, and multiple icon styles in the same shell.
-- **App shell sidebar** uses `{components.app-shell-sidebar}`. It contains the brand row, `Trò chuyện mới` action, grouped conversation history, grouped trip projects, and a compact account/privacy footer with an admin entry only for authorized users. It has no outer card radius or elevation.
+- **App shell sidebar** uses `{components.app-shell-sidebar}`. It contains the brand row, `Hỏi XuyenViet` action, grouped saved trips, grouped recent conversations, and a compact account/privacy footer with an admin entry only for authorized users. It has no outer card radius or elevation and does not ask the traveler to select a chat/project mode before asking.
 - **Sidebar active row** uses `{components.app-shell-active-row}`. Exactly one primary workspace row is active: the selected conversation, selected trip project, or new-chat empty state. Row actions are compact and must not appear only on hover.
 - **Trip project row** behaves like a project/workspace item, with title, optional route/date hint, and active context indicator when the main chat is scoped to that trip.
 - **Trip Project header** keeps project title, compact route/date/traveler context, and an explicit `Kế hoạch chuyến đi` label. It does not present weather, maps, budget, or booking widgets in this tranche.
@@ -280,13 +280,14 @@ Shape language is soft but not playful.
 - **Logged-out ask box** visually resembles the chat composer but is sign-in-gated. It may accept visible draft text later, but submitting requires Google sign-in before AI calls or persistence.
 - **Logged-in empty start** uses a centered greeting, centered composer, and four icon-led `{components.starter-card}` controls. It must not render the right detail panel before an answer exists.
 - **Answer section chip** uses `{components.section-chip}` and sits in a compact, horizontally scrollable row at the top of an active answer. It navigates relevant answer sections such as `Ăn gì?`, `Đi đâu?`, `Ở đâu?`, and `Cần biết`; it is not a second navigation system or a filter that changes stored conversation data.
-- **Right detail panel** uses `{components.detail-panel}` and appears in active conversations when the user selects, hovers/focuses, or the assistant highlights a place, hotel, route segment, source, cost, warning, or trip fact. Its header, icon, title, short summary, action row, quick facts, related notes, and provenance chips make it an inspector, not a map-first surface or second chat.
-- **Detail card** uses `{components.detail-card}` for selected item title, summary, quick facts, related route/hotel/driving notes, action chips, and source/provenance chips.
-- **Route card** uses `{components.route-card}` for day plans, route segments, hotel-area suggestions, and practical stop lists. Route cards should support a short title, distance/time if known, confidence/source summary, and a clear next step.
+- **Right detail panel** uses `{components.detail-panel}` and appears in active conversations when the user selects, hovers/focuses, or the assistant highlights a place, hotel, route segment, source, cost, warning, or trip fact. Its header, icon, title, short summary, action row, quick facts, related notes, and optional plain-language source detail make it an inspector, not a map-first surface or second chat. It does not show technical status, provenance taxonomy, confidence codes, or implementation diagnostics.
+- **Detail card** uses `{components.detail-card}` for selected item title, summary, quick facts, related route/hotel/driving notes, actions, and optional plain-language verification detail.
+- **Route card** uses `{components.route-card}` for day plans, route segments, hotel-area suggestions, and practical stop lists. Route cards should support a short title, distance/time if known, a plain-language verification cue when needed, and a clear next step.
 - **Answer trust disclosure** is a compact, specific sentence near the advice it qualifies, with an optional `Cần kiểm tra gì?` or `Xem nguồn tham khảo` trigger. Generic provenance categories, general-reasoning labels, and full source blocks stay hidden until explicitly opened. Detailed source rows remain derived from persisted provenance.
 - **Answer feedback** is a quiet footer action using compact positive/negative controls or equivalent accessible text buttons. It may reveal a short follow-up after negative feedback but never pushes the composer down with a full card.
 - **Image attachment row** appears only after a file is selected. It uses a compact thumbnail, filename or generic image label, size/status text, and an icon-only remove action with an accessible name. It must not look like an approved source chip.
 - **Streaming answer state** uses subtle pending treatment and normal answer typography; avoid flashy typewriter effects that reduce readability or conflict with reduced-motion settings.
+- **Traveler state copy** always states the practical situation and next action in Vietnamese. Do not render provider/model names, technical status labels, error codes, request IDs, source/provenance categories, confidence codes, audit vocabulary, or diagnostic details outside authorized admin surfaces.
 - **Freshness warning** uses `{components.freshness-warning}` only when a specific recommendation depends on changeable information. It must be compact and specific: `Giá/giờ mở cửa có thể thay đổi. Kiểm tra lại trước khi đi.` It is not a default header for every answer.
 - **Storage notice** is a low-friction inline callout near first AI Ask use. It should not look like an error. Use muted shadcn surface with one link to privacy/details.
 - **Delete confirmation** uses shadcn destructive dialog styling. The destructive action must name the object: `Xóa cuộc trò chuyện`, `Xóa dự án chuyến đi`.
@@ -296,7 +297,7 @@ Shape language is soft but not playful.
 
 | Do | Don't |
 |---|---|
-| Make source/confidence visible but progressively disclosed | Put generic provenance blocks, general-reasoning labels, or large warnings in every answer |
+| Make plain-language verification guidance available through progressive disclosure | Put source/confidence taxonomy, generic provenance blocks, general-reasoning labels, or large warnings in every answer |
 | Use green for primary route/action semantics | Use green to imply unverified facts are safe or guaranteed |
 | Keep Vietnamese text readable with generous line height | Compress chat answers into dense dashboards |
 | Use amber for guidance and freshness attention | Use amber as generic decoration |

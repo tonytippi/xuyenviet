@@ -1,6 +1,6 @@
 # Proposal: Chat-First Trip Companion UX
 
-**Status:** Proposed
+**Status:** Accepted direction; superseded as an implementation specification by the active PRD, Architecture Spine, and UX spines.
 **Date:** 2026-08-04
 **Decision requested:** Approve a chat-first UX revision so XuyenViet feels like a simple travel companion rather than a technical planning or provenance interface.
 
@@ -8,7 +8,7 @@
 
 XuyenViet should begin with one natural-language conversation, not a choice between "chat" and "create a trip." The assistant helps first, learns context through the conversation, and only suggests saving or continuing a Trip Project when that is useful and sufficiently clear.
 
-The primary chat should borrow the simplicity of ChatGPT: readable messages, a natural composer, a small number of useful follow-ups, and minimal persistent UI. Technical information about provenance, uncertainty, freshness, and feedback remains available, but moves out of the default reading path.
+The primary chat should borrow the simplicity of ChatGPT: readable messages, a natural composer, a small number of useful follow-ups, and minimal persistent UI. Technical information about provenance, uncertainty, freshness, processing, and feedback remains available only where it helps the traveler act, but moves out of the default reading path. Traveler-facing UI must never expose internal states, model/provider terminology, retrieval mechanics, source categories, confidence codes, audit vocabulary, or technical failure/status messages.
 
 This proposal preserves the current planning safety model:
 
@@ -19,7 +19,7 @@ This proposal preserves the current planning safety model:
 
 ## Problem
 
-The current authenticated chat gives system and audit information too much visual weight. Per-answer blocks such as `Cảnh báo cần kiểm tra`, `Nguồn và độ tin cậy`, general-reasoning labels, and the full usefulness-rating card make a simple travel exchange read like a compliance report.
+The current authenticated chat gives system and audit information too much visual weight. Per-answer blocks such as `Cảnh báo cần kiểm tra`, `Nguồn và độ tin cậy`, general-reasoning labels, consumer-processing status, and the full usefulness-rating card make a simple travel exchange read like a compliance report.
 
 The current shell also exposes internal distinctions before the user has a reason to understand them:
 
@@ -38,6 +38,7 @@ The result is a product that is technically explainable but harder to understand
 4. **Keep the conversation calm and readable.** The default answer surface prioritizes conclusion, options, practical next steps, and an optional contextual action.
 5. **Disclose trust detail progressively.** Verify-before-action guidance remains visible when relevant, but provenance internals, raw source categorization, and general-reasoning labels are not default answer content.
 6. **Never imply automatic plan changes.** AI suggestions and saved plan state remain visually and behaviorally distinct.
+7. **Speak like a travel companion, not a system console.** Translate every traveler-visible trust, loading, failure, and unavailable state into a short practical explanation and recovery action. Internal diagnostics remain restricted to logs and authorized operator surfaces.
 
 ## Proposed Experience
 
@@ -207,7 +208,7 @@ Thông tin cần kiểm tra trước khi đi
 [Xem nguồn tham khảo]
 ```
 
-The source detail remains backed by persisted provenance and preserves all existing safety and owner-scoping rules. It may expose source title, source category, URL, collected/checked date, confidence, and freshness in the detail drawer. Technical copy such as `Suy luận tổng quát của AI`, `Nguồn và độ tin cậy`, or `Không phải nguồn đã xác minh` is replaced on traveler surfaces by plain-language explanation of what should be checked and why.
+The source detail remains backed by persisted provenance and preserves all existing safety and owner-scoping rules. It may expose a traveler-safe source title, link, checked date, and plain-language explanation of why verification is useful. Internal source categories, confidence codes, provenance identifiers, retrieval policy, model reasoning, provider information, and audit states remain hidden from traveler surfaces. Technical copy such as `Suy luận tổng quát của AI`, `Nguồn và độ tin cậy`, `Không phải nguồn đã xác minh`, or raw processing/failure states is replaced on traveler surfaces by plain-language explanation of what should be checked and why.
 
 Prominent warning treatment remains permitted only for actionable safety, access, legal, booking, or time-sensitive failures. It must state the concrete risk and recovery action, rather than communicate generic uncertainty.
 
@@ -323,6 +324,7 @@ Nơi ở: Giữ nguyên nơi ở Đà Nẵng
 12. The workspace presents one actionable focus, a relevant plan slice, and on-demand trip information; it remains read-only.
 13. Pending change proposals use a concrete decision title, bounded impact, and explicit apply/dismiss actions. A plan mutation still requires owner confirmation.
 14. All revised controls retain keyboard access, visible focus, accessible names, live announcements for async state, and mobile targets of at least 44px where touch actions are exposed.
+15. Traveler-facing loading, unavailable, and failure copy states the practical effect and next action without exposing provider names, model names, internal job/consumer states, provenance identifiers, retrieval/source categories, error codes, request IDs, or implementation terminology.
 
 ## Non-Goals
 
@@ -332,6 +334,7 @@ Nơi ở: Giữ nguyên nơi ở Đà Nẵng
 - No manual itinerary editor or second plan-authoring surface outside the primary conversation and proposal review.
 - No visual clone of ChatGPT. The goal is familiar conversational simplicity while retaining XuyenViet's Vietnamese road-trip context and safety cues.
 - No required long onboarding form for a new Trip Project.
+- No traveler-facing technical console, diagnostic status, audit trail, provenance taxonomy, model reasoning label, or implementation error message.
 
 ## Implementation Notes
 
@@ -414,4 +417,4 @@ This is a product and UX direction proposal. Before implementation, update the a
 4. Sidebar terminology and hierarchy revision.
 5. Decision-oriented Trip Workspace and proposal-card revision.
 
-The approved planning artifacts remain authoritative over this proposal where they conflict. Once the PRD, architecture, and UX spine adopt this direction, this proposal should be retained only as historical decision context or superseded with links to the authoritative documents.
+The active [PRD](../../_bmad-output/planning-artifacts/prds/prd-xuyenviet-2026-07-04/prd.md), [Architecture Spine](../../_bmad-output/planning-artifacts/architecture/architecture-xuyenviet-2026-07-04/ARCHITECTURE-SPINE.md), and [UX spines](../../_bmad-output/planning-artifacts/ux-designs/ux-xuyenviet-2026-07-05/EXPERIENCE.md) are authoritative for implementation. This proposal is retained as historical decision context only.

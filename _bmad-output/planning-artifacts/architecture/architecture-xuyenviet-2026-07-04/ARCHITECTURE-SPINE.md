@@ -2,7 +2,7 @@
 title: XuyenViet AI Travel Information MVP Architecture Spine
 status: final
 created: 2026-07-04
-updated: 2026-08-04
+updated: 2026-08-05
 altitude: project MVP
 source_prd: ../../prds/prd-xuyenviet-2026-07-04/prd.md
 source_ux: ../../ux-designs/ux-xuyenviet-2026-07-05/EXPERIENCE.md
@@ -244,11 +244,13 @@ Binds: every assistant answer to stored provenance categories, knowledge card ID
 
 Prevents: citations that appear in the UI but cannot be audited, debugged, or measured later.
 
-Rule: The UI renders source/confidence sections from stored response provenance, not by re-parsing the answer text.
+Rule: The UI derives any traveler trust disclosure from stored response provenance, not by re-parsing answer text. Default traveler answer UI does not render generic source/confidence sections, provenance categories, retrieval policy, reasoning labels, audit state, or provider/model metadata.
 
 Rule: `assistant_response_provenance` is row-per-source-item, not only a JSON blob. Each row stores `message_id`, `source_category`, exactly one nullable source reference for chat/trip/knowledge/web when applicable, source rank, retrieval score, source type, verification status, `used_in_prompt`, `cited_in_answer`, and a source snapshot.
 
 Rule: The orchestrator persists provenance with the assistant message in the same transaction; UI, eval, and audits consume this table only.
+
+Rule: A traveler disclosure projection contains only the plain-language verification need, optional safe disclosure trigger, and exact persisted provenance-row references needed to resolve a detail view. It must not contain internal state names, confidence codes, source categories, provenance IDs, prompt/model/provider metadata, retrieval scores/policy, or audit/worker status as display strings.
 
 ### AD-12: Context Is Split Between Chat Sessions And Trip Projects
 
@@ -298,9 +300,9 @@ Seed: Vercel-compatible Next.js request deployment plus hosted Postgres and a co
 
 Binds: chat streaming to the moment after retrieval/search context and provenance ledger inputs are assembled.
 
-Prevents: partial AI answers that cannot satisfy source/confidence display requirements.
+Prevents: partial AI answers that cannot satisfy persisted provenance and safe disclosure requirements.
 
-Rule: Long-running extraction and embedding may run as background tasks with status; user answers must not stream before the orchestrator knows which source categories were used.
+Rule: Long-running extraction and embedding may run as background tasks; user answers must not stream before the orchestrator knows which provenance inputs were used. Traveler UI translates any relevant pending or failed follow-up work into a short practical message and never exposes consumer/job/status names.
 
 Rule: During streaming, partial assistant tokens are transient UI state. The final assistant message, retrieval decision, provenance rows, and usage events are persisted through the orchestrator; the UI must reconcile to persisted final content after completion.
 
@@ -515,6 +517,32 @@ Rule: Only `applyApprovedTripChange(...)` in Chat/Trips may apply a proposal. In
 Rule: `expireTripChangeProposal(...)` is an idempotent Chat/Trips command. Pending-proposal reads used by Trip Home and proposal review, and proposal application, invoke it for elapsed expiries; a scheduled worker may invoke the same command. In one fenced transaction it marks an elapsed pending proposal `expired`, sets its terminal timestamp, and writes exactly one safe history row with the `system-trip-planning` actor. Dismissing or expiring a proposal never mutates plan state. Change history records only safe operation summaries, actor, timestamp, proposal ID, and affected structured-item references; it does not persist raw model prompts/responses or turn free-form answer text into authoritative state.
 
 Rule: AI Orchestration may read the Trip Planning aggregate and emit a schema-validated proposal draft, but it may not call direct table writes or bypass the Chat/Trips proposal command. Provider output, answer annotations, and detail-panel actions remain untrusted inputs until the owner-confirmed command validates them.
+
+### AD-30A: Chat-First Trip Recommendations Are Chat/Trips-Owned Decisions
+
+Binds: unscoped conversation recommendation, Trip Project creation recommendation, dismissal fencing, existing-project matching, primary-conversation selection, and traveler recommendation actions.
+
+Prevents: the browser or model automatically creating/attaching a Trip Project, leaking another owner's project through matching, re-prompting after a decline, or turning rendered prose into a command.
+
+Rule: Chat/Trips owns typed server decisions for `trip_creation_recommendation` and `trip_context_recommendation`. A creation decision is `none | clarify | offer`; a context decision is `none | clarify | single | multiple`. Each actionable decision is bound to the authenticated owner, current conversation, and a server-calculated context revision/fingerprint.
+
+Rule: Existing-project candidates are queried owner-scoped before matching. Initial matching uses deterministic normalized trip facts and bounded recency signals; uncertain matches resolve to `clarify` or `none`. A decision never exposes another owner's project existence, title, route, metadata, or match score.
+
+Rule: Declining a creation recommendation persists a decision fence for its conversation and context revision. The service may re-offer only after material context change or an explicit user request to save. Client state, rendered assistant prose, and local storage are not authority for dismissal or re-offer eligibility.
+
+Rule: `acceptTripCreationRecommendation(...)` is an explicit, idempotent Chat/Trips command. It revalidates owner, decision binding, and current context before atomically creating the Trip Project and its primary conversation under existing aggregate rules. It never turns unconfirmed extracted facts into confirmed plan state without the existing proposal path.
+
+Rule: `continueInTrip(...)` requires an explicit owner selection and changes URL-selected scope to the selected project's existing primary conversation. It does not copy, merge, link, or replay an ordinary conversation into the Trip Project. A private-answer choice neither loads nor persists that Trip Project's constraints for the turn.
+
+### AD-30B: Traveler Presentation Uses Plain-Language State Projections
+
+Binds: traveler-visible loading, verification, unavailable, error, source-detail, and recommendation messages to safe presentation projections.
+
+Prevents: internal implementation vocabulary, provider diagnostics, request identifiers, audit records, provenance taxonomy, or technical state machines appearing in consumer UI.
+
+Rule: Server feature modules return traveler-facing state as bounded Vietnamese presentation copy plus an allowed recovery action. Raw API error codes, request/correlation IDs, provider/model names, internal job/consumer states, source/provenance categories, confidence codes, retrieval policy, audit metadata, and stack/database diagnostics remain server/operator/log-only data.
+
+Rule: The browser may use machine-readable state discriminators to select an approved presentation, but it must not render those discriminators or concatenate technical failure details into traveler messages. Operator/admin surfaces may expose technical data only through separately authorized, safe operational projections.
 
 ### AD-31: Audit And Automated Execution Use First-Class Actors
 

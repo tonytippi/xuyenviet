@@ -2,7 +2,7 @@
 title: XuyenViet AI Travel Information MVP PRD
 status: final
 created: 2026-07-04
-updated: 2026-08-04
+updated: 2026-08-05
 ---
 
 # XuyenViet AI Travel Information MVP PRD
@@ -147,7 +147,7 @@ Internal owner or future small operations team member who collects travel inform
 - FR-6A: The system shall stream AI Ask assistant responses when the selected Gateway model and orchestration path support streaming, but only after required context, source-bundle, and provenance inputs are assembled.
 - FR-6B: The system shall allow authenticated users to submit supported image inputs with AI Ask messages when using an image-capable Gateway model.
 - FR-6C: The system shall validate image inputs for size, type, ownership, and safety before any provider call, and invalid image submissions shall not create provider calls.
-- FR-7: The system shall format travel answers with suggested plan/options, rationale, practical tips, warnings, sources, uncertainty notes, and next steps.
+- FR-7: The system shall format travel answers as a calm Vietnamese conversation with suggested plan/options, rationale, practical tips, concise verification guidance when relevant, and next steps. Technical source/provenance, reasoning, audit, processing, and provider information shall not occupy the default traveler reading path.
 
 ### 8.2 User Authentication, Chats, And Trips
 
@@ -169,6 +169,9 @@ Internal owner or future small operations team member who collects travel inform
 - FR-16G: The system shall let AI create a typed Trip Change Proposal containing rationale, affected trip items, alternatives when available, and expiry when its supporting information is time-sensitive.
 - FR-16H: The system shall require the Trip Project owner to explicitly apply a Trip Change Proposal before it changes persistent trip state; AI, provider output, and ordinary answer generation shall not directly mutate itinerary, constraints, or item state.
 - FR-16I: The system shall preserve an owner-visible history for applied, dismissed, and expired Trip Change Proposals with actor and timestamp.
+- FR-16J: The logged-in empty chat shall accept a natural-language travel request without requiring a traveler to select ordinary chat or a Trip Project first. The assistant may recommend, but never automatically create, a Trip Project when durable planning context makes saving useful; declining the recommendation is remembered until the context materially changes or the traveler asks to save.
+- FR-16K: For an unscoped question, the system may recommend one or more owned Trip Projects or ask a clarifying question using a server-owned decision. It shall never attach project context without explicit traveler selection; a private answer shall not use or persist the selected project's constraints for that turn.
+- FR-16L: A project-scoped composer shall state the active trip in traveler language and provide an explicit way to ask outside it or switch projects. Switching selects the existing primary conversation and shall not merge or copy an ordinary conversation into the project.
 
 ### 8.3 Knowledge Cards
 
@@ -212,7 +215,7 @@ Internal owner or future small operations team member who collects travel inform
 - FR-29: The system shall retrieve relevant cards only when `lifecycle_state = active`, current evidence is eligible, and domain classification and verification requirement permit the requested use.
 - FR-30: The system shall prioritize answer context in this order: selected trip project context, current chat session context, active XuyenViet knowledge, web search fallback, and general AI knowledge.
 - FR-31: The system shall use web search fallback when active knowledge is missing, sparse, freshness-sensitive, unavailable because it is pending operator work, or conflicted.
-- FR-32: The system shall identify when information came from chat/trip context, XuyenViet knowledge cards, web search, or general AI reasoning.
+- FR-32: The system shall persist and make auditable whether answer information came from chat/trip context, XuyenViet knowledge cards, web search, or general AI reasoning. This classification is not default traveler-facing copy.
 - FR-33: The system shall warn users to verify changing details before acting or booking.
 - FR-34: The system shall avoid presenting unverified collected information as guaranteed fact.
 - FR-35: Web search results used in answers shall be shown as external/unverified unless ingested into an active knowledge card that meets the applicable publication policy.
@@ -238,7 +241,8 @@ Internal owner or future small operations team member who collects travel inform
 - FR-45A: The operator capture-review surface shall show safe aggregate and candidate-level ingestion outcomes sufficient to diagnose a source without exposing raw provider output, raw captured text, quotes outside approved evidence storage, or internal execution secrets.
 - FR-45B: Exact administrators shall be able to view a paginated user roster limited to name, email, avatar, verification state, and roles; grant or revoke only `operator` and `admin` roles; and receive an audit record for each role delta. Operators shall not access the roster or role mutations, and the system shall prevent removal of the final administrator or an administrator's own final admin role.
 - FR-45C: The exact-admin user roster shall show each displayed user's lifetime persisted AI-event count and prompt and completion token totals. It shall include successful and failed events, treat null token values as zero, aggregate only the paginated roster user IDs, and expose neither prompts nor provider payloads; it shall not introduce quotas, credits, billing, or traveler/operator access.
-- FR-46: The system shall capture a simple usefulness rating for AI answers during the public MVP.
+- FR-46: The system shall capture a simple usefulness rating for AI answers during the public MVP through lightweight answer-footer controls. Optional reasons or comments appear only after negative feedback and never block the composer or displace planning.
+- FR-46A: Traveler-facing UI shall express loading, unavailable, verification, and failure states in plain Vietnamese with the practical effect and recovery action. It shall not display internal status names, provider/model names, technical error codes, request IDs, source/provenance taxonomy, retrieval policy, audit terminology, or implementation diagnostics.
 - FR-47: The system shall record AI usage events for authenticated AI requests, including user, conversation or trip context when applicable, AI purpose, provider/model, timestamp, and available usage/cost metadata.
 - FR-48: The system shall capture referral attribution when a new user signs in or registers through a valid referral link, without calculating rewards, ranking, payout, or credit conversion in MVP.
 - FR-49: The system shall manage AI Gateway model records with gateway model name, intended purpose, supported input/output capabilities, active status, and input/output/cache pricing metadata.
@@ -290,14 +294,13 @@ Internal owner or future small operations team member who collects travel inform
 - Conversation transcripts may be retained only as part of existing chat sessions or trip projects, with access limited to the owning user and authorized operators/admins for operations/debugging.
 - OpenAI processing is allowed for public MVP chat, extraction, and response generation only under a configuration that does not train provider models on project data where such setting is available.
 
-### 10.2 Source And Confidence Display Contract
+### 10.2 Traveler Trust And Source Detail Contract
 
-- Answers shall include a compact "Nguon va do tin cay" section when sources or retrieved cards are used.
-- MVP source display shall show source title or label, source type, direct URL when available, collected or checked date when available, confidence label, and freshness-sensitive warning when applicable.
-- Confidence applies to the source/card, not to every individual claim in MVP.
-- Initial confidence labels are fixed for MVP: `unverified`, `community`, `curated`, `partner`, and `official`.
-- Web search facts are labeled `unverified` unless later ingested into an active knowledge card that meets the applicable publication policy.
-- Source details may appear at the end of the answer; inline citation is not required for MVP.
+- Every assistant answer retains persisted, inspectable provenance, but a default answer shall not render a generic source/confidence/provenance block, model-reasoning label, raw source category, or audit/processing status.
+- When a recommendation depends on changing, consequential, safety-sensitive, route, access, booking, price, opening-hours, or availability information, the answer shall show a concise, nearby, action-oriented verification note in plain Vietnamese and may offer a disclosure control.
+- A traveler who opens source detail may see only a safe source title or label, safe HTTP link when available, checked/collected date when useful, and a plain-language explanation of relevance or verification need. Internal source types, confidence codes, provenance IDs, retrieval decisions, provider/model metadata, and raw evidence remain hidden.
+- Source classification, confidence, verification state, and web-search status remain persisted machine/audit data. They inform safe wording and disclosure selection but are not traveler-facing labels by default.
+- Web-search information is never represented as confirmed merely because it is displayed. Traveler copy explains what to verify and why; it does not use internal labels such as `unverified`.
 
 ### 10.3 Community Knowledge Publication And Conflict Contract
 
@@ -330,7 +333,7 @@ Public MVP answer evaluation uses a 1-10 score across these dimensions:
 
 - User-context use: answer reflects travelers, children, dates, preferences, prior trips, and constraints.
 - Practical specificity: answer includes concrete stops, pacing, services, warnings, or next actions.
-- Source grounding: answer identifies which parts came from XuyenViet knowledge, web search, chat/trip context, or general AI reasoning.
+- Source grounding: persisted answer provenance correctly identifies which parts came from XuyenViet knowledge, web search, chat/trip context, or general AI reasoning; traveler copy communicates only the practical verification guidance needed for a decision.
 - Uncertainty handling: answer flags outdated, changing, sparse, or unverified information.
 - Family-awareness: when children are included, answer adapts driving time, activities, rest, hotel area, and risk notes.
 - Vietnamese clarity: answer is understandable, natural, and locally appropriate for Vietnamese users.
@@ -383,10 +386,10 @@ The public MVP should focus on the Hanoi-to-HCMC road-trip corridor. Initial kno
 ## 12. Success Criteria
 
 - SC-1: At least 7 of 10 sampled public MVP users or test users rate the magic-moment answer as useful, with a score of 7/10 or higher.
-- SC-2: At least 7 of 10 test answers include user-context references, practical local tips, and source/confidence notes.
+- SC-2: At least 7 of 10 test answers include user-context references, practical local tips, and plain-language verification guidance when the recommendation needs it, without technical source/confidence labels in the default reading path.
 - SC-3: The magic-moment answer includes at least one child-aware planning recommendation, one practical route/logistics tip, one uncertainty or freshness warning, and one suggested next step.
 - SC-4: The AI-first ingestion workflow can create at least 100 active, evidence-grounded knowledge cards for the Hanoi-to-HCMC corridor before first public-MVP evaluation.
-- SC-5: Active knowledge cards influence AI answers and are visible in the response provenance with appropriate source and uncertainty wording.
+- SC-5: Active knowledge cards influence AI answers and remain visible in persisted response provenance; traveler UI uses appropriate plain-language uncertainty and verification wording without exposing internal provenance taxonomy.
 - SC-6: No more than 2 of 10 test users say the answer feels no better than generic ChatGPT.
 - SC-7: In representative quality samples, every active AI-extracted claim has a validated evidence span and no high-severity publication-policy failure.
 
@@ -395,7 +398,7 @@ The public MVP should focus on the Hanoi-to-HCMC road-trip corridor. Initial kno
 - AC-1: A Vietnamese user can access the public app entry point, sign in with Google, and then access AI Ask.
 - AC-2: The user can ask the magic-moment trip-planning question and receive a Vietnamese answer without first completing a long form.
 - AC-3: The answer includes clarifying questions while still providing an initial useful plan.
-- AC-4: The answer shows at least three provenance categories when applicable: chat/trip context, XuyenViet knowledge, web search/external source, or general AI reasoning.
+- AC-4: The system persists applicable provenance categories for chat/trip context, XuyenViet knowledge, web search/external source, or general AI reasoning; the default traveler answer does not expose these technical categories.
 - AC-5: The answer clearly labels freshness-sensitive or uncertain information.
 - AC-6: The answer incorporates family-aware recommendations when children are mentioned.
 - AC-7: The system stores and reuses non-sensitive context within chat sessions and trip projects owned by the authenticated user.
@@ -411,7 +414,7 @@ The public MVP should focus on the Hanoi-to-HCMC road-trip corridor. Initial kno
 - AC-10: At least 100 active, evidence-grounded knowledge cards exist for the Hanoi-to-HCMC corridor before first public-MVP evaluation.
 - AC-11: Web search fallback is used only when curated knowledge is missing, sparse, or freshness-sensitive, and search-derived facts are labeled as external/unverified.
 - AC-12: Public MVP answer feedback is captured for usefulness evaluation.
-- AC-13: Source display shows source label/title, source type, URL when available, date when available, confidence label, and freshness warning when applicable.
+- AC-13: When a traveler opens a relevant verification disclosure, source detail shows only traveler-safe title/label, safe URL when available, useful date, and plain-language verification context. Internal source type, confidence label, provenance ID, retrieval policy, and provider metadata are not rendered.
 - AC-14: AI quality evaluation can be run against the five-prompt public-MVP evaluation set using the rubric in this PRD.
 - AC-15: Authenticated AI requests create AI usage records with enough metadata to support future cost analysis.
 - AC-16: A valid referral link can be captured during sign-in or registration and associated with the new user without exposing referral reward UI.
@@ -423,6 +426,9 @@ The public MVP should focus on the Hanoi-to-HCMC road-trip corridor. Initial kno
 - AC-22: When AI suggests a persistent trip change, the owner sees a structured proposal and no persistent plan mutation occurs until that owner explicitly applies it.
 - AC-23: Applying, dismissing, or expiring a proposal produces an owner-visible, actor/timestamped history and cannot affect another owner's trip.
 - AC-24: Trip Home deterministically shows a pending unexpired proposal, then a defined confirmed-item gap, then the next dated `planned` or `confirmed` leg, or preparation when no such leg exists; it provides access to the primary conversation and never represents `confirmed` as a booking/provider validation.
+- AC-25: A traveler can begin an unscoped natural-language conversation, explicitly accept or decline a server-owned recommendation to save it as a Trip Project, and is not prompted again until planning context materially changes or they ask to save.
+- AC-26: A traveler can explicitly continue an unscoped question in one owned Trip Project or keep it private. No project context is attached by default, and private-answer turns do not use that project's constraints.
+- AC-27: Traveler-visible loading, unavailable, verification, and failure states use plain Vietnamese and a recovery action without technical status, provider/model, request ID, error-code, source-taxonomy, provenance, retrieval, or audit terminology.
 
 ## 14. Risks
 
@@ -440,7 +446,7 @@ The public MVP should focus on the Hanoi-to-HCMC road-trip corridor. Initial kno
 ## 15. Open Questions
 
 - OQ-1: What web search provider or mechanism will be used?
-- OQ-2: Should users see full source URLs directly, summarized source labels, or both?
+- OQ-2: Resolved: source detail uses a safe source label and optional safe URL only after a relevant traveler action; internal source/confidence taxonomy never appears in default traveler UI.
 - OQ-3: What exact privacy-policy wording is required for AI Gateway-backed chat and trip-project processing?
 - OQ-4: What detailed Facebook content reuse policy should govern captured post text retention, operator review, quoting, and deletion beyond provenance and non-official labeling?
 - OQ-5: Should AI-generated image output become an MVP workflow, or remain deferred until after text/image-input planning is validated?

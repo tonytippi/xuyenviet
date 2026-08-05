@@ -51,7 +51,7 @@ FR-6: Support iterative conversation refinement.
 FR-6A: Stream AI Ask responses only after context, source bundle, and provenance inputs are assembled.
 FR-6B: Accept supported image inputs from authenticated users when the selected Gateway model supports them.
 FR-6C: Validate image type, size, ownership, and safety before a provider call; invalid input creates no provider call.
-FR-7: Structure travel answers with plan/options, rationale, tips, warnings, sources, uncertainty notes, and next steps.
+FR-7: Structure travel answers as a calm Vietnamese conversation with plan/options, rationale, tips, concise verification guidance when relevant, and next steps; technical source/provenance, reasoning, audit, processing, and provider information are not part of the default traveler reading path.
 FR-8: Require Google Login before AI Ask use.
 FR-9: Associate chat sessions and trip projects with the authenticated user.
 FR-10: Extract travel-relevant traveler and trip details from chat.
@@ -70,6 +70,9 @@ FR-16F: Show an owned Trip Project a basic Trip Home that prioritizes an unresol
 FR-16G: Let AI create a typed Trip Change Proposal containing rationale, affected trip items, alternatives when available, and expiry when its supporting information is time-sensitive.
 FR-16H: Require the Trip Project owner to explicitly apply a Trip Change Proposal before it changes persistent trip state; AI, provider output, and ordinary answer generation cannot directly mutate itinerary, constraints, or item state.
 FR-16I: Preserve an owner-visible history for applied, dismissed, and expired Trip Change Proposals with actor and timestamp.
+FR-16J: Start from natural-language chat and only recommend explicit Trip Project creation after durable context; remember a decline until context materially changes or the traveler asks to save.
+FR-16K: Make any owned-trip recommendation a server-owned explicit choice; never auto-attach context and keep private answers free of project constraints.
+FR-16L: Show active trip context in traveler language and let the traveler explicitly ask outside it or switch projects without merging conversations.
 FR-17: Support operator-created knowledge cards.
 FR-18: Store title, type, location/route, summary, source, collected date, confidence, tags, and freshness-sensitive status on cards.
 FR-18A: Preserve short validated evidence quote/span, source link, capture/observed date, and conditions before an AI-extracted community claim is active.
@@ -102,7 +105,7 @@ FR-28A: Provide authorized operators an aggregate-only active-corridor seed-cove
 FR-29: Retrieve relevant active cards under publication and knowledge-state guardrails.
 FR-30: Prioritize context: selected trip, current chat, active XuyenViet knowledge, web fallback, then general reasoning.
 FR-31: Use web fallback for missing, sparse, freshness-sensitive, uncertain, or conflicted knowledge.
-FR-32: Identify whether answer information came from chat/trip, knowledge cards, web, or general reasoning.
+FR-32: Persist and audit whether answer information came from chat/trip, knowledge cards, web, or general reasoning without making those categories default traveler-facing copy.
 FR-33: Warn travelers to verify changing details before action or booking.
 FR-34: Never present unverified collected information as guaranteed fact.
 FR-35: Label search results external/unverified unless later ingested under publication policy.
@@ -122,7 +125,8 @@ FR-45: Permit future multi-operator expansion without workflow redesign.
 FR-45A: Show operators safe aggregate and candidate-level ingestion outcomes without raw provider output, raw captured text, unapproved quotes, or execution secrets.
 FR-45B: Let exact administrators view a paginated safe user roster, grant/revoke only operator/admin roles with audit, and prevent removal of the final administrator or the caller's own final admin role.
 FR-45C: Show each displayed roster user's persisted AI-event count and prompt/completion token totals, including failed events and null-token-as-zero handling, without exposing prompts or provider payloads.
-FR-46: Capture a simple usefulness rating for answers.
+FR-46: Capture a simple usefulness rating through lightweight answer-footer controls.
+FR-46A: Present traveler loading, unavailable, verification, and failure states in plain Vietnamese without internal status, provider/model, source/provenance, retrieval, audit, request-ID, error-code, or diagnostic terminology.
 FR-47: Record authenticated AI usage with user/context, purpose, model/provider, timestamp, and available usage/cost metadata.
 FR-48: Capture valid sign-in referral attribution without rewards, rankings, payouts, or credits.
 FR-49: Manage AI Gateway model records with name, purpose, capabilities, active status, and input/output/cache pricing.
@@ -236,6 +240,7 @@ UX-DR19: Streaming is subtle, `aria-live` announced, reconciles to final persist
 UX-DR20: Show low-friction storage notice and explicit delete confirmation with normal UI/retrieval removal effects.
 UX-DR21: Conversation/project selection is server-loaded and URL-owned; only draft, attachment, streaming, sheets, and selected descriptor are client transient state.
 UX-DR22: Traveler/admin/public surfaces target WCAG 2.2 AA keyboard, focus, live-region, color-independent, modal, and mobile behavior.
+UX-DR25: Traveler UI uses plain-language action/recovery copy and hides implementation details, including technical states, provenance taxonomy, confidence codes, provider/model data, audit vocabulary, request IDs, error codes, and diagnostics. Authorized admin projections remain separate.
 UX-DR23: Admin knowledge workflows stay separate, structured, explicit, and desktop-optimized for dense review.
 UX-DR24: Referral attribution is silent and introduces no reward/credit/ranking/payout UI.
 
@@ -334,6 +339,7 @@ FR-45A: Epic 3 - Safe operator ingestion outcome diagnostics.
 FR-45B: Epic 14 Story 14.4 - Direct exact-admin roster and audited role governance; historical Epic 13 Story 13.2 is completed extraction evidence only.
 FR-45C: Epic 14 Story 14.4 - Direct exact-admin roster usage aggregates; historical Epic 13 Story 13.2 is completed extraction evidence only.
 FR-46: Epic 5 - Answer usefulness feedback.
+FR-46A: Follow-on chat-first UX epic - Plain-language traveler state projections.
 FR-47: Epic 4 - Authenticated AI usage events.
 FR-48: Epic 1 - Silent referral attribution.
 FR-49: Epic 4 - Managed AI Gateway model records.
@@ -352,6 +358,8 @@ ADR-32-7: Epic 10 - Ordered, non-retroactive AI Ask consumers.
 ADR-32-8: Epic 11 - Canonical TripAnswerContext and auditable source bundles.
 ADR-32-9: Epic 11 - Withdrawn provenance safety for historic traveler answers.
 ADR-32-10: Epic 11 - Validated, provenance-safe answer annotations.
+FR-16J, FR-16K, FR-16L: Follow-on chat-first UX epic - Server-owned trip recommendations, explicit confirmation, and scoped composer switching.
+UX-DR25: Follow-on chat-first UX epic - Plain-language traveler presentation with technical detail restricted to authorized admin surfaces.
 
 ### Knowledge Lifecycle Normalization Coverage Map (2026-08-04)
 
@@ -479,6 +487,14 @@ Operators can safely manage evidence-grounded community knowledge through one un
 **Requirements covered:** KLN-1 through KLN-10; FR-22A, FR-22B, FR-22C, FR-22D, FR-24D, FR-25A, FR-25B, FR-29, NFR-9, NFR-9A, NFR-9B, and NFR-16.
 
 **Implementation notes:** This is a disposable-target clean break: one forward-only target migration followed by reset/reseed, with no backfill, dual write, compatibility runtime path, release matrix, or legacy fixture. It depends on the direct NestJS API boundary from Epic 14 but preserves its session, CSRF, origin, and safe-error behavior. The Worker remains the sole continuous execution owner; API commands synchronously resolve authorized operator decisions only, and `apps/admin` remains presentation-only. Epic 3 stories are historical baseline and must not be reinterpreted as this target lifecycle contract.
+
+### Epic 16: Chat-First Trip Companion Simplification
+
+Travelers begin with one natural-language question, receive calm practical guidance without technical product language, and explicitly choose when a durable Trip Project should save or supply context. Trust and recovery information remains safe and available, but appears as plain-language, decision-oriented disclosure rather than system/provenance/status UI.
+
+**FRs covered:** FR-7, FR-16J, FR-16K, FR-16L, FR-32, FR-33, FR-46, FR-46A. **UX requirements covered:** UX-DR14, UX-DR18, UX-DR25. **Architecture decisions covered:** AD-11, AD-30A, AD-30B.
+
+**Implementation notes:** Implement in vertical slices: simplify answer/provenance/feedback presentation; add typed, owner-scoped creation and existing-trip recommendations with persisted decline fencing; make scope switching explicit and URL-owned; then revise sidebar, composer, Trip Workspace, and proposal decision language. Persisted provenance, authorization, one-primary-conversation rules, explicit proposal application, and owner-scoping remain unchanged. The traveler web client never parses answer prose to infer a recommendation, provenance, risk, or mutation, and it never renders technical states, codes, categories, diagnostics, or provider/model information.
 
 ## Epic 1: Trusted Entry And Planning Workspace Access
 
