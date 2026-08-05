@@ -50,6 +50,13 @@ describe("direct traveler API client", () => {
     expect(fetch.mock.calls[1]![1]).toEqual(expect.objectContaining({ headers: expect.objectContaining({ "Idempotency-Key": "a".repeat(16) }) }));
   });
 
+  test("rejects an invalid accepted-creation command before it reaches the API", async () => {
+    const fetch = vi.fn();
+    vi.stubGlobal("fetch", fetch);
+    await expect(acceptDirectTripCreationRecommendation("decision-2", "short")).resolves.toEqual({ success: false, reason: "not_found" });
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
   test("accepts the persisted terminal answer with provenance", async () => {
     const fetch = vi.fn().mockResolvedValueOnce(new Response('{"type":"preparing"}\n{"type":"done","conversationId":"conversation-1","userMessage":{"id":"user-1","content":"Đi đâu?"},"assistantMessage":{"id":"assistant-1","content":"Đi Huế.","provenance":[{"id":"source-1"}]}}\n', { status: 200 }));
     vi.stubGlobal("fetch", fetch);

@@ -1,5 +1,5 @@
 # generated: 2026-07-25
-# last_updated: 2026-08-05 (Story 16.1 completed and ready for review.)
+# last_updated: 2026-08-05 (Story 16.1 review repairs completed.)
 # project: xuyenviet
 # project_key: NOKEY
 # tracking_system: file-system
@@ -33,7 +33,7 @@
 #   - done: Completed
 
 generated: 2026-07-25
-last_updated: 2026-08-05 (Story 16.1 completed and ready for review.)
+last_updated: 2026-08-05 (Story 16.1 review repairs completed.)
 project: xuyenviet
 project_key: NOKEY
 tracking_system: file-system
@@ -385,7 +385,7 @@ development_status:
 
   # Epic 16 passed implementation-readiness assessment on 2026-08-05.
   epic-16: in-progress
-  16-1-recommend-and-save-trip-projects-through-typed-owner-decisions: review
+  16-1-recommend-and-save-trip-projects-through-typed-owner-decisions: done
   16-2-preserve-explicit-trip-scope-in-the-planning-shell: backlog
   16-3-present-practical-vietnamese-answer-trust-and-recovery-states: backlog
   16-4-prove-chat-first-scope-trust-and-accessibility-boundaries: backlog

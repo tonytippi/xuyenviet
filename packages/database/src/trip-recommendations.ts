@@ -89,7 +89,8 @@ export async function discardTripRecommendationAcceptancesForDeletedResources(tr
   const invalidDecisions = await transaction.select({ id: tripRecommendationDecisions.id }).from(tripRecommendationDecisions).where(and(eq(tripRecommendationDecisions.userId, userId), sql`(${sql.join(decisionConditions, sql` or `)})`));
   const acceptanceConditions = [
     invalidDecisions.length ? sql`${tripRecommendationAcceptances.decisionId} in (${sql.join(invalidDecisions.map((decision) => sql`${decision.id}`), sql`, `)})` : undefined,
-    sql`${tripRecommendationAcceptances.terminalResult}::text like any(array[${sql.join(ids.map((id) => sql`'%' || ${id} || '%'`), sql`, `)}])`,
+    conversationIds.length ? sql`(${tripRecommendationAcceptances.terminalResult} -> 'destination' ->> 'conversationId') in (${sql.join(conversationIds.map((id) => sql`${id}`), sql`, `)})` : undefined,
+    tripProjectIds.length ? sql`(${tripRecommendationAcceptances.terminalResult} -> 'destination' ->> 'tripProjectId') in (${sql.join(tripProjectIds.map((id) => sql`${id}`), sql`, `)})` : undefined,
   ].filter((condition): condition is ReturnType<typeof sql> => Boolean(condition));
   await transaction.update(tripRecommendationAcceptances).set({ terminalResult: result }).where(and(eq(tripRecommendationAcceptances.userId, userId), sql`(${sql.join(acceptanceConditions, sql` or `)})`));
 }
@@ -98,8 +99,8 @@ async function loadRecommendations(transaction: Transaction, userId: string, con
   const [conversation] = await transaction.select({ id: conversations.id, tripProjectId: conversations.tripProjectId }).from(conversations).where(and(eq(conversations.id, conversationId), eq(conversations.userId, userId))).limit(1).for("update");
   const none: TripRecommendationResponse = { tripCreationRecommendation: { kind: "none" }, tripContextRecommendation: { kind: "none" } };
   if (!conversation || conversation.tripProjectId) return none;
-  const [effect] = await transaction.select({ id: domainOutbox.id }).from(domainOutbox).where(and(eq(domainOutbox.userId, userId), eq(domainOutbox.conversationId, conversationId), eq(domainOutbox.eventType, "ai_ask.context_extraction.v1"), eq(domainOutbox.status, "completed"))).orderBy(desc(domainOutbox.completedAt)).limit(1);
-  if (!effect) return none;
+  const [latestEffect] = await transaction.select({ status: domainOutbox.status }).from(domainOutbox).where(and(eq(domainOutbox.userId, userId), eq(domainOutbox.conversationId, conversationId), eq(domainOutbox.eventType, "ai_ask.context_extraction.v1"))).orderBy(desc(domainOutbox.createdAt), desc(domainOutbox.id)).limit(1);
+  if (latestEffect?.status !== "completed") return none;
   const context = await refreshContext(transaction, userId, conversationId);
   if (context.facts.length === 0) return none;
   const [declined] = await transaction.select({ userId: tripRecommendationDeclines.userId }).from(tripRecommendationDeclines).where(and(eq(tripRecommendationDeclines.userId, userId), eq(tripRecommendationDeclines.conversationId, conversationId), eq(tripRecommendationDeclines.contextRevision, context.revision))).limit(1);
@@ -118,4 +119,13 @@ async function refreshContext(transaction: Transaction, userId: string, conversa
   return { revision: existing.revision, fingerprint, facts: normalized };
 }
 async function openDecision(transaction: Transaction, userId: string, conversationId: string, kind: "creation" | "context", context: CurrentContext, candidateTripProjectId?: string) { const [existing] = await transaction.select({ id: tripRecommendationDecisions.id }).from(tripRecommendationDecisions).where(and(eq(tripRecommendationDecisions.userId, userId), eq(tripRecommendationDecisions.conversationId, conversationId), eq(tripRecommendationDecisions.kind, kind), eq(tripRecommendationDecisions.contextRevision, context.revision), eq(tripRecommendationDecisions.status, "open"), candidateTripProjectId ? eq(tripRecommendationDecisions.candidateTripProjectId, candidateTripProjectId) : sql`${tripRecommendationDecisions.candidateTripProjectId} is null`)).limit(1); if (existing) return existing.id; const [created] = await transaction.insert(tripRecommendationDecisions).values({ userId, conversationId, kind, contextRevision: context.revision, contextFingerprint: context.fingerprint, candidateTripProjectId: candidateTripProjectId ?? null }).returning({ id: tripRecommendationDecisions.id }); return created!.id; }
-async function currentDecision(transaction: Transaction, decision: { userId: string; conversationId: string; contextRevision: number; contextFingerprint: string }) { const context = await refreshContext(transaction, decision.userId, decision.conversationId); return context.revision === decision.contextRevision && context.fingerprint === decision.contextFingerprint; }
+async function currentDecision(transaction: Transaction, decision: { userId: string; conversationId: string; contextRevision: number; contextFingerprint: string }) {
+  // Context extraction locks this row before writing facts. Holding the same lock
+  // makes the decision's revision check and its mutation one serializable fence.
+  const [conversation] = await transaction.select({ id: conversations.id, tripProjectId: conversations.tripProjectId }).from(conversations).where(and(eq(conversations.id, decision.conversationId), eq(conversations.userId, decision.userId))).limit(1).for("update");
+  if (!conversation || conversation.tripProjectId) return false;
+  const [latestEffect] = await transaction.select({ status: domainOutbox.status }).from(domainOutbox).where(and(eq(domainOutbox.userId, decision.userId), eq(domainOutbox.conversationId, decision.conversationId), eq(domainOutbox.eventType, "ai_ask.context_extraction.v1"))).orderBy(desc(domainOutbox.createdAt), desc(domainOutbox.id)).limit(1);
+  if (latestEffect?.status !== "completed") return false;
+  const context = await refreshContext(transaction, decision.userId, decision.conversationId);
+  return context.revision === decision.contextRevision && context.fingerprint === decision.contextFingerprint;
+}

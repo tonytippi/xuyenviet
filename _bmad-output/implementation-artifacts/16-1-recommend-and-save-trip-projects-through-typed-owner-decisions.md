@@ -4,7 +4,7 @@ baseline_commit: 92da48e24a760c8e0e21dc91d277212a71513f0e
 
 # Story 16.1: Recommend and Save Trip Projects Through Typed Owner Decisions
 
-Status: review
+Status: done
 
 ## Story
 
@@ -217,3 +217,13 @@ gpt-5.6-terra
 
 - 2026-08-05: Implemented the initial typed, server-owned recommendation aggregate and focused regression coverage; retained `in-progress` pending the remaining Story 16.1 acceptance matrix.
 - 2026-08-05: Completed the recommendation acceptance matrix, repaired direct command DTO admission and a stale unrelated YouTube test assertion, and moved the story to `review` after full regression validation.
+
+### Review Findings
+
+- [x] [Review][Patch] Latest extraction is not required before an actionable recommendation [packages/database/src/trip-recommendations.ts:101] — fixed by requiring the newest extraction event to be `completed` before projecting or consuming a recommendation.
+- [x] [Review][Patch] Recommendation actions are not serialized with context extraction [packages/database/src/trip-recommendations.ts:121] — fixed by locking the same conversation row used by extraction before checking the current context and consuming a decision.
+- [x] [Review][Patch] Creation acceptance does not revalidate the ordinary conversation scope [packages/database/src/trip-recommendations.ts:64] — fixed by rejecting a missing or now-scoped conversation in the current-decision fence.
+- [x] [Review][Decision] Define matching semantics before offering a single existing Trip Project [packages/database/src/trip-recommendations.ts:106] — resolved: a traveler's sole owned Trip Project is always eligible for the `single` recommendation; no context-match predicate is required.
+- [x] [Review][Patch] Accepted-creation client bypasses local command admission parsing [apps/web/src/features/ai/direct-api-client.ts:111] — fixed by parsing the complete `{ decisionId, idempotencyKey }` command before issuing the request.
+- [x] [Review][Patch] Continue endpoint OpenAPI body omits `tripProjectId` [apps/api/src/openapi.controller.ts:32] — fixed by documenting a dedicated exact-shape body requiring both identifiers.
+- [x] [Review][Patch] Deletion replay scrubbing uses substring matching on JSON text [packages/database/src/trip-recommendations.ts:92] — fixed by exact JSON destination-field comparisons.

@@ -31,6 +31,13 @@ describe("trip recommendation aggregate", () => {
     await expect(createPostgresTripRecommendationReadRepository().loadOwnedTripRecommendations("owner", "conversation")).resolves.toEqual({ tripCreationRecommendation: { kind: "none" }, tripContextRecommendation: { kind: "none" } });
   });
 
+  test("waits for the latest extraction instead of a completed earlier turn", async () => {
+    const conversation = await readyConversation();
+    const [pendingCommand] = await testDb.insert(aiAskCommands).values({ userId: "owner", scopeKind: "conversation", scopeId: "pending-command", idempotencyKey: "pending-extraction-key", requestDigest: "c".repeat(64), normalizedQuestion: "Tôi đi cùng hai bé", selectedScopeDigest: "d".repeat(64), status: "completed", conversationId: conversation.id, terminalAt: new Date(), terminalResult: { type: "done" }, expiresAt: new Date(Date.now() + 60_000) }).returning();
+    await testDb.insert(domainOutbox).values({ originatingCommandId: pendingCommand!.id, eventType: "ai_ask.context_extraction.v1", eventVersion: 1, aggregateType: "ai_ask_command", aggregateId: pendingCommand!.id, userId: "owner", conversationId: conversation.id, userMessageId: `${conversation.id}-message`, conversationLifecycleVersion: 1, dedupeKey: "pending-context-extraction", payload: {}, status: "pending", createdAt: new Date(Date.now() + 86_400_000) });
+    await expect(createPostgresTripRecommendationReadRepository().loadOwnedTripRecommendations("owner", conversation.id)).resolves.toEqual({ tripCreationRecommendation: { kind: "none" }, tripContextRecommendation: { kind: "none" } });
+  });
+
   test("offers an owner-bound creation decision, persists a decline fence, and advances revision on material change", async () => {
     const conversation = await readyConversation();
     const repository = createPostgresTripRecommendationReadRepository();
@@ -127,6 +134,16 @@ describe("trip recommendation aggregate", () => {
     await expect(createPostgresTravelerCommandPort().deleteConversation("owner", original.id)).resolves.toEqual({ success: true });
     await expect(acceptTripCreationRecommendation("owner", { decisionId: refreshed.tripCreationRecommendation.decisionId, idempotencyKey: "deleted-conversation" })).resolves.toEqual({ success: false, reason: "refresh_required" });
     expect(await testDb.select().from(tripProjects)).toEqual([]);
+  });
+
+  test("rejects creation when the formerly ordinary conversation becomes scoped", async () => {
+    const original = await readyConversation();
+    const recommendation = await createPostgresTripRecommendationReadRepository().loadOwnedTripRecommendations("owner", original.id);
+    if (recommendation.tripCreationRecommendation.kind !== "offer") throw new Error("Expected creation offer");
+    const [project] = await testDb.insert(tripProjects).values({ userId: "owner", title: "Đã chọn" }).returning();
+    await testDb.update(conversations).set({ tripProjectId: project!.id }).where(eq(conversations.id, original.id));
+    await expect(acceptTripCreationRecommendation("owner", { decisionId: recommendation.tripCreationRecommendation.decisionId, idempotencyKey: "scoped-conversation-key" })).resolves.toEqual({ success: false, reason: "refresh_required" });
+    await expect(testDb.select({ id: tripProjects.id }).from(tripProjects).where(eq(tripProjects.userId, "owner"))).resolves.toHaveLength(1);
   });
 
   test("does not disclose or accept another owner's decision", async () => {
