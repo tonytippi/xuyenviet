@@ -1,7 +1,8 @@
 import { eq, sql } from "drizzle-orm";
 import { beforeEach, describe, expect, test } from "vitest";
 
-import { assistantProvenanceWithdrawalBackfillState, assistantResponseProvenance, auditEvents, conversations, knowledgeCardEvidence, knowledgeCards, knowledgeCardSources, knowledgeSourceSuggestions, messages, sourceCaptureVersions, sources, users } from "@/db/schema";
+import { assistantProvenanceWithdrawalBackfillState, assistantResponseProvenance, auditEvents, conversations, knowledgeCardEvidence, knowledgeCards, knowledgeCardSources, knowledgeRecommendations, knowledgeSourceSuggestions, messages, sourceCaptureVersions, sources, users } from "@/db/schema";
+import { transitionKnowledgeCard } from "@/db/knowledge-lifecycle";
 import { removeKnowledgeSource, withdrawKnowledgeEvidence } from "@/features/knowledge/source-removal";
 import { backfillHistoricalAssistantProvenanceWithdrawal, classifyAssistantProvenanceRowsForInsertion, extractHistoricalAnchors, ProvenanceWithdrawalBackfillError } from "../packages/database/src/assistant-provenance-withdrawal";
 import { createPostgresPlanningReadRepository } from "@xuyenviet/database";
@@ -50,6 +51,21 @@ describe("knowledge source removal", () => {
     await expect(testDb.select({ rawText: sourceCaptureVersions.rawText, rawMetadata: sourceCaptureVersions.rawMetadata }).from(sourceCaptureVersions)).resolves.toEqual([{ rawText: null, rawMetadata: null }]);
     await expect(testDb.select().from(auditEvents).where(eq(auditEvents.targetType, "knowledge_source_removal"))).resolves.toHaveLength(1);
     await expect(removeKnowledgeSource({ sourceId: "removed-source", reason: "withdrawn", actor: { userId: "operator", email: "operator@example.com" } }, testDb)).resolves.toMatchObject({ status: "already_completed" });
+  });
+
+  test("withdrawal prevents an operator resolution after atomically removing final support", async () => {
+    await source("racing-source");
+    await testDb.insert(knowledgeCards).values({ id: "racing-card", lifecycleState: "pending_operator", knowledgeState: "community_observation", verificationRequirement: "operator_required", type: "place", title: "Racing card", locationName: "Huế", summary: "Pending evidence.", confidence: "curated", aiPromptVersion: "test", createdByUserId: "operator" });
+    await testDb.insert(knowledgeCardSources).values({ knowledgeCardId: "racing-card", sourceId: "racing-source", supportLevel: "primary" });
+    const capture = await seedSourceCaptureVersion({ sourceId: "racing-source", captureKind: "url", rawText: "Final support." });
+    await seedKnowledgeCardEvidence({ cardId: "racing-card", sourceId: "racing-source", captureVersionId: capture.id, quoteText: "Final support." });
+    await testDb.insert(knowledgeRecommendations).values({ id: "racing-work", knowledgeCardId: "racing-card", contentVersion: 1, evidenceSetRevision: 1, workType: "verification", priority: 1, policySnapshot: {} });
+
+    await expect(removeKnowledgeSource({ sourceId: "racing-source", reason: "withdrawn", actor: { userId: "operator", email: "operator@example.com" } }, testDb)).resolves.toMatchObject({ status: "completed" });
+    await expect(transitionKnowledgeCard({ actor: { kind: "user", userId: "operator", email: "operator@example.com" }, fences: { recommendationId: "racing-work", contentVersion: 1, evidenceSetRevision: 1 }, trigger: { kind: "operator_resolution", recommendationId: "racing-work", resolution: "published_operator_confirmed" } }, testDb)).resolves.toEqual({ status: "invalid", reason: "ineligible_support" });
+    await expect(testDb.select({ lifecycleState: knowledgeCards.lifecycleState, contentVersion: knowledgeCards.contentVersion }).from(knowledgeCards).where(eq(knowledgeCards.id, "racing-card"))).resolves.toEqual([{ lifecycleState: "pending_operator", contentVersion: 1 }]);
+    await expect(testDb.select({ state: knowledgeCardEvidence.state }).from(knowledgeCardEvidence).where(eq(knowledgeCardEvidence.knowledgeCardId, "racing-card"))).resolves.toEqual([{ state: "removed" }]);
+    await expect(testDb.select({ status: knowledgeRecommendations.status }).from(knowledgeRecommendations).where(eq(knowledgeRecommendations.id, "racing-work"))).resolves.toEqual([{ status: "open" }]);
   });
 
   test("removes operational source suggestions with the withdrawn source", async () => {

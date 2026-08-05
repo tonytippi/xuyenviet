@@ -36,6 +36,8 @@ describe("knowledge lifecycle writer boundary", () => {
     expect(writesLifecycleTable("import { knowledgeCards } from './schema'; const tables = { card: knowledgeCards }; db.update(tables.card);", tables)).toBe(true);
     expect(writesLifecycleTable("import { knowledgeCards } from './schema'; const tables = { card: knowledgeCards }; const card = tables.card; db.delete(card);", tables)).toBe(true);
     expect(writesLifecycleTable("import { knowledgeCards } from './schema'; const tables = { card: knowledgeCards }; db.select().from(tables.card);", tables)).toBe(false);
+    expect(writesLifecycleTable("import { knowledgeCards } from './schema'; const tables = { card: knowledgeCards }; const { card } = tables; db.update(card);", tables)).toBe(true);
+    expect(writesLifecycleTable("sql`update knowledge_cards set lifecycle_state = 'active'`;", tables)).toBe(true);
   });
 
   test("keeps API admin routes out of Worker claim, run, and loop ownership", async () => {
@@ -101,16 +103,18 @@ function writesLifecycleTable(content: string, tableNames: string[]) {
         if (properties.size) objectAliases.set(node.name.text, properties);
       }
     }
-    if (ts.isVariableDeclaration(node) && ts.isObjectBindingPattern(node.name) && node.initializer && ts.isIdentifier(node.initializer) && namespaces.has(node.initializer.text)) {
+    if (ts.isVariableDeclaration(node) && ts.isObjectBindingPattern(node.name) && node.initializer) {
       for (const element of node.name.elements) {
         const table = element.propertyName?.getText(source) ?? element.name.getText(source);
-        if (tables.has(table) && ts.isIdentifier(element.name)) aliases.set(element.name.text, table);
+        const resolved = ts.isIdentifier(node.initializer) && namespaces.has(node.initializer.text) && tables.has(table) ? table : resolveTable(ts.factory.createPropertyAccessExpression(node.initializer, table));
+        if (resolved && ts.isIdentifier(element.name)) aliases.set(element.name.text, resolved);
       }
     }
     if (ts.isCallExpression(node)) {
       if (ts.isPropertyAccessExpression(node.expression) && ["insert", "update", "delete"].includes(node.expression.name.text) && node.arguments[0] && resolveTable(node.arguments[0])) violation = true;
       if (node.arguments.some((argument) => ts.isNoSubstitutionTemplateLiteral(argument) || ts.isTemplateExpression(argument)) && /\b(?:insert\s+into|update|delete\s+from)\s+(?:(?:"?public"?\.)?"?)(knowledge_cards|knowledge_recommendations|knowledge_sampling_obligations|knowledge_ingestion_candidates|knowledge_index_dirty_markers)\b/i.test(node.getText(source))) violation = true;
     }
+    if (ts.isTaggedTemplateExpression(node) && /\b(?:insert\s+into|update|delete\s+from)\s+(?:(?:"?public"?\.)?"?)(knowledge_cards|knowledge_recommendations|knowledge_sampling_obligations|knowledge_ingestion_candidates|knowledge_index_dirty_markers)\b/i.test(node.template.getText(source))) violation = true;
     ts.forEachChild(node, visit);
   };
   visit(source);

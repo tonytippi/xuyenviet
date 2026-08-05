@@ -4,7 +4,7 @@ baseline_commit: 17a904f5c4303a5cdaf2865c6660450c3f4b9096
 
 # Story 15.7: Prove the Lifecycle Transition Matrix
 
-Status: review
+Status: done
 
 ## Story
 
@@ -40,6 +40,15 @@ As a product owner, I want executable evidence that the lifecycle contract rejec
 - [x] Add `tests/knowledge-target-vocabulary-boundary.test.ts` as an infrastructure-free unit test. Lexically scan current runtime, seed, fixture, and test sources under `apps/api/src`, `apps/admin/app/knowledge`, `packages/contracts/src`, `scripts`, and `tests`; exclude `drizzle/migrations`, `docs`, `_bmad-output`, and explicitly named retirement tests. Reject target-invalid vocabulary in active shapes: `stage`, `publicationState`, `reviewState`, `needsReview`, `reviewStatus`, `operationState`, `verify_first`, and retired queue/status aliases such as `approved` when used as a lifecycle or job/candidate state. Keep intentional historical-retirement assertions narrowly excluded rather than weakening the vocabulary boundary. (AC: 1)
 - [x] Extend existing narrow suites before adding new files. Add `knowledge-lifecycle-writer-boundary.test.ts`, `admin-knowledge-views-ui-boundary.test.ts`, and `knowledge-target-vocabulary-boundary.test.ts` to `unitTests` in `vitest.config.ts`, because they are parser/import/static tests and must run under `pnpm test:unit`. Keep PostgreSQL tests in `pnpm test:integration`, serially, using `DATABASE_URL_TEST`, with `resetTestDatabase()` in each clean-table suite. Do not add a global reset hook or integration parallelism. (AC: 1-4)
 - [x] Run and record the required focused and full command sequence. Record the exact command, failure, and environmental blocker in this story if a check cannot run; do not declare a failed or skipped suite passing. (AC: 4)
+
+### Review Findings
+
+- [x] [Review][Patch] Authoritative matrix inventory does not encode or execute transition contracts [tests/knowledge-lifecycle-transition-matrix.test.ts:16]
+- [x] [Review][Patch] Source withdrawal races are not exercised through the production withdrawal seam [tests/knowledge-source-removal.test.ts:56]
+- [x] [Review][Patch] Protected direct API coverage omits invalid CSRF, missing capability, and controlled resolution rejection paths [tests/admin-knowledge-review-api.integration.test.ts:45]
+- [x] [Review][Patch] Lifecycle static boundary scanner misses destructured aliases from table objects [tests/knowledge-lifecycle-writer-boundary.test.ts:104]
+- [x] [Review][Patch] Lifecycle static boundary scanner misses tagged raw SQL mutations [tests/knowledge-lifecycle-writer-boundary.test.ts:112]
+- [x] [Review][Patch] Target vocabulary scanner permits multiline retired approved-state assignments [tests/knowledge-target-vocabulary-boundary.test.ts:26]
 
 ## Dev Notes
 
@@ -116,6 +125,7 @@ gpt-5.6-terra
 - 2026-08-05: Direct API coverage found that the global SafeValidationPipe rejected every otherwise-valid recommendation resolve request because the controller used an unknown body type. The controller now declares a parser-backed DTO type, preserving fail-closed validation while allowing an authorized request through the sole review port.
 - 2026-08-05: Full unit validation exposed a fail-closed policy omission: an invalid knowledge classification did not also report unsupported_knowledge_state. The policy now reports both reasons as its declared contract requires.
 - 2026-08-05: Completed the named trigger inventory and added LTM-10 through LTM-13: candidate lease no-effect rejection, atomic candidate relation effects, concurrent primary resolution, and stale sealed-cohort rollback. The retained Facebook ingestion-rerun route is a guarded port command only; static evidence rejects direct Worker claim/run/loop ownership.
+- 2026-08-05: Code-review repairs expanded the executable trigger contract, verified withdrawal blocks a subsequent fenced resolution after final support removal, added invalid-CSRF and policy-rejection API coverage, and hardened static writer/vocabulary bypass detection.
 
 ### Completion Notes List
 
@@ -145,3 +155,4 @@ gpt-5.6-terra
 - 2026-08-05: Validation repair bounded the complete public trigger inventory, assigned each race and ownership assertion to an executable suite, required direct Nest resolution coverage, and made target-vocabulary/static-boundary checks unit-project evidence.
 - 2026-08-05: Added the first executable lifecycle evidence slice, repaired direct API DTO admission for recommendation resolution, and restored complete fail-closed invalid-classification reasons.
 - 2026-08-05: Completed exhaustive lifecycle evidence with named trigger inventory, stale candidate and containment rollback assertions, concurrent primary resolution, and explicit retained-rerun Worker ownership boundary; status moved to review.
+- 2026-08-05: Resolved all six BMad code-review findings; focused unit and serial integration suites plus typecheck and diff whitespace validation passed; status moved to done.

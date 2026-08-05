@@ -4,7 +4,7 @@ import request from "supertest";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import { createPostgresApiIdentityRepository } from "@xuyenviet/database";
-import type { AdminKnowledgeReviewPort } from "@xuyenviet/domain";
+import { KnowledgeDraftReviewPolicyError, type AdminKnowledgeReviewPort } from "@xuyenviet/domain";
 import { createApiModule } from "../apps/api/src/app.module";
 import { csrfHash, csrfNonce } from "../apps/api/src/auth/browser-auth";
 import { userRoles, users } from "@/db/schema";
@@ -42,12 +42,13 @@ beforeEach(async () => {
 afterEach(async () => { await app.close(); });
 
 describe("admin knowledge review direct API", () => {
-  test("rejects anonymous, traveler, missing CSRF, and malformed requests before lifecycle resolution", async () => {
+  test("rejects anonymous, traveler, invalid or missing CSRF, and malformed requests before lifecycle resolution", async () => {
     await request(app.getHttpServer()).post(`/v1/admin/knowledge/recommendations/${recommendationId}/resolve`).set("x-request-id", "knowledge-review-anonymous").send({ action: "verify" }).expect(401);
     const traveler = await browserSession("traveler", "traveler");
     await request(app.getHttpServer()).post(`/v1/admin/knowledge/recommendations/${recommendationId}/resolve`).set({ Cookie: traveler.cookie, Origin: "https://admin.xuyenviet.app", "x-xuyenviet-csrf": traveler.csrf }).send({ action: "verify" }).expect(403);
     const operator = await browserSession("operator", "operator");
     await request(app.getHttpServer()).post(`/v1/admin/knowledge/recommendations/${recommendationId}/resolve`).set({ Cookie: operator.cookie, Origin: "https://admin.xuyenviet.app" }).send({ action: "verify" }).expect(403);
+    await request(app.getHttpServer()).post(`/v1/admin/knowledge/recommendations/${recommendationId}/resolve`).set({ Cookie: operator.cookie, Origin: "https://admin.xuyenviet.app", "x-xuyenviet-csrf": "invalid" }).send({ action: "verify" }).expect(403);
     await request(app.getHttpServer()).post(`/v1/admin/knowledge/recommendations/${recommendationId}/resolve`).set({ Cookie: operator.cookie, Origin: "https://admin.xuyenviet.app", "x-xuyenviet-csrf": operator.csrf }).send({ action: "verify", unexpected: true }).expect(400);
     expect(resolveRecommendation).not.toHaveBeenCalled();
   });
@@ -58,5 +59,12 @@ describe("admin knowledge review direct API", () => {
     expect(response.status).toBe(200);
     expect(response.body).toEqual({ status: "resolved", cardId });
     expect(resolveRecommendation).toHaveBeenCalledWith(recommendationId, { action: "verify" }, expect.objectContaining({ userId: "operator", roles: ["operator"] }));
+  });
+
+  test("maps an admitted port policy rejection without a successful lifecycle result", async () => {
+    resolveRecommendation.mockRejectedValueOnce(new KnowledgeDraftReviewPolicyError("rejected", "not_reviewable"));
+    const operator = await browserSession("operator", "operator");
+    await request(app.getHttpServer()).post(`/v1/admin/knowledge/recommendations/${recommendationId}/resolve`).set({ Cookie: operator.cookie, Origin: "https://admin.xuyenviet.app", "x-xuyenviet-csrf": operator.csrf }).send({ action: "verify" }).expect(400);
+    expect(resolveRecommendation).toHaveBeenCalledOnce();
   });
 });

@@ -23,7 +23,7 @@ describe("target knowledge vocabulary boundary", () => {
   test("does not use approved as a knowledge lifecycle, job, or candidate state", async () => {
     const files = new Set<string>();
     for (const pattern of sources) for await (const file of glob(pattern)) if (!excluded.has(file)) files.add(file);
-    const violations = (await Promise.all([...files].map(async (file) => /(?:lifecycleState|processingStatus|status)\s*[:=][^\n]*["']approved["']/.test(await readFile(file, "utf8")) ? file : null))).filter(Boolean);
+    const violations = (await Promise.all([...files].map(async (file) => /(?:lifecycleState|processingStatus|status)\s*[:=][\s\S]{0,200}?["']approved["']/.test(await readFile(file, "utf8")) ? file : null))).filter(Boolean);
     expect(violations).toEqual([]);
   });
 });

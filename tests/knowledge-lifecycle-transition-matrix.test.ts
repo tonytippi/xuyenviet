@@ -13,18 +13,20 @@ describe("knowledge lifecycle transition matrix", () => {
     await seedTestOperator();
   });
 
-  test.each([
-    ["LTM-01", "candidate_relation", "knowledge-ingestion-pipeline.test.ts", "candidate leases and relation outcomes require Worker-owned setup"],
-    ["LTM-02", "operator_resolution", "knowledge-lifecycle-transition-matrix.test.ts", "primary and sampling resolution races are asserted below"],
-    ["LTM-03", "sampling_containment", "knowledge-recommendation-queue.test.ts", "sealed cohort persistence invariants are owned by the queue suite"],
-    ["LTM-04", "draft_publish", "knowledge-lifecycle-transition-matrix.test.ts", "supported and unsupported draft publication is asserted below"],
-    ["LTM-05", "open_work", "knowledge-lifecycle-transition-matrix.test.ts", "same-fence and terminal-state admission is asserted below"],
-    ["LTM-06", "content_refresh", "knowledge-lifecycle-transition-matrix.test.ts", "replacement work and terminal no-op behavior is asserted below"],
-    ["LTM-07", "support_loss", "knowledge-source-removal.test.ts", "source withdrawal owns evidence removal; lifecycle effects are asserted below"],
-    ["LTM-08", "archive", "knowledge-lifecycle-transition-matrix.test.ts", "archive work supersession is asserted below"],
-    ["LTM-09", "restore", "knowledge-lifecycle-transition-matrix.test.ts", "supported restore and stale work rejection is asserted below"],
-  ] as const)("%s inventories %s through %s", (_caseId, trigger, suite, whyDelegated) => {
-    expect({ trigger, suite, whyDelegated }).toEqual(expect.objectContaining({ trigger: expect.any(String), suite: expect.stringMatching(/\.test\.ts$/), whyDelegated: expect.any(String) }));
+  const triggerMatrix = [
+    { id: "LTM-01", trigger: "candidate_relation", owner: "Worker", from: "processing candidate", to: "draft|active|pending_operator", fences: "candidate lease", work: "create or supersede", projection: "dirty", result: "resolved|stale|invalid", suite: "knowledge-ingestion-pipeline.test.ts", whyDelegated: "candidate leases and relation outcomes require Worker-owned setup" },
+    { id: "LTM-02", trigger: "operator_resolution", owner: "API", from: "pending_operator|active", to: "active|suppressed|pending_operator", fences: "recommendation and card", work: "resolve or supersede", projection: "dirty", result: "resolved|stale|invalid", suite: "knowledge-lifecycle-transition-matrix.test.ts", whyDelegated: "primary and sampling resolution races are asserted below" },
+    { id: "LTM-03", trigger: "sampling_containment", owner: "Worker", from: "active", to: "pending_operator|suppressed", fences: "sealed cohort", work: "risk or none", projection: "dirty", result: "resolved|stale|invalid", suite: "knowledge-recommendation-queue.test.ts", whyDelegated: "sealed cohort persistence invariants are owned by the queue suite" },
+    { id: "LTM-04", trigger: "draft_publish", owner: "Worker", from: "draft", to: "active", fences: "card", work: "supersede", projection: "dirty", result: "resolved|invalid", suite: "knowledge-lifecycle-transition-matrix.test.ts", whyDelegated: "supported and unsupported draft publication is asserted below" },
+    { id: "LTM-05", trigger: "open_work", owner: "Worker", from: "active|pending_operator|suppressed", to: "pending_operator", fences: "card", work: "open primary or sampling", projection: "dirty", result: "resolved|stale|invalid", suite: "knowledge-lifecycle-transition-matrix.test.ts", whyDelegated: "same-fence and terminal-state admission is asserted below" },
+    { id: "LTM-06", trigger: "content_refresh", owner: "Worker", from: "active|pending_operator", to: "same lifecycle", fences: "card", work: "replace", projection: "dirty", result: "resolved|stale", suite: "knowledge-lifecycle-transition-matrix.test.ts", whyDelegated: "replacement work and terminal no-op behavior is asserted below" },
+    { id: "LTM-07", trigger: "support_loss", owner: "Worker", from: "active", to: "suppressed", fences: "card and evidence", work: "supersede", projection: "dirty", result: "resolved|stale", suite: "knowledge-source-removal.test.ts", whyDelegated: "source withdrawal owns evidence removal and stale resolver fencing" },
+    { id: "LTM-08", trigger: "archive", owner: "API", from: "any non-archived", to: "archived", fences: "card", work: "supersede", projection: "dirty", result: "resolved|stale", suite: "knowledge-lifecycle-transition-matrix.test.ts", whyDelegated: "archive work supersession is asserted below" },
+    { id: "LTM-09", trigger: "restore", owner: "API|Worker", from: "archived|suppressed", to: "pending_operator", fences: "card", work: "open primary", projection: "dirty", result: "resolved|stale|invalid", suite: "knowledge-lifecycle-transition-matrix.test.ts", whyDelegated: "supported restore and stale work rejection is asserted below" },
+  ] as const;
+
+  test.each(triggerMatrix)("$id declares the $trigger transition contract", (entry) => {
+    expect(entry).toMatchObject({ id: expect.stringMatching(/^LTM-\d+$/), trigger: expect.any(String), owner: expect.any(String), from: expect.any(String), to: expect.any(String), fences: expect.any(String), work: expect.any(String), projection: expect.any(String), result: expect.any(String), suite: expect.stringMatching(/\.test\.ts$/), whyDelegated: expect.any(String) });
   });
 
   test("LTM-10 candidate relation rejects a stale lease without card, work, audit, or index effects", async () => {
