@@ -1,4 +1,3 @@
----
 stepsCompleted:
   - step-01-document-discovery
   - step-02-prd-analysis
@@ -7,10 +6,18 @@ stepsCompleted:
   - step-05-epic-quality-review
   - step-06-final-assessment
 documentsIncluded:
-  prd: _bmad-output/planning-artifacts/prds/prd-xuyenviet-2026-07-04/prd.md
-  architecture: _bmad-output/planning-artifacts/architecture/architecture-xuyenviet-2026-07-04/ARCHITECTURE-SPINE.md
-  epics: _bmad-output/planning-artifacts/epics.md
-  ux: _bmad-output/planning-artifacts/ux-designs/ux-xuyenviet-2026-07-05/
+  prd:
+    - prds/prd-xuyenviet-2026-07-04/prd.md
+    - prds/prd-xuyenviet-2026-07-04/addendum.md
+  architecture:
+    - architecture/architecture-xuyenviet-2026-07-04/ARCHITECTURE-SPINE.md
+    - architecture/architecture-xuyenviet-2026-07-04/community-knowledge-solution-design.md
+    - architecture/architecture-xuyenviet-2026-07-04/frontend-shell-implementation-notes.md
+  epics:
+    - epics.md
+  ux:
+    - ux-designs/ux-xuyenviet-2026-07-05/EXPERIENCE.md
+    - ux-designs/ux-xuyenviet-2026-07-05/DESIGN.md
 ---
 
 # Implementation Readiness Assessment Report
