@@ -11,7 +11,11 @@ export function DirectShellLoader({ initialQuestion, conversationId, historyConv
   const [refreshGeneration, setRefreshGeneration] = useState(0);
   useEffect(() => {
     let active = true;
-    void Promise.all([loadTravelerShell(conversationId, tripProjectId), loadConversationSummaries(), historyConversationId ? loadTravelerShell(historyConversationId) : Promise.resolve(undefined)]).then(async ([shell, summaries, historyShell]) => {
+    void loadTravelerShell(conversationId, tripProjectId).then(async (shell) => {
+      const [summaries, historyShell] = await Promise.all([
+        loadConversationSummaries().catch(() => []),
+        historyConversationId ? loadTravelerShell(historyConversationId).catch(() => undefined) : Promise.resolve(undefined),
+      ]);
       const enrich = async (candidate: typeof shell.shell.conversation) => {
         if (!candidate) return null;
         const details = await Promise.all(candidate.messages.map(async (message) => message.role === "assistant" ? loadAnswerDetail(candidate.id, message.id).catch(() => ({ detail: null })) : { detail: null }));

@@ -47,6 +47,7 @@ describe("admin workspace direct browser admission", () => {
     const cookie = `${browserAuth.cookieName}=${sessionId}`;
     await request(app.getHttpServer()).get("/v1/admin/workspace").set({ Cookie: cookie, Origin: "https://admin.xuyenviet.app" }).expect(403);
     await request(app.getHttpServer()).get("/v1/admin/workspace").set({ Cookie: cookie, Origin: "https://foreign.example" }).expect(403);
-    await request(app.getHttpServer()).get("/auth/csrf").set("Cookie", cookie).expect(401);
+    await request(app.getHttpServer()).get("/auth/csrf").set({ Cookie: cookie, Origin: "https://foreign.example" }).expect(403);
+    await request(app.getHttpServer()).get("/auth/csrf").set("Cookie", cookie).expect(200);
   });
 });

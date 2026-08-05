@@ -176,4 +176,10 @@ function isIdentifier(value: unknown): value is string { return typeof value ===
 function isOptionalIdentifier(value: unknown): value is string | undefined { return value === undefined || isIdentifier(value); }
 function isMessage(value: unknown): value is { id: string; content: string } { return Boolean(value) && typeof value === "object" && !Array.isArray(value) && hasOnlyKeys(value as Record<string, unknown>, ["id", "content"]) && isIdentifier((value as Record<string, unknown>).id) && typeof (value as Record<string, unknown>).content === "string"; }
 function isOptionalMessage(value: unknown): value is { id: string; content: string } | undefined { return value === undefined || isMessage(value); }
-function isAssistantMessage(value: unknown): value is { id: string; content: string; provenance?: unknown[] } { if (!isMessage(value)) return false; const record = value as Record<string, unknown>; return hasOnlyKeys(record, ["id", "content"]) || hasOnlyKeys(record, ["id", "content", "provenance"]) && Array.isArray(record.provenance); }
+function isAssistantMessage(value: unknown): value is { id: string; content: string; provenance?: unknown[] } {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const record = value as Record<string, unknown>;
+  return (hasOnlyKeys(record, ["id", "content"]) || hasOnlyKeys(record, ["id", "content", "provenance"]) && Array.isArray(record.provenance))
+    && isIdentifier(record.id)
+    && typeof record.content === "string";
+}

@@ -240,6 +240,7 @@ describe("browser Google identity callback", () => {
     expect(await testDb.select().from(users)).toEqual([expect.objectContaining({ id: "authjs-user", authorizationVersion: 2 })]);
     expect(await testDb.select().from(browserSessions)).toEqual([expect.objectContaining({ userId: "authjs-user", authorizationVersion: 2 })]);
     await request(app.getHttpServer()).get("/auth/csrf").set({ Cookie: `${browserAuth.cookieName}=${sessionId}`, Origin: browserAuth.allowedOrigins[0] }).expect(200);
+    await request(app.getHttpServer()).get("/auth/csrf").set("Cookie", `${browserAuth.cookieName}=${sessionId}`).expect(200);
   });
 
   test("rejects an email-selected user linked to another Google subject without issuing a session or taking over the account", async () => {

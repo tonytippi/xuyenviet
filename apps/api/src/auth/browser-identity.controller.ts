@@ -79,10 +79,10 @@ export class BrowserIdentityController {
   }
 
   @Get("csrf")
-  csrf(@Headers("cookie") cookie: string | undefined, @Headers("origin") origin: string | undefined, @Principal() principal: RequestPrincipal) {
+  csrf(@Headers("cookie") cookie: string | undefined, @Principal() principal: RequestPrincipal) {
     const config = this.requiredConfig();
     const sessionId = cookieValue(cookie, config.cookieName);
-    if (!origin || !config.allowedOrigins.includes(origin) || !sessionId || principal.sessionId !== sessionId) throw this.denied();
+    if (!sessionId || principal.sessionId !== sessionId) throw this.denied();
     return { csrfToken: csrfNonce(config, sessionId) };
   }
 
