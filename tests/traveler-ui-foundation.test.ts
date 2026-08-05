@@ -70,4 +70,23 @@ describe("traveler UI foundation", () => {
     expect(source).not.toContain("formatProvenanceUrl");
   });
 
+  test("keeps disclosure links safe and source URLs out of traveler quick facts", () => {
+    const source = readFileSync("apps/web/src/features/ai/ai-ask-composer.tsx", "utf8");
+
+    expect(source).toContain('const detailActionLabel = getSafeTravelerUrl(item.url) ? "Xem nguồn tham khảo" : "Cần kiểm tra gì?";');
+    expect(source).toContain('const travelerUrl = getSafeTravelerUrl(item.url);');
+    expect(source).toContain('Object.entries(detail).filter(([label]) => label !== "URL")');
+    expect(source).toContain('href={travelerUrl}');
+  });
+
+  test("keeps stream failures, shell retries, and reduced-motion recovery controls bounded", () => {
+    const composer = readFileSync("apps/web/src/features/ai/ai-ask-composer.tsx", "utf8");
+    const shellLoader = readFileSync("apps/web/src/features/chat-trips/direct-shell-loader.tsx", "utf8");
+
+    expect(composer).not.toContain("setStatus(`${result.errorMessage}");
+    expect(composer).toContain('return { status: "answer-failed" };');
+    expect(shellLoader).toContain("Thử mở lại");
+    expect(shellLoader).toContain("motion-reduce:transition-none");
+  });
+
 });

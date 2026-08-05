@@ -4,7 +4,7 @@ baseline_commit: 9161d4e0fca3699fa080686993dad6d158c0e7d7
 
 # Story 16.3: Present Practical Vietnamese Answer, Trust, and Recovery States
 
-Status: review
+Status: done
 
 ## Story
 
@@ -83,7 +83,16 @@ so that I can act on travel guidance without seeing product internals or being p
   - [x] Extend `tests/ai-ask-direct-api.test.ts` for strict `loadAnswerDetail()` cookie-authenticated/safe-parser behavior and `saveDirectAnswerUsefulnessFeedback()` CSRF request/result behavior, including malformed safe responses.
   - [x] Preserve and extend `tests/answer-annotations.test.ts` and `tests/knowledge-source-removal.test.ts` coverage for persisted-provenance-only detail, cross-message/unsafe annotation rejection, withdrawn provenance, and safe unavailable projections. These server-side tests do not replace traveler-rendering coverage.
   - [x] Add infrastructure-free component-compatible or source-level web tests using the existing Vitest setup for: available, freshness-sensitive, withdrawn, and `detail: null` disclosure render paths; allowed Vietnamese copy and absence of category, confidence, source type, trust labels, evidence, conditions, raw URL text, and provenance IDs; `DirectShellLoader.enrich(...)` matching, null, and mismatched message/detail identity behavior; negative-only feedback editor, immediate rating submission/retry, pending disablement, message-scoped update, and composer availability; generic Vietnamese streaming/consumer/recovery copy with transient streamed content visibly provisional; connected-trigger and composer fallback focus restoration; and reduced-motion classes on changed controls. Do not introduce a new UI-test framework for this story.
-  - [x] Run focused unit tests, then `pnpm lint`, `pnpm typecheck`, `pnpm build`, and `git diff --check`. Use `pnpm test:integration` only if a changed test reads/mutates PostgreSQL; keep it serial and call `resetTestDatabase()` in each clean-table suite.
+- [x] Run focused unit tests, then `pnpm lint`, `pnpm typecheck`, `pnpm build`, and `git diff --check`. Use `pnpm test:integration` only if a changed test reads/mutates PostgreSQL; keep it serial and call `resetTestDatabase()` in each clean-table suite.
+
+### Review Findings
+
+- [x] [Review][Patch] Do not expose stream error text to travelers [apps/web/src/features/ai/ai-ask-composer.tsx:1228] — Terminal stream results now discard API and exception error text before the presentation state maps failures to fixed practical Vietnamese recovery copy.
+- [x] [Review][Dismiss] Preserve verification guidance for action-blocked provenance [apps/web/src/features/ai/ai-ask-composer.tsx:556] — dismissed after contract verification: `PlanningProvenance` exposes only `verificationStatus`, not `do_not_use`, failed, conflicted, or superseded source states; the UI cannot infer omitted policy states without an out-of-scope projection change.
+- [x] [Review][Patch] Do not render the raw source URL in quick facts [apps/web/src/features/ai/ai-ask-composer.tsx:2439] — The descriptor now retains only a sanitized URL for the action-labeled link and excludes `URL` from traveler-visible quick facts.
+- [x] [Review][Patch] Offer the recovery action stated for unavailable shells [apps/web/src/features/chat-trips/direct-shell-loader.tsx:49] — Expired sessions retain the sign-in action; other shell failures now provide a focus-visible 44px retry action that refreshes the current shell.
+- [x] [Review][Patch] Derive disclosure labels from the sanitized URL [apps/web/src/features/ai/ai-ask-composer.tsx:571] — The disclosure chooses `Xem nguồn tham khảo` only for a valid safe URL and otherwise uses `Cần kiểm tra gì?`.
+- [x] [Review][Patch] Add regression coverage for repaired traveler surfaces [tests/traveler-ui-foundation.test.ts:57] — Existing infrastructure-free source-level coverage now guards safe disclosure labels, raw-URL quick-fact omission, bounded stream failure projection, retry recovery, and reduced-motion controls. Direct component imports are not supported by the unit runner's web alias configuration.
 
 ## Dev Notes
 
@@ -176,6 +185,7 @@ gpt-5.6-terra
 - Converted feedback to compact `Hữu ích` and `Chưa đúng ý` footer actions, retaining immediate direct API saves, negative-only optional comments, live pending feedback, message-scoped updates, and established focus behavior.
 - Added direct-client regressions for strict persisted answer-detail parsing and CSRF feedback results, plus source-level UI boundary coverage for practical copy, taxonomy removal, and reduced-motion controls.
 - Validation passed: `pnpm test:unit` (23 files, 226 tests), `pnpm lint` (0 errors, 45 pre-existing warnings), `pnpm typecheck`, `pnpm build`, and `git diff --check`. No integration test was required because this story changed no PostgreSQL behavior.
+- Code review repair 2026-08-05: removed stream error-message interpolation, retained only safe source-link rendering, added practical generic-shell retry, and hardened source-level regressions. `pnpm test:unit` passed (23 files, 228 tests); `pnpm lint` had 0 errors and 45 pre-existing warnings; `pnpm typecheck`, `pnpm build`, and `git diff --check` passed. One provenance-state finding was dismissed because the client contract does not project those states.
 
 ### File List
 

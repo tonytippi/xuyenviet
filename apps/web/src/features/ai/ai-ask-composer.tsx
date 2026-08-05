@@ -568,7 +568,7 @@ export function AssistantProvenanceBlock({ provenance, selectedEntityId, detailP
           }
           const isSelected = selectedEntityId === item.id;
           const needsVerification = item.freshnessSensitive || item.verificationStatus === "unverified";
-          const detailActionLabel = item.url ? "Xem nguồn tham khảo" : "Cần kiểm tra gì?";
+          const detailActionLabel = getSafeTravelerUrl(item.url) ? "Xem nguồn tham khảo" : "Cần kiểm tra gì?";
 
           return (
           <li className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm leading-6 text-[#6f3f12]" key={item.id}>
@@ -1225,7 +1225,7 @@ export function AiAskComposer({
           setFailedQuestionIds([]);
           setSelectedAnswerEntity(null);
           answerEntityTriggerRef.current = null;
-          setStatus(result.errorMessage);
+          setStatus("Kế hoạch hoặc hội thoại đã thay đổi. Hãy làm mới trước khi tiếp tục.");
           setRecoveryMessage("Kế hoạch hoặc hội thoại đã thay đổi. Đã bỏ phần trả lời tạm thời và làm mới dữ liệu hiện tại.");
           reconcileSelection(conversationId, activeTripProjectId);
           return;
@@ -1246,10 +1246,10 @@ export function AiAskComposer({
           reconcileSelection(newConversationId, activeTripProjectId);
         }
         if (result.conversationId && failedUserMessage) {
-          setStatus(`${result.errorMessage} Chưa có câu trả lời trợ lý nào được lưu cho lượt này.`);
+          setStatus("Chưa có câu trả lời trợ lý nào được lưu cho lượt này.");
           setRecoveryMessage("Tin nhắn đã được lưu nhưng chưa có câu trả lời. Bạn có thể chỉnh câu hỏi rồi gửi lại.");
         } else {
-          setStatus(`${result.errorMessage} Nội dung vẫn còn trong ô nhập để bạn thử lại.`);
+          setStatus("Không thể gửi câu hỏi lúc này. Nội dung vẫn còn trong ô nhập để thử lại.");
           setRecoveryMessage("Không thể gửi yêu cầu. Nội dung của bạn vẫn còn trong ô nhập để thử lại.");
         }
         return;
@@ -2337,7 +2337,6 @@ type StreamResult = {
   code?: "refresh_required";
   conversationId?: string;
   userMessage?: DisplayMessage;
-  errorMessage: string;
 };
 
 function appendMessagesWithoutDuplicateIds(currentMessages: DisplayMessage[], additions: DisplayMessage[]) {
@@ -2374,7 +2373,7 @@ async function submitAiAskStream({
     events = await submitDirectAiAskStream({ question, conversationId, tripProjectId, image, idempotencyKey, signal, onPreparing, onDelta });
   } catch (error) {
     if (error instanceof DirectApiError) throw error;
-    return { status: "answer-failed", errorMessage: error instanceof Error ? error.message : "Mình chưa tạo được câu trả lời lúc này." };
+    return { status: "answer-failed" };
   }
   let terminalResult: StreamResult | null = null;
   for (const event of events) {
@@ -2388,11 +2387,11 @@ async function submitAiAskStream({
       }
 
       if (event.type === "error" && terminalResult?.status !== "answer-created") {
-        terminalResult = { status: "answer-failed", code: event.code, conversationId: event.conversationId, userMessage: event.userMessage ? { ...event.userMessage, role: "user" } : undefined, errorMessage: event.errorMessage ?? "Mình chưa tạo được câu trả lời lúc này." };
+        terminalResult = { status: "answer-failed", code: event.code, conversationId: event.conversationId, userMessage: event.userMessage ? { ...event.userMessage, role: "user" } : undefined };
       }
   }
 
-  return terminalResult ?? { status: "answer-failed", errorMessage: "Luồng trả lời kết thúc trước khi lưu câu trả lời hoàn chỉnh." };
+  return terminalResult ?? { status: "answer-failed" };
 }
 
 export function buildAiAskStreamFormData({
@@ -2433,11 +2432,12 @@ function validateSelectedImage(image: File | null) {
 }
 
 function createProvenanceAnswerEntityDescriptor(item: AvailableAssistantMessageProvenanceItem): AnswerEntityDescriptor {
-  const hasActionBlockedProvenance = isActionBlockedProvenance(item);
+  const hasActionBlockedProvenance = item.verificationStatus === "unverified";
   const detail: Record<string, string> = {};
+  const travelerUrl = getSafeTravelerUrl(item.url);
 
-  if (item.url) {
-    detail["URL"] = item.url;
+  if (travelerUrl) {
+    detail["URL"] = travelerUrl;
   }
 
   if (item.checkedAt) {
@@ -2451,13 +2451,9 @@ function createProvenanceAnswerEntityDescriptor(item: AvailableAssistantMessageP
     sourceCategory: item.sourceCategory,
     owner: { table: "assistant_response_provenance", id: item.id },
     detail,
-    quickFacts: Object.entries(detail).slice(0, 6).map(([label, value]) => ({ label, value })),
+    quickFacts: Object.entries(detail).filter(([label]) => label !== "URL").slice(0, 6).map(([label, value]) => ({ label, value })),
     provenanceIds: [item.id],
   };
-}
-
-function isActionBlockedProvenance(item: AvailableAssistantMessageProvenanceItem) {
-  return item.verificationStatus === "unverified";
 }
 
 function formatAnswerEntitySummary(entity: AnswerEntityDescriptor) {
