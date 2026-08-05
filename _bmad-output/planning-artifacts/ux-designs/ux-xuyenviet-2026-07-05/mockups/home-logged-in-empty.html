@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>XuyenViet - Trạng thái trống sau đăng nhập</title>
+    <title>XuyenViet - Bắt đầu bằng chuyến đi của bạn</title>
   <style>
     :root {
       --green: #14532d;
@@ -30,7 +30,7 @@
     .logo { display: grid; width: 34px; height: 34px; place-items: center; border-radius: 12px; background: linear-gradient(135deg, var(--green), var(--route)); color: white; font-size: 13px; font-weight: 900; }
     .icon-button { display: grid; width: 34px; height: 34px; place-items: center; border: 1px solid transparent; border-radius: 11px; background: transparent; color: var(--muted); }
     .icon-button:hover { background: white; border-color: var(--line); }
-    .new-chat { display: flex; align-items: center; justify-content: center; gap: 8px; min-height: 42px; border: 0; border-radius: 13px; background: var(--green); color: white; font-weight: 800; }
+     .new-chat { display: flex; align-items: center; justify-content: center; gap: 8px; min-height: 42px; border: 0; border-radius: 13px; background: var(--green); color: white; font-weight: 800; }
     .empty-sidebar { display: grid; place-items: center; min-height: 220px; padding: 18px; color: var(--muted); text-align: center; font-size: 13px; }
     .empty-sidebar img { width: 34px; height: 34px; margin-bottom: 10px; opacity: .72; }
     .sidebar-footer { display: grid; gap: 4px; padding-top: 10px; border-top: 1px solid var(--line); }
@@ -64,28 +64,28 @@
   <div class="app">
     <aside class="sidebar" aria-label="Sidebar navigation">
       <div class="brand"><div class="brand-left"><span class="logo">XV</span><span>XuyenViet</span></div><button class="icon-button" type="button">☰</button></div>
-      <button class="new-chat" type="button"><span>＋</span><span>Trò chuyện mới</span></button>
-      <div class="empty-sidebar"><div><img src="https://img.icons8.com/?id=3726&amp;format=png&amp;size=48" alt="" /><span>Chưa có cuộc trò chuyện. Hãy hỏi câu đầu tiên.</span></div></div>
+       <button class="new-chat" type="button"><span>＋</span><span>Hỏi XuyenViet</span></button>
+       <div class="empty-sidebar"><div><img src="https://img.icons8.com/?id=3726&amp;format=png&amp;size=48" alt="" /><span>Chưa có cuộc trò chuyện. Hãy kể về chuyến đi bạn đang nghĩ tới.</span></div></div>
       <div class="sidebar-footer"><a class="footer-row" href="#"><span>Riêng tư</span><span>›</span></a><a class="footer-row" href="#"><span>Admin</span><span>↗</span></a><a class="footer-row" href="#"><span>Tony</span><span>⎋</span></a></div>
     </aside>
 
     <main class="main">
-      <header class="topbar"><div class="topbar-title"><strong>Trò chuyện mới</strong><span>Chưa có nội dung</span></div><div class="account">T</div></header>
+       <header class="topbar"><div class="topbar-title"><strong>Hỏi XuyenViet</strong><span>Bắt đầu bằng điều bạn muốn đi</span></div><div class="account">T</div></header>
       <section class="empty-chat">
         <div class="empty-inner">
-          <h1>Mình sẽ đi đâu?</h1>
-          <p class="subtitle">Bắt đầu bằng một câu hỏi tự nhiên. XuyenViet sẽ giúp bạn lên route, chọn điểm dừng, nơi ở và những điều cần kiểm chứng.</p>
+           <h1>Bạn muốn đi đâu,<br />cùng ai, khi nào?</h1>
+           <p class="subtitle">Cứ kể tự nhiên. Mình sẽ cùng bạn phác thảo chuyến đi, hỏi thêm khi cần và chỉ đề nghị lưu lại khi điều đó thực sự hữu ích.</p>
 
           <form class="composer">
-            <textarea aria-label="Nhập câu hỏi" placeholder="Hỏi XuyenViet về chuyến đi đường bộ ở Việt Nam..."></textarea>
+             <textarea aria-label="Kể về chuyến đi của bạn" placeholder="Ví dụ: Nhà mình đi ô tô từ Hà Nội vào Huế 5 ngày cuối tháng 9, có bé 5 tuổi và muốn đi chậm..."></textarea>
             <button class="send" type="submit">→</button>
           </form>
 
           <div class="starter-grid">
-            <button class="starter" type="button"><img src="https://img.icons8.com/?id=37078&amp;format=png&amp;size=48" alt="" /><span><strong>Lên route</strong><span>Hà Nội → Huế trong 5 ngày</span></span></button>
-            <button class="starter" type="button"><img src="https://img.icons8.com/?id=12338&amp;format=png&amp;size=64" alt="" /><span><strong>Tìm nơi ở</strong><span>khu nào tiện cho gia đình</span></span></button>
-            <button class="starter" type="button"><img src="https://img.icons8.com/?id=13800&amp;format=png&amp;size=48" alt="" /><span><strong>Điểm dừng</strong><span>nghỉ ăn, chơi nhẹ, trẻ em</span></span></button>
-            <button class="starter" type="button"><img src="https://img.icons8.com/?id=742&amp;format=png&amp;size=48" alt="" /><span><strong>Kiểm tra nguồn</strong><span>curated, official, web</span></span></button>
+             <button class="starter" type="button"><img src="https://img.icons8.com/?id=37078&amp;format=png&amp;size=48" alt="" /><span><strong>Gia đình có trẻ nhỏ</strong><span>đi Hà Nội - Huế 5 ngày bằng ô tô</span></span></button>
+             <button class="starter" type="button"><img src="https://img.icons8.com/?id=12338&amp;format=png&amp;size=64" alt="" /><span><strong>Đi cuối tuần</strong><span>từ TP.HCM đến Đà Lạt, 2 người</span></span></button>
+             <button class="starter" type="button"><img src="https://img.icons8.com/?id=13800&amp;format=png&amp;size=48" alt="" /><span><strong>Đi xe máy</strong><span>tìm cung đường Hà Giang dễ đi hơn</span></span></button>
+             <button class="starter" type="button"><img src="https://img.icons8.com/?id=742&amp;format=png&amp;size=48" alt="" /><span><strong>Hỏi riêng</strong><span>ăn gì ở Hội An nếu chỉ ghé một buổi tối?</span></span></button>
           </div>
         </div>
       </section>

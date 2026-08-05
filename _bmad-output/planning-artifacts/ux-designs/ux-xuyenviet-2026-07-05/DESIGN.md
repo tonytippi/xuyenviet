@@ -4,7 +4,7 @@ description: Responsive web UX for an AI-first Vietnam road-trip planning compan
 status: final
 project: xuyenviet
 created: 2026-07-05
-updated: 2026-07-24
+updated: 2026-08-04
 sources:
   - ../../prds/prd-xuyenviet-2026-07-04/prd.md
   - ../../architecture/architecture-xuyenviet-2026-07-04/ARCHITECTURE-SPINE.md
@@ -192,6 +192,8 @@ XuyenViet should feel like a practical road companion for Vietnam: calm enough f
 
 The product differentiator is not visual spectacle. It is trustworthy AI guidance with visible provenance and a familiar conversation model. The UI should stay quiet until the user asks; after an answer exists, it can reveal richer contextual detail without making every answer feel like a compliance report. [`trip-project-workspace.html`](./mockups/trip-project-workspace.html) is the visual reference for the Trip Home, plan timeline, primary composer, and proposal inspector; these spines win on conflict.
 
+The primary chat should feel as simple as a familiar ChatGPT conversation while remaining a distinctly Vietnamese road-trip companion: normal reading typography, one clear next step, and a quiet composer. Technical trust metadata, large warning cards, and full feedback forms do not occupy the default answer path. [`chat-first-trip-companion.html`](./mockups/chat-first-trip-companion.html) is the visual reference for this active chat state.
+
 ## Colors
 
 - **Route Green (`{colors.primary}`)** is the primary action and brand color. It represents forward motion, planned route, and safe go-ahead. Use for primary buttons, active navigation, selected trip project, and verified route actions.
@@ -271,6 +273,7 @@ Shape language is soft but not playful.
 - **Trip Home focus card** uses `{components.trip-home-focus}` and contains one focus label, short reason, the next action, and a link to the affected timeline item or proposal. It should feel like a calm briefing card, not an alert feed.
 - **Plan timeline** uses date dividers and a thin route-teal progression line. Anchors, legs, and activities use semantic icons and a visible state label. `Ý tưởng` is neutral/outlined, `Dự kiến` uses guide amber sparingly, `Đã chốt` uses `{components.plan-item-confirmed}`, and `Phương án B` uses `{components.plan-item-backup}`.
 - **Change proposal card** uses `{components.change-proposal}` and contains `Đề xuất`, rationale, before/after impact, and a bounded action row. `Áp dụng` uses the primary button, `Giữ kế hoạch` is secondary/destructive-neutral dismissal, and `Xem phương án khác` appears only when provided. Pending proposals must never look identical to confirmed timeline items.
+- **Companion action** is a compact conversational message block used only after the assistant has enough context to suggest saving a trip or continuing in an owned trip. It uses one clear explanation and at most two explicit choices; it is not a modal, dashboard card, or persistent callout.
 - **Plan history row** is visually compact and subdued: status icon/label, safe summary, actor, and timestamp. It is secondary to current plan state and does not show raw AI prose.
 - **Conversation row** uses one-line title plus optional short preview/date. It should feel like chat history, not a document library.
 - **Chat composer** uses `{components.chat-composer}` and remains visually anchored to the main chat column. It is a low-chrome surface: prompt text, an icon-only `{components.composer-icon-action}` attachment trigger when supported, and an icon-only `{components.composer-send-action}` send trigger. A visible label, keyboard cheat sheet, file-type/size explanation, or secondary bordered attachment region must not occupy the idle composer. Show that information contextually after focus, an attachment, validation failure, or an explicit help request. The composer expands only as needed for multiline text or an attachment preview without widening the reading column.
@@ -280,10 +283,11 @@ Shape language is soft but not playful.
 - **Right detail panel** uses `{components.detail-panel}` and appears in active conversations when the user selects, hovers/focuses, or the assistant highlights a place, hotel, route segment, source, cost, warning, or trip fact. Its header, icon, title, short summary, action row, quick facts, related notes, and provenance chips make it an inspector, not a map-first surface or second chat.
 - **Detail card** uses `{components.detail-card}` for selected item title, summary, quick facts, related route/hotel/driving notes, action chips, and source/provenance chips.
 - **Route card** uses `{components.route-card}` for day plans, route segments, hotel-area suggestions, and practical stop lists. Route cards should support a short title, distance/time if known, confidence/source summary, and a clear next step.
-- **Answer source chips** use confidence label colors. They summarize source category in the answer body: `Curated`, `Community`, `Official`, `Unverified`, `Partner`. Detailed URLs appear in expandable source detail rows.
+- **Answer trust disclosure** is a compact, specific sentence near the advice it qualifies, with an optional `Cần kiểm tra gì?` or `Xem nguồn tham khảo` trigger. Generic provenance categories, general-reasoning labels, and full source blocks stay hidden until explicitly opened. Detailed source rows remain derived from persisted provenance.
+- **Answer feedback** is a quiet footer action using compact positive/negative controls or equivalent accessible text buttons. It may reveal a short follow-up after negative feedback but never pushes the composer down with a full card.
 - **Image attachment row** appears only after a file is selected. It uses a compact thumbnail, filename or generic image label, size/status text, and an icon-only remove action with an accessible name. It must not look like an approved source chip.
 - **Streaming answer state** uses subtle pending treatment and normal answer typography; avoid flashy typewriter effects that reduce readability or conflict with reduced-motion settings.
-- **Freshness warning** uses `{components.freshness-warning}`. It must be compact and specific: `Giá/giờ mở cửa có thể thay đổi. Kiểm tra lại trước khi đi.`
+- **Freshness warning** uses `{components.freshness-warning}` only when a specific recommendation depends on changeable information. It must be compact and specific: `Giá/giờ mở cửa có thể thay đổi. Kiểm tra lại trước khi đi.` It is not a default header for every answer.
 - **Storage notice** is a low-friction inline callout near first AI Ask use. It should not look like an error. Use muted shadcn surface with one link to privacy/details.
 - **Delete confirmation** uses shadcn destructive dialog styling. The destructive action must name the object: `Xóa cuộc trò chuyện`, `Xóa dự án chuyến đi`.
 - **Admin knowledge card** uses map-paper card treatment plus structured metadata rows: title, type, route/location, source, collected date, confidence, freshness-sensitive flag, status.
@@ -292,7 +296,7 @@ Shape language is soft but not playful.
 
 | Do | Don't |
 |---|---|
-| Make source/confidence visible but progressively disclosed | Put long URLs and provenance blocks inline after every paragraph |
+| Make source/confidence visible but progressively disclosed | Put generic provenance blocks, general-reasoning labels, or large warnings in every answer |
 | Use green for primary route/action semantics | Use green to imply unverified facts are safe or guaranteed |
 | Keep Vietnamese text readable with generous line height | Compress chat answers into dense dashboards |
 | Use amber for guidance and freshness attention | Use amber as generic decoration |
@@ -302,6 +306,7 @@ Shape language is soft but not playful.
 | Make conversation history and trip projects visible in the left app shell | Force users to manage planning context only inside dropdowns |
 | Use familiar ChatGPT/Gemini navigation patterns selectively | Copy another product's visual identity or remove XuyenViet's travel trust cues |
 | Keep logged-in empty state centered and calm | Show an empty right detail panel before the user has asked anything |
+| Let the assistant recommend a saved trip when context makes it useful | Force a user to choose chat versus trip management before they can ask |
 | Use the right panel to explain selected answer entities | Make the right panel a map-first surface or a second chat thread |
 | Make saved plan state and AI proposals visually distinct | Let a suggested card resemble a confirmed itinerary item |
 | Use one Trip Home focus card before the timeline | Turn Trip Home into a dashboard grid of weather, budget, map, booking, and checklist widgets |

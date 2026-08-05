@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>XuyenViet - Trợ lý đồng hành chuyến đi</title>
+  <style>
+    /* Governing spine sections: Experience / Component Patterns (Assistant answer,
+       Trip recommendation, Chat composer); State Patterns (Trip creation recommendation);
+       Design / Components (Companion action, Answer trust disclosure). */
+    :root { --green:#14532d; --teal:#0f766e; --ink:#17342c; --muted:#64746d; --line:#dfe5df; --sidebar:#f7f7f3; --active:#e8f3ec; --paper:#fffdf8; }
+    * { box-sizing:border-box; }
+    body { margin:0; background:#fff; color:var(--ink); font:15px/1.58 Inter,ui-sans-serif,system-ui,sans-serif; }
+    button { font:inherit; cursor:pointer; }
+    .app { display:grid; grid-template-columns:264px minmax(0,1fr); min-height:100dvh; }
+    .sidebar { display:grid; grid-template-rows:auto auto 1fr auto; gap:18px; padding:15px 12px; border-right:1px solid var(--line); background:var(--sidebar); }
+    .brand { display:flex; align-items:center; gap:9px; padding:2px 4px; font-weight:800; letter-spacing:-.03em; }
+    .mark { display:grid; width:32px; height:32px; place-items:center; border-radius:11px; background:linear-gradient(135deg,var(--green),var(--teal)); color:#fff; font-size:12px; }
+    .ask { min-height:44px; border:0; border-radius:12px; background:var(--green); color:#fff; font-weight:750; }
+    .nav { overflow:auto; }
+    .label { margin:17px 7px 7px; color:var(--muted); font-size:11px; font-weight:800; letter-spacing:.08em; text-transform:uppercase; }
+    .row { display:block; padding:9px 10px; border:1px solid transparent; border-radius:11px; color:inherit; text-decoration:none; }
+    .row + .row { margin-top:3px; }
+    .row.active { border-color:#c8dfcf; background:var(--active); }
+    .row strong,.row span { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .row strong { font-size:13px; } .row span { color:var(--muted); font-size:11px; }
+    .row .status { color:var(--green); font-weight:700; }
+    .account { padding:10px 7px 2px; border-top:1px solid var(--line); color:var(--muted); font-size:12px; }
+    .chat { display:grid; grid-template-rows:auto minmax(0,1fr) auto; min-width:0; }
+    .topbar { display:flex; align-items:center; min-height:60px; padding:0 clamp(18px,4vw,46px); border-bottom:1px solid var(--line); }
+    .topbar strong { font-size:14px; } .topbar span { margin-left:8px; color:var(--muted); font-size:13px; }
+    .scroll { overflow:auto; padding:30px clamp(18px,5vw,72px) 22px; }
+    .thread { max-width:760px; margin:auto; }
+    .message-label { margin:20px 0 6px; color:var(--muted); font-size:11px; font-weight:800; letter-spacing:.08em; text-transform:uppercase; }
+    .user { max-width:430px; margin-left:auto; padding:12px 15px; border-radius:17px 17px 4px 17px; background:#eef1ef; color:#1b2e27; }
+    .assistant { max-width:680px; }
+    .assistant h1 { margin:0 0 10px; font-size:22px; line-height:1.25; letter-spacing:-.035em; }
+    .assistant p { margin:9px 0; }
+    .plan { margin:14px 0; padding-left:20px; } .plan li { margin:6px 0; }
+    .followups { display:flex; flex-wrap:wrap; gap:8px; margin:16px 0 3px; }
+    .reply { min-height:44px; padding:7px 12px; border:1px solid #bfd7c6; border-radius:999px; background:#fff; color:var(--green); font-size:13px; font-weight:700; }
+    .companion { margin:20px 0 10px; padding:15px 16px; border-left:3px solid var(--teal); background:var(--paper); }
+    .companion p { margin:0; } .companion strong { display:block; margin-bottom:4px; }
+    .actions { display:flex; flex-wrap:wrap; gap:8px; margin-top:13px; }
+    .primary,.secondary { min-height:44px; padding:8px 13px; border-radius:10px; font-size:13px; font-weight:750; }
+    .primary { border:1px solid var(--green); background:var(--green); color:#fff; }
+    .secondary { border:1px solid #cfd8d1; background:#fff; color:var(--ink); }
+    .verify { margin-top:18px; color:var(--muted); font-size:13px; }
+    .verify button { min-height:44px; padding:0 4px; border:0; background:none; color:var(--green); font-weight:750; text-decoration:underline; text-underline-offset:3px; }
+    .feedback { display:flex; gap:10px; margin-top:17px; }
+    .feedback button { min-height:44px; padding:0 4px; border:0; background:none; color:var(--muted); font-size:13px; }
+    .composer-wrap { padding:12px clamp(18px,5vw,72px) 18px; border-top:1px solid var(--line); background:#fff; }
+    .composer { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:10px; max-width:760px; margin:auto; padding:11px; border:1px solid #cfd8d1; border-radius:16px; background:#fff; box-shadow:0 8px 24px rgba(23,52,44,.06); }
+    textarea { min-height:42px; resize:none; border:0; outline:0; color:var(--ink); font:inherit; } .send { width:44px; height:44px; align-self:end; border:0; border-radius:11px; background:var(--green); color:#fff; font-weight:800; }
+    .composer-note { max-width:760px; margin:8px auto 0; color:var(--muted); font-size:12px; }
+    @media (max-width:720px) { .app { display:block; } .sidebar { display:none; } .scroll { padding:22px 16px; } .topbar { padding:0 16px; } .composer-wrap { padding:10px 16px calc(10px + env(safe-area-inset-bottom)); } .assistant h1 { font-size:20px; } }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar" aria-label="Điều hướng chính">
+      <div class="brand"><span class="mark">XV</span><span>XuyenViet</span></div>
+      <button class="ask" type="button">Hỏi XuyenViet</button>
+      <nav class="nav">
+        <p class="label">Chuyến đi của bạn</p>
+        <a class="row" href="#"><strong>Hè miền Trung</strong><span>Huế → Đà Nẵng · <b class="status">Cần xem 1 đề xuất</b></span></a>
+        <a class="row" href="#"><strong>Đà Lạt cuối tuần</strong><span>2-4/9 · Đang lên ý tưởng</span></a>
+        <p class="label">Cuộc trò chuyện gần đây</p>
+        <a class="row active" href="#"><strong>Hà Nội đến Huế 5 ngày</strong><span>Đang trò chuyện</span></a>
+        <a class="row" href="#"><strong>Ăn gì ở Hội An?</strong><span>Hỏi riêng</span></a>
+      </nav>
+      <div class="account">Tony · Tài khoản và quyền riêng tư</div>
+    </aside>
+    <main class="chat">
+      <header class="topbar"><strong>Hỏi XuyenViet</strong><span>Chưa lưu thành chuyến đi</span></header>
+      <section class="scroll" aria-label="Cuộc trò chuyện">
+        <div class="thread">
+          <p class="message-label">Bạn</p>
+          <div class="user">Nhà mình đi ô tô từ Hà Nội vào Huế 5 ngày, có bé 5 tuổi, muốn đi chậm và nghỉ nhiều.</div>
+          <p class="message-label">XuyenViet</p>
+          <article class="assistant">
+            <h1>Mình sẽ lên một nhịp đi thoải mái cho gia đình.</h1>
+            <p>Với bé 5 tuổi, mình nghiêng về việc chia quãng đường thành hai chặng lái chính để không phải ngồi xe quá lâu liên tục.</p>
+            <p><strong>Gợi ý ban đầu</strong></p>
+            <ul class="plan">
+              <li>Ngày 1: Hà Nội → Vinh hoặc khu vực lân cận.</li>
+              <li>Ngày 2: Đi tiếp vào Huế, thêm một điểm nghỉ phù hợp cho bé.</li>
+              <li>Ngày 3-4: Khám phá Huế với lịch nhẹ và linh hoạt.</li>
+              <li>Ngày 5: Dự phòng hoặc bắt đầu quay về.</li>
+            </ul>
+            <p>Để sát hơn, gia đình dự định đi vào khoảng thời gian nào?</p>
+            <div class="followups" aria-label="Gợi ý trả lời"><button class="reply" type="button">Đi cuối tháng 9</button><button class="reply" type="button">Đi đầu tháng 10</button></div>
+            <section class="companion" aria-label="Gợi ý lưu chuyến đi">
+              <strong>Mình có thể theo dõi chuyến này cùng bạn.</strong>
+              <p>Nếu lưu thành chuyến đi, mình sẽ nhớ các ưu tiên của gia đình và luôn đề xuất trước khi cập nhật kế hoạch.</p>
+              <div class="actions"><button class="primary" type="button">Lưu chuyến đi này</button><button class="secondary" type="button">Chưa cần</button></div>
+            </section>
+            <p class="verify">Giờ mở cửa, giá và tình trạng đường có thể thay đổi. <button type="button">Cần kiểm tra gì?</button></p>
+            <div class="feedback" aria-label="Đánh giá câu trả lời"><button type="button">Hữu ích</button><button type="button">Chưa đúng ý</button></div>
+          </article>
+        </div>
+      </section>
+      <div class="composer-wrap">
+        <form class="composer"><textarea aria-label="Hỏi thêm về chuyến đi" placeholder="Hỏi thêm về chuyến đi này..."></textarea><button class="send" type="submit" aria-label="Gửi câu hỏi">Gửi</button></form>
+        <p class="composer-note">Cứ nói tự nhiên, mình sẽ hỏi thêm khi cần.</p>
+      </div>
+    </main>
+  </div>
+</body>
+</html>
