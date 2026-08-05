@@ -8,6 +8,7 @@ import { answerUsefulnessFeedback, assistantResponseProvenance, conversations, m
 import { adminUserRosterPageSize, encodeAdminUserRosterCursor, evaluateSchemaAdmission, parsePlanningAnswerDetailResponse, planningDetailProvenanceLimit, type AdminAiGatewayModel, type AdminAiGatewayModelInput, type AdminAiGatewayModelUpdate, type PlanningJsonValue, type PlanningProvenance, type RequestPrincipal, type RequestRole, type SchemaCompatibilityDeclaration, type TravelerShellProjection, type TripAnswerContextResponse } from "@xuyenviet/contracts";
 import { createAiAskStreamExecutionPort } from "./ai-ask-stream-execution";
 import { discardAiAskCommandsForDeletedConversations } from "./ai-ask-commands";
+import { acceptTripCreationRecommendation, choosePrivateTripRecommendation, continueInTrip, declineTripCreationRecommendation, discardTripRecommendationAcceptancesForDeletedResources } from "./trip-recommendations";
 import { recordAuditEvent } from "./audit-writers";
 import { toUserAuditActor } from "./actors";
 import type { TravelerCommandPort } from "@xuyenviet/domain";
@@ -53,6 +54,7 @@ export * from "./admin-knowledge-coverage";
 export * from "./trip-plan-commands";
 export * from "./plan-references";
 export * from "./traveler-proposal-commands";
+export * from "./trip-recommendations";
 
 export type ApiIdentityRecord = {
   userId: string;
@@ -194,7 +196,8 @@ export function createPostgresTravelerCommandPort(): TravelerCommandPort {
               await transaction.update(tripProjects).set({ primaryConversationId: replacement.id, aggregateVersion: sql`${tripProjects.aggregateVersion} + 1`, updatedAt: new Date() }).where(eq(tripProjects.id, project.id));
              }
            }
-           await discardAiAskCommandsForDeletedConversations(transaction, userId, [conversation.id]);
+            await discardAiAskCommandsForDeletedConversations(transaction, userId, [conversation.id]);
+            await discardTripRecommendationAcceptancesForDeletedResources(transaction, userId, [conversation.id], []);
            await transaction.update(conversations).set({ lifecycleVersion: sql`${conversations.lifecycleVersion} + 1`, updatedAt: new Date() }).where(eq(conversations.id, conversation.id));
           const deleted = await transaction.delete(conversations).where(and(eq(conversations.id, conversation.id), eq(conversations.userId, userId))).returning({ id: conversations.id });
           if (deleted.length !== 1) return { success: false, reason: "not_found" } as const;
@@ -214,7 +217,8 @@ export function createPostgresTravelerCommandPort(): TravelerCommandPort {
           const linkedConversationCount = linkedConversations.length;
           await transaction.update(tripProjects).set({ primaryConversationId: null, aggregateVersion: sql`${tripProjects.aggregateVersion} + 1`, updatedAt: new Date() }).where(eq(tripProjects.id, project.id));
           await transaction.update(conversations).set({ lifecycleVersion: sql`${conversations.lifecycleVersion} + 1`, updatedAt: new Date() }).where(and(eq(conversations.tripProjectId, project.id), eq(conversations.userId, userId)));
-          await discardAiAskCommandsForDeletedConversations(transaction, userId, linkedConversations.map((conversation) => conversation.id));
+           await discardAiAskCommandsForDeletedConversations(transaction, userId, linkedConversations.map((conversation) => conversation.id));
+           await discardTripRecommendationAcceptancesForDeletedResources(transaction, userId, linkedConversations.map((conversation) => conversation.id), [project.id]);
           await transaction.delete(conversations).where(and(eq(conversations.tripProjectId, project.id), eq(conversations.userId, userId)));
           const deleted = await transaction.delete(tripProjects).where(and(eq(tripProjects.id, project.id), eq(tripProjects.userId, userId))).returning({ id: tripProjects.id });
           if (deleted.length !== 1) return { success: false, reason: "not_found" } as const;
@@ -245,6 +249,10 @@ export function createPostgresTravelerCommandPort(): TravelerCommandPort {
     async executeAnnotationProposalAction(userId, input) {
       try { const result = await import("./traveler-proposal-commands").then(({ executeAnnotationProposalAction }) => executeAnnotationProposalAction(userId, input)); return result.success ? "aggregateVersion" in result ? { success: true, aggregateVersion: result.aggregateVersion as number, proposalStatus: "applied" } : { success: true, proposalStatus: "dismissed" } : result; } catch { return { success: false, reason: "failed" }; }
     },
+    declineTripCreationRecommendation,
+    choosePrivateTripRecommendation,
+    continueInTrip,
+    acceptTripCreationRecommendation,
   };
 }
 

@@ -1,4 +1,4 @@
-import { conversationSummaryLimit, type AiAskStreamEvent, type AiAskStreamInput, type AnnotationProposalActionCommand, type AnnotationProposalActionResult, type ApplyTripChangeProposalResult, type ConversationSummary, type CreateTripProjectCommand, type CreateTripProjectResult, type DeleteOwnedResourceResult, type DismissTripChangeProposalResult, type PlanningAnswerDetailResponse, type RequestPrincipal, type SaveAnswerUsefulnessFeedbackCommand, type SaveAnswerUsefulnessFeedbackResult, type TripAnswerContextResponse, type TripChangeProposalCommand } from "@xuyenviet/contracts";
+import { conversationSummaryLimit, type AcceptTripCreationRecommendationCommand, type AcceptTripCreationRecommendationResult, type AiAskStreamEvent, type AiAskStreamInput, type AnnotationProposalActionCommand, type AnnotationProposalActionResult, type ApplyTripChangeProposalResult, type ContinueInTripCommand, type ContinueInTripResult, type ConversationSummary, type CreateTripProjectCommand, type CreateTripProjectResult, type DeleteOwnedResourceResult, type DismissTripChangeProposalResult, type PlanningAnswerDetailResponse, type RecommendationActionResult, type RecommendationDecisionCommand, type RequestPrincipal, type SaveAnswerUsefulnessFeedbackCommand, type SaveAnswerUsefulnessFeedbackResult, type TripAnswerContextResponse, type TripChangeProposalCommand, type TripRecommendationResponse } from "@xuyenviet/contracts";
 
 export type ConversationSummaryRepository = {
   listOwnedConversationSummaryRows(userId: string, limit: number): Promise<Array<{ id: string; updatedAt: Date; messageContent: string | null }>>;
@@ -9,6 +9,7 @@ export type PlanningReadRepository = {
   loadOwnedPlanningContext(userId: string, tripProjectId: string): Promise<TripAnswerContextResponse | null>;
   loadOwnedAnswerDetail(userId: string, conversationId: string, assistantMessageId: string): Promise<PlanningAnswerDetailResponse["detail"]>;
 };
+export type TripRecommendationReadRepository = { loadOwnedTripRecommendations(userId: string, conversationId: string): Promise<TripRecommendationResponse> };
 
 /** The HTTP adapter supplies the admitted principal; this port never reads a cookie. */
 export type TravelerCommandPort = {
@@ -19,6 +20,10 @@ export type TravelerCommandPort = {
   applyTripChangeProposal(userId: string, input: TripChangeProposalCommand): Promise<ApplyTripChangeProposalResult>;
   dismissTripChangeProposal(userId: string, input: TripChangeProposalCommand): Promise<DismissTripChangeProposalResult>;
   executeAnnotationProposalAction(userId: string, input: AnnotationProposalActionCommand): Promise<AnnotationProposalActionResult>;
+  declineTripCreationRecommendation(userId: string, input: RecommendationDecisionCommand): Promise<RecommendationActionResult>;
+  choosePrivateTripRecommendation(userId: string, input: RecommendationDecisionCommand): Promise<RecommendationActionResult>;
+  continueInTrip(userId: string, input: ContinueInTripCommand): Promise<ContinueInTripResult>;
+  acceptTripCreationRecommendation(userId: string, input: AcceptTripCreationRecommendationCommand): Promise<AcceptTripCreationRecommendationResult>;
 };
 
 export * from "./planning-detail";

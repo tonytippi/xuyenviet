@@ -201,6 +201,8 @@ export type ChatContextScope = (typeof chatContextScopeValues)[number];
 
 export const chatContextStatusValues = ["active", "deleted"] as const;
 export type ChatContextStatus = (typeof chatContextStatusValues)[number];
+export const tripRecommendationDecisionKindValues = ["creation", "context"] as const;
+export type TripRecommendationDecisionKind = (typeof tripRecommendationDecisionKindValues)[number];
 
 export const tripPlanItemKindValues = ["anchor", "leg", "activity"] as const;
 export type TripPlanItemKind = (typeof tripPlanItemKindValues)[number];
@@ -1204,6 +1206,15 @@ export const chatContext = pgTable(
     ),
   ],
 );
+
+export const tripRecommendationContexts = pgTable("trip_recommendation_contexts", {
+  userId: text("user_id").notNull(), conversationId: text("conversation_id").notNull(), revision: integer("revision").notNull(), fingerprint: text("fingerprint").notNull(), updatedAt: timestamp("updated_at", { mode: "date" }).defaultNow().notNull(),
+}, (row) => [primaryKey({ columns: [row.userId, row.conversationId] }), foreignKey({ columns: [row.conversationId, row.userId], foreignColumns: [conversations.id, conversations.userId], name: "trip_recommendation_contexts_owner_fk" }).onDelete("cascade"), check("trip_recommendation_contexts_revision_check", sql`${row.revision} >= 1`), check("trip_recommendation_contexts_fingerprint_check", sql`${row.fingerprint} ~ '^[a-f0-9]{64}$'`)]);
+export const tripRecommendationDecisions = pgTable("trip_recommendation_decisions", {
+  id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()), userId: text("user_id").notNull(), conversationId: text("conversation_id").notNull(), kind: text("kind").$type<TripRecommendationDecisionKind>().notNull(), contextRevision: integer("context_revision").notNull(), contextFingerprint: text("context_fingerprint").notNull(), candidateTripProjectId: text("candidate_trip_project_id"), status: text("status").default("open").notNull(), createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(), consumedAt: timestamp("consumed_at", { mode: "date" }),
+}, (row) => [foreignKey({ columns: [row.conversationId, row.userId], foreignColumns: [conversations.id, conversations.userId], name: "trip_recommendation_decisions_owner_fk" }).onDelete("cascade"), foreignKey({ columns: [row.candidateTripProjectId, row.userId], foreignColumns: [tripProjects.id, tripProjects.userId], name: "trip_recommendation_decisions_candidate_owner_fk" }).onDelete("cascade"), index("trip_recommendation_decisions_owner_conversation_idx").on(row.userId, row.conversationId, row.status), check("trip_recommendation_decisions_kind_check", sql`${row.kind} in ('creation', 'context')`), check("trip_recommendation_decisions_revision_check", sql`${row.contextRevision} >= 1`), check("trip_recommendation_decisions_fingerprint_check", sql`${row.contextFingerprint} ~ '^[a-f0-9]{64}$'`), check("trip_recommendation_decisions_status_check", sql`${row.status} in ('open', 'consumed', 'declined', 'private')`)]);
+export const tripRecommendationDeclines = pgTable("trip_recommendation_declines", { userId: text("user_id").notNull(), conversationId: text("conversation_id").notNull(), contextRevision: integer("context_revision").notNull(), fingerprint: text("fingerprint").notNull(), createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull() }, (row) => [primaryKey({ columns: [row.userId, row.conversationId, row.contextRevision] }), foreignKey({ columns: [row.conversationId, row.userId], foreignColumns: [conversations.id, conversations.userId], name: "trip_recommendation_declines_owner_fk" }).onDelete("cascade"), check("trip_recommendation_declines_revision_check", sql`${row.contextRevision} >= 1`), check("trip_recommendation_declines_fingerprint_check", sql`${row.fingerprint} ~ '^[a-f0-9]{64}$'`)]);
+export const tripRecommendationAcceptances = pgTable("trip_recommendation_acceptances", { userId: text("user_id").notNull(), idempotencyKey: text("idempotency_key").notNull(), requestDigest: text("request_digest").notNull(), decisionId: text("decision_id"), terminalResult: jsonb("terminal_result").$type<Record<string, unknown>>().notNull(), createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull() }, (row) => [primaryKey({ columns: [row.userId, row.idempotencyKey] }), check("trip_recommendation_acceptances_key_check", sql`${row.idempotencyKey} ~ '^[A-Za-z0-9_-]{16,128}$'`), check("trip_recommendation_acceptances_digest_check", sql`${row.requestDigest} ~ '^[a-f0-9]{64}$'`)]);
 
 export const aiGatewayModels = pgTable(
   "ai_gateway_models",

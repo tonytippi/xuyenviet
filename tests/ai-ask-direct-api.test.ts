@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 
-import { loadTravelerShell, submitDirectAiAskStream } from "../apps/web/src/features/ai/direct-api-client";
+import { acceptDirectTripCreationRecommendation, declineDirectTripCreationRecommendation, loadTravelerShell, submitDirectAiAskStream } from "../apps/web/src/features/ai/direct-api-client";
 
 describe("direct traveler API client", () => {
   afterEach(() => { vi.unstubAllGlobals(); });
@@ -37,6 +37,17 @@ describe("direct traveler API client", () => {
     const events = await submitDirectAiAskStream({ question: "Đi đâu?", image: null, idempotencyKey: "a".repeat(16), onPreparing: () => undefined, onDelta: () => undefined });
     expect(events.map((event) => event.type)).toEqual(["preparing", "done"]);
     expect(fetch).toHaveBeenLastCalledWith("/v1/ai-ask/stream", expect.objectContaining({ credentials: "include", headers: expect.objectContaining({ "X-XuyenViet-CSRF": "a".repeat(43), "Idempotency-Key": "a".repeat(16) }) }));
+  });
+
+  test("forwards Idempotency-Key only for accepted trip creation", async () => {
+    const fetch = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ success: true }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ success: true, destination: { tripProjectId: "project-1", conversationId: "conversation-1" } }), { status: 200 }));
+    vi.stubGlobal("fetch", fetch);
+    await expect(declineDirectTripCreationRecommendation({ decisionId: "decision-1" })).resolves.toEqual({ success: true });
+    await expect(acceptDirectTripCreationRecommendation("decision-2", "a".repeat(16))).resolves.toEqual({ success: true, destination: { tripProjectId: "project-1", conversationId: "conversation-1" } });
+    expect(fetch.mock.calls[0]![1]).toEqual(expect.objectContaining({ headers: expect.not.objectContaining({ "Idempotency-Key": expect.anything() }) }));
+    expect(fetch.mock.calls[1]![1]).toEqual(expect.objectContaining({ headers: expect.objectContaining({ "Idempotency-Key": "a".repeat(16) }) }));
   });
 
   test("accepts the persisted terminal answer with provenance", async () => {
