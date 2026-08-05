@@ -63,7 +63,7 @@ export type ApiIdentityRecord = {
 export interface ApiIdentityRepository {
   getSession(sessionId: string): Promise<ApiIdentityRecord | null>;
 }
-export type BrowserIdentity = ApiIdentityRecord & { roles: RequestRole[]; csrfHash: string; sessionId: string };
+export type BrowserIdentity = ApiIdentityRecord & { roles: RequestRole[]; csrfHash: string; sessionId: string; name: string | null; email: string | null };
 export type BrowserOAuthTransaction = { id: string; state: string; codeVerifier: string; returnUrl: string; referralCode?: string | null; expires: Date };
 export class BrowserGoogleAccountConflictError extends Error {}
 export interface BrowserIdentityRepository extends ApiIdentityRepository {
@@ -71,6 +71,7 @@ export interface BrowserIdentityRepository extends ApiIdentityRepository {
   createBrowserOAuthTransaction(transaction: BrowserOAuthTransaction): Promise<void>;
   consumeBrowserOAuthTransaction(id: string, state: string): Promise<BrowserOAuthTransaction | null>;
   resolveOrCreateBrowserGoogleUser(subject: string, email: string, name: string | null, image: string | null, referralCode: string | null): Promise<{ userId: string; authorizationVersion: number }>;
+  ensureBrowserUserAdmin(userId: string): Promise<number>;
   createBrowserSession(userId: string, sessionId: string, csrfHash: string, authorizationVersion: number, expires: Date): Promise<void>;
   getBrowserSession(sessionId: string): Promise<BrowserIdentity | null>;
   getBrowserLogoutCsrfHash(sessionId: string): Promise<string | null>;
@@ -347,9 +348,20 @@ export function createPostgresApiIdentityRepository(databaseUrl: string, browser
       });
       return rows[0]!;
     },
+    async ensureBrowserUserAdmin(userId) {
+      const rows = await sql.begin(async (transaction) => {
+        const user = await transaction<{ authorizationVersion: number }[]>`select authorization_version as "authorizationVersion" from users where id = ${userId} for update`;
+        if (!user[0]) throw new Error("Browser user not found.");
+        const granted = await transaction`insert into user_roles (user_id, role) values (${userId}, 'admin') on conflict do nothing returning user_id`;
+        if (!granted.length) return user[0].authorizationVersion;
+        const updated = await transaction<{ authorizationVersion: number }[]>`update users set authorization_version = authorization_version + 1 where id = ${userId} returning authorization_version as "authorizationVersion"`;
+        return updated[0]!.authorizationVersion;
+      });
+      return rows;
+    },
     async createBrowserSession(userId, sessionId, csrfHash, authorizationVersion, expires) { await sql`insert into browser_sessions (session_lookup_hash, user_id, csrf_hash, authorization_version, expires) values (${browserLookupHash(sessionId)}, ${userId}, ${csrfHash}, ${authorizationVersion}, ${expires})`; },
     async getBrowserSession(sessionId) {
-      const rows = await sql<Array<BrowserIdentity>>`select browser_sessions.user_id as "userId", browser_sessions.csrf_hash as "csrfHash", browser_sessions.expires, browser_sessions.authorization_version as "authorizationVersion", coalesce(array_agg(user_roles.role order by user_roles.role) filter (where user_roles.role is not null), '{}') as roles from browser_sessions join users on users.id = browser_sessions.user_id left join user_roles on user_roles.user_id = users.id where browser_sessions.session_lookup_hash = ${browserLookupHash(sessionId)} and browser_sessions.revoked_at is null and browser_sessions.authorization_version = users.authorization_version group by browser_sessions.user_id, browser_sessions.csrf_hash, browser_sessions.expires, browser_sessions.authorization_version`;
+      const rows = await sql<Array<BrowserIdentity>>`select browser_sessions.user_id as "userId", browser_sessions.csrf_hash as "csrfHash", browser_sessions.expires, browser_sessions.authorization_version as "authorizationVersion", users.name, users.email, coalesce(array_agg(user_roles.role order by user_roles.role) filter (where user_roles.role is not null), '{}') as roles from browser_sessions join users on users.id = browser_sessions.user_id left join user_roles on user_roles.user_id = users.id where browser_sessions.session_lookup_hash = ${browserLookupHash(sessionId)} and browser_sessions.revoked_at is null and browser_sessions.authorization_version = users.authorization_version group by browser_sessions.user_id, browser_sessions.csrf_hash, browser_sessions.expires, browser_sessions.authorization_version, users.name, users.email`;
       return rows[0] ? { ...rows[0], sessionId } : null;
     },
     async getBrowserLogoutCsrfHash(sessionId) {

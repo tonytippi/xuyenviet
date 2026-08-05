@@ -67,9 +67,11 @@ export class BrowserIdentityController {
        if (isRetryableGoogleResponse(profileResponse)) throw new ServiceUnavailableException({ code: "internal_error" });
       const profile = await profileResponse.json().catch(() => null) as { sub?: unknown; email?: unknown; email_verified?: unknown; name?: unknown; picture?: unknown } | null;
       if (!profileResponse.ok || !nonEmpty(profile?.sub) || !nonEmpty(profile?.email) || profile.email_verified !== true) throw this.denied();
-       const user = await this.identities.resolveOrCreateBrowserGoogleUser(profile.sub, profile.email.trim().toLowerCase(), stringOrNull(profile.name), stringOrNull(profile.picture), transaction.referralCode ?? null);
-      const sessionId = randomBytes(48).toString("base64url"); const csrfToken = csrfNonce(config, sessionId); const expires = new Date(Date.now() + sessionLifetimeMs);
-      await this.identities.createBrowserSession(user.userId, sessionId, csrfHash(config, sessionId, csrfToken), user.authorizationVersion, expires);
+       const email = profile.email.trim().toLowerCase();
+       const user = await this.identities.resolveOrCreateBrowserGoogleUser(profile.sub, email, stringOrNull(profile.name), stringOrNull(profile.picture), transaction.referralCode ?? null);
+       const authorizationVersion = isBootstrapAdminEmail(email) ? await this.identities.ensureBrowserUserAdmin(user.userId) : user.authorizationVersion;
+       const sessionId = randomBytes(48).toString("base64url"); const csrfToken = csrfNonce(config, sessionId); const expires = new Date(Date.now() + sessionLifetimeMs);
+       await this.identities.createBrowserSession(user.userId, sessionId, csrfHash(config, sessionId, csrfToken), authorizationVersion, expires);
       setSessionCookie(response, config, sessionId, expires);
       response.redirect(transaction.returnUrl);
     } catch (error) {
@@ -84,6 +86,11 @@ export class BrowserIdentityController {
     const sessionId = cookieValue(cookie, config.cookieName);
     if (!sessionId || principal.sessionId !== sessionId) throw this.denied();
     return { csrfToken: csrfNonce(config, sessionId) };
+  }
+
+  @Get("session")
+  session(@Principal() principal: RequestPrincipal) {
+    return { account: { name: principal.name ?? null, email: principal.email ?? null } };
   }
 
   @Post("logout")
@@ -114,5 +121,6 @@ function parseState(value: string | undefined): { id: string; state: string } | 
 function nonEmpty(value: unknown): value is string { return typeof value === "string" && value.trim().length > 0; }
 function stringOrNull(value: unknown): string | null { return typeof value === "string" && value.trim() ? value.trim().slice(0, 512) : null; }
 function normalizeReferralCode(value: string | undefined): string | null { const code = value?.trim().toUpperCase(); return code && /^[A-Z0-9][A-Z0-9_-]{1,63}$/.test(code) ? code : null; }
+function isBootstrapAdminEmail(email: string): boolean { return process.env.ADMIN_EMAIL?.trim().toLowerCase() === email; }
 function isRetryableGoogleResponse(response: Response): boolean { return response.status === 429 || response.status >= 500; }
 async function googleRequest(url: string, init: RequestInit): Promise<Response> { const controller = new AbortController(); const timeout = setTimeout(() => controller.abort(), 5_000); try { return await fetch(url, { ...init, signal: controller.signal }); } finally { clearTimeout(timeout); } }

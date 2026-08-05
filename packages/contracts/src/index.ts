@@ -6,6 +6,8 @@ export type RequestPrincipal = {
   sessionId: string;
   roles: RequestRole[];
   authorizationVersion: number;
+  name?: string | null;
+  email?: string | null;
 };
 
 export const adminCapabilities = ["admin.workspace.read", "admin.role.governance", "admin.ai-model-catalog.write", "admin.knowledge.write"] as const;
