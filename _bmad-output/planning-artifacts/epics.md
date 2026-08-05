@@ -20,6 +20,10 @@ stepsCompleted:
   - step-02-knowledge-lifecycle-normalization-2026-08-04-epic-design
   - step-03-knowledge-lifecycle-normalization-2026-08-04-story-generation
   - step-04-knowledge-lifecycle-normalization-2026-08-04-final-validation
+  - step-01-epic-16-requirements-extraction
+  - step-02-epic-16-design
+  - step-03-epic-16-story-generation
+  - step-04-epic-16-final-validation
 inputDocuments:
   - _bmad-output/planning-artifacts/prds/prd-xuyenviet-2026-07-04/prd.md
   - _bmad-output/planning-artifacts/architecture/architecture-xuyenviet-2026-07-04/ARCHITECTURE-SPINE.md
@@ -28,6 +32,7 @@ inputDocuments:
   - _bmad-output/project-context.md
   - _bmad-output/planning-artifacts/proposal-eliminate-fake-system-users-with-audit-actors.md
   - _bmad-output/planning-artifacts/knowledge-lifecycle-normalization-2026-08-05.md
+  - _bmad-output/planning-artifacts/implementation-readiness-report-2026-08-05.md
 ---
 
 # xuyenviet - Epic Breakdown
@@ -492,7 +497,7 @@ Travelers begin with one natural-language question, receive calm practical guida
 
 **FRs covered:** FR-7, FR-16J, FR-16K, FR-16L, FR-32, FR-33, FR-46, FR-46A. **UX requirements covered:** UX-DR14, UX-DR18, UX-DR25. **Architecture decisions covered:** AD-11, AD-30A, AD-30B.
 
-**Implementation notes:** Implement in vertical slices: simplify answer/provenance/feedback presentation; add typed, owner-scoped creation and existing-trip recommendations with persisted decline fencing; make scope switching explicit and URL-owned; then revise sidebar, composer, Trip Workspace, and proposal decision language. Persisted provenance, authorization, one-primary-conversation rules, explicit proposal application, and owner-scoping remain unchanged. The traveler web client never parses answer prose to infer a recommendation, provenance, risk, or mutation, and it never renders technical states, codes, categories, diagnostics, or provider/model information.
+**Implementation notes:** Implement in vertical slices: simplify answer/provenance/feedback presentation; add typed, owner-scoped creation and existing-trip recommendations with persisted decline fencing; make scope switching explicit and URL-owned; then revise sidebar, composer, Trip Workspace, and proposal decision language. Chat/Trips alone calculates context revision/fingerprint, re-offer eligibility, and typed owner-scoped recommendation decisions; the browser does not infer them. Rendered AI prose never creates an action, a Trip Project, a context attachment, or a scope change: only a persisted typed server decision can render recommendation controls. A recommendation appears only after useful guidance and durable context. Accepting it is idempotent and revalidates owner, conversation, and context revision; stale decisions cannot create or attach a project. When a question uses a Trip Project, the header and composer visibly identify it in traveler language, for example `Đang lên kế hoạch cho: Hè miền Trung`. The existing `Hỏi XuyenViet` new-chat action is the primary explicit way to ask outside that Trip Project, and the existing trip-project sidebar list is the primary way to switch projects; do not add persistent scope-action buttons to the composer. Default unscoped chat has no technical scope label. A private-answer choice in a typed recommendation neither loads, uses, nor persists a selected Trip Project's constraints, leaves URL scope unchanged, and does not link conversations; it may confirm the current-turn effect briefly without creating a persistent "private" mode. UI may show only a pending selection state; URL-selected server shell state becomes canonical after owner and primary-conversation validation. Switching opens only the selected owned project's existing primary conversation; stale, deleted, or unauthorized resources reconcile to the safe server shell. Tests prove private-answer source bundles, persisted provenance, and context updates contain no selected Trip Project constraints, and ordinary conversations are never copied, merged, or linked into a Trip Project. Recommendations and trust disclosures must not steal composer focus; their keyboard, focus restoration, live-region, mobile-target, and reduced-motion behavior is independently verified. Persisted provenance, authorization, one-primary-conversation rules, explicit proposal application, and owner-scoping remain unchanged. The traveler web client never parses answer prose to infer a recommendation, provenance, risk, or mutation, and it never renders technical states, codes, categories, diagnostics, or provider/model information.
 
 ## Epic 1: Trusted Entry And Planning Workspace Access
 
@@ -2122,4 +2127,140 @@ So that the clean-break migration remains safe as the pipeline evolves.
 **Given** the epic is complete
 **When** verification runs
 **Then** focused tests, `pnpm test:unit`, `pnpm test:integration`, `pnpm lint`, `pnpm typecheck`, `pnpm build`, and `pnpm exec drizzle-kit check` are run
+**And** any environmental blocker is recorded exactly in the implementation artifact.
+
+## Epic 16: Chat-First Trip Companion Simplification
+
+Travelers begin with one natural-language question, receive calm practical guidance without technical product language, and explicitly choose when a durable Trip Project should save or supply context. Trust and recovery information remains safe and available, but appears as plain-language, decision-oriented disclosure rather than system/provenance/status UI.
+
+### Story 16.1: Recommend and Save Trip Projects Through Typed Owner Decisions
+
+As a traveler,
+I want XuyenViet to offer a saved Trip Project only when it is useful and let me decide what to do,
+So that I can begin with a natural question without an automatic project or unwanted reuse of another trip's details.
+
+**Acceptance Criteria:**
+
+**Given** an authenticated traveler asks in an unscoped conversation
+**When** Chat/Trips evaluates the current conversation's server-calculated context revision and fingerprint
+**Then** it returns only a typed owner-bound `trip_creation_recommendation` of `none`, `clarify`, or `offer` and a typed owner-bound `trip_context_recommendation` of `none`, `clarify`, `single`, or `multiple` when applicable
+**And** the browser neither calculates material context change nor decides whether a recommendation may be offered again.
+
+**Given** a typed recommendation is actionable
+**When** the traveler UI renders it after useful guidance and durable context exist
+**Then** it offers only the server-projected explicit choices appropriate to that decision, such as saving a new trip, continuing in an owned trip, or receiving only the current answer
+**And** rendered assistant prose, local storage, or parsed answer text cannot create a recommendation control, Trip Project, context attachment, or scope change.
+
+**Given** a traveler declines a creation recommendation
+**When** Chat/Trips records the decision
+**Then** it persists a decline fence for that owner, conversation, and context revision
+**And** the service does not re-offer creation until server-calculated material context changes or the traveler explicitly asks to save.
+
+**Given** a traveler accepts a creation recommendation
+**When** `acceptTripCreationRecommendation(...)` receives a valid idempotent request
+**Then** it revalidates the authenticated owner, current conversation, decision binding, and context revision before atomically creating the Trip Project and its primary conversation
+**And** a stale, consumed, foreign-owner, deleted-conversation, or changed-context decision creates and attaches nothing.
+
+**Given** an unscoped answer offers an existing Trip Project or a private-answer choice
+**When** the traveler chooses the existing project or private answer
+**Then** existing-project candidates have been queried owner-scoped and no other owner's project existence, title, route, metadata, or match score is exposed
+**And** a private answer neither loads, uses, nor persists selected Trip Project constraints for that turn and leaves URL-selected scope unchanged.
+
+### Story 16.2: Preserve Explicit Trip Scope in the Planning Shell
+
+As a traveler,
+I want the planning shell to show when I am working on a named trip and let the established navigation change that trip,
+So that I understand when a saved plan affects my question without learning internal context terminology or managing extra composer controls.
+
+**Acceptance Criteria:**
+
+**Given** the URL-selected shell is scoped to an owned Trip Project
+**When** its header and composer render on desktop, tablet, or mobile
+**Then** they visibly identify the project in traveler language, for example `Đang lên kế hoạch cho: Hè miền Trung`
+**And** unscoped chat renders no technical scope/context label.
+
+**Given** a traveler uses the existing `Hỏi XuyenViet` action from a project-scoped workspace
+**When** the new chat route is selected
+**Then** it starts an unscoped ordinary conversation without silently carrying project constraints forward
+**And** the composer does not gain persistent scope-action buttons.
+
+**Given** a traveler selects an owned Trip Project from the existing sidebar or accepts a typed continue-in-trip recommendation
+**When** Chat/Trips validates the selection
+**Then** the URL scope changes only to that project's existing primary conversation
+**And** the ordinary conversation is not copied, merged, linked, or replayed into the Trip Project.
+
+**Given** a scope selection is in flight
+**When** the browser updates the workspace
+**Then** it may show a pending state only
+**And** URL-selected server shell data becomes canonical only after owner and primary-conversation validation succeeds.
+
+**Given** the selected project or primary conversation is stale, deleted, unlinked, or unauthorized
+**When** the server resolves the route or command
+**Then** the client clears the invalid local selection, reconciles to the safe server shell, and returns focus to the originating control or composer as appropriate
+**And** it presents a practical Vietnamese recovery message without leaking resource existence or technical details.
+
+### Story 16.3: Present Practical Vietnamese Answer, Trust, and Recovery States
+
+As a traveler,
+I want answers, verification guidance, feedback, and recovery states expressed in clear practical Vietnamese,
+So that I can act on travel guidance without seeing product internals or being pulled away from the conversation.
+
+**Acceptance Criteria:**
+
+**Given** a persisted assistant answer is displayed
+**When** it contains plan/options, rationale, practical tips, changing-detail guidance, or a next step
+**Then** the default reading path is a calm scannable Vietnamese conversation with relevant section chips and no mandatory outer answer card
+**And** generic provenance, confidence, source-category, retrieval, reasoning, audit, processing, provider, model, request-ID, error-code, or diagnostic UI is absent.
+
+**Given** persisted provenance shows a traveler-relevant verification need or safe source detail
+**When** the answer or selected descriptor renders a disclosure
+**Then** it uses a compact nearby plain-language explanation and an optional action-oriented trigger such as `Cần kiểm tra gì?` or `Xem nguồn tham khảo`
+**And** the detail view resolves only stored traveler-safe provenance projections, never raw source material or answer-prose inference.
+
+**Given** the traveler encounters loading, streaming completion, unavailable detail, verification guidance, provider failure, stale planning state, or a retryable command failure
+**When** the state is projected to the traveler
+**Then** it states the practical situation and the permitted recovery action in Vietnamese
+**And** it never renders machine-state discriminators, provider/model names, source/provenance taxonomy, confidence codes, internal status/job/consumer names, request IDs, error codes, or diagnostics.
+
+**Given** a feedback control, typed trip recommendation, verification disclosure, or recovery action is rendered
+**When** the traveler uses keyboard, touch, or assistive technology
+**Then** it has an accessible name, visible focus, appropriate `aria-live` announcement where state changes, and a mobile target of at least 44px
+**And** it does not steal focus from or create a persistent card that displaces the composer.
+
+**Given** an answer, source detail, proposal, or sheet is closed or reaches a terminal action
+**When** focus returns to the conversation
+**Then** it returns predictably to the initiating control or relevant composer state
+**And** reduced-motion preferences suppress non-essential reveal, sheet, and toast transitions.
+
+### Story 16.4: Prove Chat-First Scope, Trust, and Accessibility Boundaries
+
+As a product owner,
+I want executable evidence for the chat-first companion boundaries,
+So that convenience improvements cannot silently weaken traveler control, owner isolation, trust safety, or accessibility.
+
+**Acceptance Criteria:**
+
+**Given** unit and integration tests exercise typed trip recommendations
+**When** they cover no-match, ambiguous match, single/multiple owned matches, accept retry, decline, explicit save, stale decision, changed context revision, deleted conversation, and cross-owner inputs
+**Then** only valid owner-bound decisions create or select a Trip Project
+**And** no client-derived material-change decision, rendered prose, or stale decision can create, attach, or expose a project.
+
+**Given** tests exercise private-answer and selected-project paths for the same traveler
+**When** source bundles, persisted provenance, context updates, and URL selection are inspected
+**Then** a private-answer turn contains no selected Trip Project constraints and leaves its URL scope unchanged
+**And** a selected-project turn uses only the chosen owned project's existing primary conversation without copying, merging, linking, or replaying ordinary conversations.
+
+**Given** UI and contract tests exercise traveler answer/trust/recovery projections
+**When** persisted source details, missing details, verification needs, streaming/retry outcomes, and safe failures render
+**Then** each projection uses approved Vietnamese copy and allowed recovery actions
+**And** no traveler-visible text exposes technical state names, taxonomy, confidence codes, provider/model information, request IDs, error codes, diagnostics, raw source material, or inferred provenance.
+
+**Given** responsive accessibility tests exercise recommendation, sidebar/project selection, disclosure, feedback, sheet, and composer flows
+**When** keyboard, focus restoration, `aria-live`, touch target, and reduced-motion behaviors are evaluated on desktop and mobile layouts
+**Then** the same server-loaded URL-owned shell model remains authoritative across breakpoints
+**And** no interactive state traps focus, hides a selected project, or creates a second loader or client persistence owner.
+
+**Given** this epic's implementation is complete
+**When** focused verification runs
+**Then** the applicable unit and serial integration tests, `pnpm lint`, `pnpm typecheck`, and `pnpm build` pass
 **And** any environmental blocker is recorded exactly in the implementation artifact.
