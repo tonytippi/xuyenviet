@@ -4,7 +4,7 @@ baseline_commit: e0173d0
 
 # Story 16.2: Preserve Explicit Trip Scope in the Planning Shell
 
-Status: review
+Status: done
 
 ## Story
 
@@ -88,6 +88,21 @@ so that I understand when a saved plan affects my question without learning inte
   - [x] Add focused shell/navigation coverage for `Hỏi XuyenViet` clearing both URL scope values, no project-constraint carryover, typed continue destination navigation, private-answer URL preservation, accepted-creation idempotency lifecycle, pending selection, stale recovery, and concrete focus intent.
   - [x] Include source-level or existing-compatible UI assertions for no persistent composer project selector, selected-trip traveler-language labels, absent unscoped technical label, shared desktop/mobile data flow, keyboard active state, and mobile selection focus transfer. Do not introduce a broad new UI test framework solely for this story.
   - [x] Run focused unit tests, serial integration tests, `pnpm lint`, `pnpm typecheck`, `pnpm build`, and `git diff --check`. Record exact environment blockers rather than claiming unrun verification.
+
+### Review Findings
+
+- [x] [Review][Patch] Route transition leaves the old composer interactive [apps/web/src/features/chat-trips/direct-shell-loader.tsx:14-16]
+  - When a user selects a Trip Project, `router.push` changes the URL immediately, but the loader continues to render its previous shell until the new request resolves. The old composer can therefore submit an AI turn with the old unscoped `conversationId` while the browser URL names the project. Start each load in a pending state that prevents interaction with the previous shell, and add a regression for attempting to submit during scope navigation. Violates AC 4's pending-only/canonical-shell requirement.
+- [x] [Review][Patch] Stale recommendation failures do not reconcile the shell [apps/web/src/features/ai/ai-ask-composer.tsx:1633]
+  - A typed `continue` decision can fail after its selected project or primary conversation becomes stale. The catch path only displays a generic status and re-enables the same stale controls. Clear the recommendation and refresh/reconcile the current server shell on terminal command failures so stale options cannot be repeatedly submitted. Violates AC 5's safe stale-resource recovery.
+- [x] [Review][Patch] Trip creation accepts concurrent duplicate submissions [apps/web/src/features/ai/ai-ask-composer.tsx:1604]
+  - `handleCreateTripProject` has no synchronous in-flight guard. After confirming a first prompt, a second click can submit another create request before the first resolves, creating a second project and primary conversation. Add a creation in-flight ref/state, disable management controls while it is set, and clear it in `finally`.
+- [x] [Review][Patch] Trip deletion can race itself and report a false failure [apps/web/src/features/ai/ai-ask-composer.tsx:1619]
+  - Unlike conversation deletion, project deletion no longer uses `deletingTripProjectIdRef`. Two confirmations can issue two deletes; a late `not_found` response can overwrite the successful deletion status. Restore synchronous deduplication, disable the relevant controls, and reconcile stale/not-found deletion results to the safe shell.
+- [x] [Review][Patch] Desktop post-navigation focus targets a hidden heading [apps/web/src/features/ai/ai-ask-composer.tsx:884]
+  - `mainHeadingRef` is attached to the `lg:hidden` mobile heading. Desktop project selection, creation, and recommendation navigation focus that hidden node rather than an available heading or composer. Select the heading only when visible, otherwise move focus to `textareaRef`, and cover the desktop branch. Violates the AC 5 focus requirement.
+- [x] [Review][Patch] Sidebar response parser accepts duplicate project identities [packages/contracts/src/index.ts:973]
+  - `parseTripProjectSidebarListResponse` accepts duplicate project IDs, which become duplicate React keys and can pair one visible project with inconsistent canonical conversation destinations. Reject duplicate project IDs before returning the parsed rows.
 
 ## Dev Notes
 
@@ -188,6 +203,7 @@ gpt-5.6-terra
 - Final recovery implementation: create/delete controls now live in desktop/sidebar and mobile navigation only; create atomically assigns the initial primary conversation; stale scoped shell resolution clears to `/ai-ask` and supplies a generic Vietnamese notice with composer focus intent. Source-level regression verifies these boundaries.
 - Final verification passed: `pnpm test:unit -- tests/direct-shell-proposal-actions.test.ts` (218 tests), `pnpm test:integration -- tests/trip-recommendations-api.integration.test.ts` (435 tests), `pnpm lint` (0 errors; 45 pre-existing warnings), `pnpm typecheck`, `pnpm build`, and `git diff --check`.
 - Checklist reconciliation completed: all ACs and subtasks have implementation and regression evidence. A late audit moved the selected-trip label into the shared shell and restored stale desktop selection focus to the initiating row when connected. Final focused unit coverage passed (219 tests); expanded serial integration coverage passed (436 tests). Status changed to `review`.
+- 2026-08-05: BMad code review repaired all six findings: shell navigation now blocks the stale composer until the matching server shell is ready; terminal recommendation failures reload the canonical shell; project create/delete actions are synchronously deduplicated; desktop focus falls back to the composer; and duplicate sidebar identities are rejected. Focused unit suite passed (222 tests), `pnpm typecheck`, `pnpm lint` (0 errors, 45 pre-existing warnings), `pnpm build`, and `git diff --check` passed. Status changed to `done`.
 
 ### File List
 

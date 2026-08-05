@@ -24,6 +24,12 @@ describe("direct traveler API client", () => {
     await expect(loadTripProjectSidebarSummaries()).rejects.toThrow();
   });
 
+  test("rejects duplicate Trip Project sidebar identities", async () => {
+    const project = { id: "project-1", title: "Hè miền Trung", conversationId: "conversation-1", updatedAt: "2026-08-05T00:00:00.000Z" };
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ projects: [project, { ...project, conversationId: "conversation-2" }] }), { status: 200 })));
+    await expect(loadTripProjectSidebarSummaries()).rejects.toThrow();
+  });
+
   test("accepts a shell conversation with persisted messages", async () => {
     const shell = { conversation: { id: "conversation-1", tripProjectId: null, messages: [{ id: "message-1", role: "assistant", content: "Đi Huế." }] }, tripProject: null, workspace: null };
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ shell }), { status: 200 })));

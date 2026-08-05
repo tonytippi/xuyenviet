@@ -100,7 +100,7 @@ export function getIdempotentAiAskSubmission({
 
 type DeleteConversationAction = (conversationId: string) => Promise<{ success: boolean; error?: string; reason?: "not_found" }>;
 type CreateTripProjectAction = (title: string) => Promise<{ success: boolean; destination?: { tripProjectId: string } }>;
-type DeleteTripProjectAction = (tripProjectId: string) => Promise<{ success: boolean }>;
+type DeleteTripProjectAction = (tripProjectId: string) => Promise<{ success: boolean; reason?: "not_found" }>;
 // Story 7.5: typed server actions for owner-confirmed apply/dismiss.
 // Q3: `transient` is a retryable DB/transport failure — the client maps it to a
 // retryable "transient-error" outcome that keeps the action buttons enabled,
@@ -171,6 +171,7 @@ type AiAskComposerProps = {
   dismissTripChangeProposalAction?: DismissTripChangeProposalAction;
   executeAnnotationAction?: ExecuteAnnotationAction;
   saveAnswerUsefulnessFeedbackAction?: SaveAnswerUsefulnessFeedbackAction;
+  refreshShellAction?: () => void;
   signOutAction?: SignOutAction;
 };
 
@@ -738,6 +739,7 @@ export function AiAskComposer({
   dismissTripChangeProposalAction,
   executeAnnotationAction,
   saveAnswerUsefulnessFeedbackAction,
+  refreshShellAction,
   signOutAction,
 }: AiAskComposerProps) {
   const router = useRouter();
@@ -780,7 +782,8 @@ export function AiAskComposer({
   const proposalInFlightRef = useRef<Set<string>>(new Set());
   const annotationActionInFlightRef = useRef(false);
   const sessionActionsDisabled = isPending || Boolean(deletingConversationId);
-  const projectActionsDisabled = isPending || Boolean(deletingConversationId);
+  const [projectActionPending, setProjectActionPending] = useState(false);
+  const projectActionsDisabled = isPending || Boolean(deletingConversationId) || projectActionPending;
   const isHistoricReview = Boolean(historyConversation);
   const askFormDisabled = isPending || isHistoricReview;
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -794,6 +797,7 @@ export function AiAskComposer({
   const recommendationActionInFlightRef = useRef(false);
   const deletingConversationIdRef = useRef<string | null>(null);
   const deletingTripProjectIdRef = useRef<string | null>(null);
+  const creatingTripProjectRef = useRef(false);
   const sessionSheetTriggerRef = useRef<HTMLButtonElement>(null);
   const sessionSheetPanelRef = useRef<HTMLDivElement>(null);
   const sessionSheetPreviousFocusRef = useRef<HTMLElement | null>(null);
@@ -886,7 +890,7 @@ export function AiAskComposer({
     if (!target) return;
     focusAfterNavigationRef.current = null;
     const focusTarget = target === "heading"
-      ? mainHeadingRef.current ?? textareaRef.current
+      ? mainHeadingRef.current?.offsetParent !== null ? mainHeadingRef.current : textareaRef.current
       : target === "selection" && scopeSelectionOriginRef.current?.isConnected
         ? scopeSelectionOriginRef.current
         : textareaRef.current;
@@ -1602,32 +1606,57 @@ export function AiAskComposer({
   }
 
   async function handleCreateTripProject() {
-    if (!createTripProjectAction) return;
+    if (!createTripProjectAction || creatingTripProjectRef.current) return;
     const title = window.prompt("Tên chuyến đi mới");
     if (!title?.trim()) return;
+    creatingTripProjectRef.current = true;
+    setProjectActionPending(true);
     setStatus("Đang tạo chuyến đi...");
-    const result = await createTripProjectAction(title.trim());
-    if (!result.success || !result.destination) {
+    try {
+      const result = await createTripProjectAction(title.trim());
+      if (!result.success || !result.destination) {
+        setStatus("Không thể tạo chuyến đi lúc này. Vui lòng thử lại.");
+        return;
+      }
+      focusAfterNavigationRef.current = "heading";
+      router.push(buildCanonicalAiAskUrl(undefined, result.destination.tripProjectId));
+      router.refresh();
+    } catch {
       setStatus("Không thể tạo chuyến đi lúc này. Vui lòng thử lại.");
-      return;
+    } finally {
+      creatingTripProjectRef.current = false;
+      setProjectActionPending(false);
     }
-    focusAfterNavigationRef.current = "heading";
-    router.push(buildCanonicalAiAskUrl(undefined, result.destination.tripProjectId));
-    router.refresh();
   }
 
   async function handleDeleteTripProject() {
-    if (!selectedTripProject || !deleteTripProjectAction || !window.confirm(`Xóa chuyến đi “${selectedTripProject.title}”?`)) return;
+    if (!selectedTripProject || !deleteTripProjectAction || deletingTripProjectIdRef.current || !window.confirm(`Xóa chuyến đi “${selectedTripProject.title}”?`)) return;
+    deletingTripProjectIdRef.current = selectedTripProject.id;
+    setProjectActionPending(true);
     setStatus("Đang xóa chuyến đi...");
-    const result = await deleteTripProjectAction(selectedTripProject.id);
-    if (!result.success) {
+    try {
+      const result = await deleteTripProjectAction(selectedTripProject.id);
+      if (!result.success) {
+        if (result.reason === "not_found") {
+          setTripProjects((projects) => projects.filter((project) => project.id !== selectedTripProject.id));
+          focusAfterNavigationRef.current = "composer";
+          router.push(buildCanonicalAiAskUrl());
+          router.refresh();
+          return;
+        }
+        setStatus("Không thể xóa chuyến đi lúc này. Vui lòng thử lại.");
+        return;
+      }
+      setTripProjects((projects) => projects.filter((project) => project.id !== selectedTripProject.id));
+      focusAfterNavigationRef.current = "composer";
+      router.push(buildCanonicalAiAskUrl());
+      router.refresh();
+    } catch {
       setStatus("Không thể xóa chuyến đi lúc này. Vui lòng thử lại.");
-      return;
+    } finally {
+      deletingTripProjectIdRef.current = null;
+      setProjectActionPending(false);
     }
-    setTripProjects((projects) => projects.filter((project) => project.id !== selectedTripProject.id));
-    focusAfterNavigationRef.current = "composer";
-    router.push(buildCanonicalAiAskUrl());
-    router.refresh();
   }
 
   async function handleRecommendationAction(action: "private" | "decline" | "continue" | "accept", decisionId: string, tripProjectId?: string) {
@@ -1638,14 +1667,14 @@ export function AiAskComposer({
     try {
       if (action === "private") {
         const result = await chooseDirectPrivateTripRecommendation({ decisionId });
-        if (!result.success) throw new Error();
+        if (!result.success) return handleStaleRecommendation();
         setTripRecommendations(null);
         setStatus("Bạn có thể tiếp tục hỏi riêng trong cuộc trò chuyện này.");
         return;
       }
       if (action === "decline") {
         const result = await declineDirectTripCreationRecommendation({ decisionId });
-        if (!result.success) throw new Error();
+        if (!result.success) return handleStaleRecommendation();
         setTripRecommendations(null);
         setStatus("Đã ghi nhận lựa chọn của bạn.");
         return;
@@ -1653,7 +1682,7 @@ export function AiAskComposer({
       if (action === "continue") {
         if (!tripProjectId) return;
         const result = await continueDirectInTrip({ decisionId, tripProjectId });
-        if (!result.success) throw new Error();
+        if (!result.success) return handleStaleRecommendation();
         focusAfterNavigationRef.current = "heading";
         setTripRecommendations(null);
         router.push(buildCanonicalAiAskUrl(result.destination.conversationId, result.destination.tripProjectId));
@@ -1666,7 +1695,7 @@ export function AiAskComposer({
       const result = await acceptDirectTripCreationRecommendation(decisionId, key);
       if (!result.success) {
         acceptedCreationKeyRef.current = null;
-        throw new Error();
+        return handleStaleRecommendation();
       }
       focusAfterNavigationRef.current = "heading";
       setTripRecommendations(null);
@@ -1678,6 +1707,12 @@ export function AiAskComposer({
       recommendationActionInFlightRef.current = false;
       setRecommendationPending(false);
     }
+  }
+
+  function handleStaleRecommendation() {
+    setTripRecommendations(null);
+    refreshShellAction?.();
+    setStatus("Lựa chọn này không còn khả dụng. Đang làm mới cuộc trò chuyện.");
   }
 
   // Story 7.5: owner-confirmed apply. Calls the server action, shows the

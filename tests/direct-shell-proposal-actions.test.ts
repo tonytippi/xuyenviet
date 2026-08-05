@@ -32,6 +32,20 @@ describe("direct shell proposal actions", () => {
     expect(composer).not.toContain("Quản lý chuyến đi");
   });
 
+  test("blocks interaction with an old shell during navigation and deduplicates project actions", () => {
+    const loader = readFileSync("apps/web/src/features/chat-trips/direct-shell-loader.tsx", "utf8");
+    const composer = readFileSync("apps/web/src/features/ai/ai-ask-composer.tsx", "utf8");
+    expect(loader).toContain("setState((current) => ({ ...current, loading: true, recoveryNotice: undefined }))");
+    expect(composer).toContain("creatingTripProjectRef.current");
+    expect(composer).toContain("deletingTripProjectIdRef.current ||");
+    expect(composer).toContain("handleStaleRecommendation()");
+  });
+
+  test("focuses the composer when the mobile heading is hidden on desktop", () => {
+    const composer = readFileSync("apps/web/src/features/ai/ai-ask-composer.tsx", "utf8");
+    expect(composer).toContain("mainHeadingRef.current?.offsetParent !== null ? mainHeadingRef.current : textareaRef.current");
+  });
+
   test("keeps the selected-trip label in the shared shell rather than only the empty state", () => {
     const source = readFileSync("apps/web/src/features/ai/ai-ask-composer.tsx", "utf8");
     const scopeLabel = source.indexOf("Đang lên kế hoạch cho: {selectedTripProject.title}");

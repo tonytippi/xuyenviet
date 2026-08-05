@@ -9,10 +9,12 @@ import type { TripWorkspaceReadModel } from "@/features/chat-trips/types";
 
 export function DirectShellLoader({ initialQuestion, conversationId, historyConversationId, tripProjectId }: { initialQuestion?: string; conversationId?: string; historyConversationId?: string; tripProjectId?: string }) {
   const router = useRouter();
-  const [state, setState] = useState<{ loading: boolean; expired: boolean; recoveryNotice?: string; shell?: Awaited<ReturnType<typeof loadTravelerShell>>; messages?: DisplayMessage[]; historyConversation?: { id: string; messages: DisplayMessage[] } | null; planningContext?: Awaited<ReturnType<typeof loadPlanningContext>>["context"]; summaries: Awaited<ReturnType<typeof loadConversationSummaries>>; projects: Awaited<ReturnType<typeof loadTripProjectSidebarSummaries>> }>({ loading: true, expired: false, summaries: [], projects: [] });
+  const scopeKey = `${conversationId ?? ""}\u0000${tripProjectId ?? ""}\u0000${historyConversationId ?? ""}`;
+  const [state, setState] = useState<{ scopeKey?: string; loading: boolean; expired: boolean; recoveryNotice?: string; shell?: Awaited<ReturnType<typeof loadTravelerShell>>; messages?: DisplayMessage[]; historyConversation?: { id: string; messages: DisplayMessage[] } | null; planningContext?: Awaited<ReturnType<typeof loadPlanningContext>>["context"]; summaries: Awaited<ReturnType<typeof loadConversationSummaries>>; projects: Awaited<ReturnType<typeof loadTripProjectSidebarSummaries>> }>({ loading: true, expired: false, summaries: [], projects: [] });
   const [refreshGeneration, setRefreshGeneration] = useState(0);
   useEffect(() => {
     let active = true;
+    setState((current) => ({ ...current, loading: true, recoveryNotice: undefined }));
     void loadTravelerShell(conversationId, tripProjectId).then(async (shell) => {
        const [summaries, projects, historyShell] = await Promise.all([
          loadConversationSummaries().catch(() => []),
@@ -34,16 +36,16 @@ export function DirectShellLoader({ initialQuestion, conversationId, historyConv
       ]);
        if (!conversation && (conversationId || tripProjectId)) {
          if (active) {
-           setState({ loading: false, expired: false, recoveryNotice: "Không thể mở chuyến đi này. Bạn có thể chọn một chuyến đi khác hoặc tiếp tục hỏi XuyenViet.", shell: { shell: { conversation: null, tripProject: null, workspace: null } }, summaries, projects });
+            setState({ scopeKey, loading: false, expired: false, recoveryNotice: "Không thể mở chuyến đi này. Bạn có thể chọn một chuyến đi khác hoặc tiếp tục hỏi XuyenViet.", shell: { shell: { conversation: null, tripProject: null, workspace: null } }, summaries, projects });
            router.replace("/ai-ask");
          }
          return;
        }
-       if (active) setState({ loading: false, expired: false, shell, messages: conversation?.messages, historyConversation, planningContext, summaries, projects });
-    }).catch((error: DirectApiError) => { if (active) setState({ loading: false, expired: error.code === "unauthorized" || error.code === "forbidden", summaries: [], projects: [] }); });
+       if (active) setState({ scopeKey, loading: false, expired: false, shell, messages: conversation?.messages, historyConversation, planningContext, summaries, projects });
+    }).catch((error: DirectApiError) => { if (active) setState({ scopeKey, loading: false, expired: error.code === "unauthorized" || error.code === "forbidden", summaries: [], projects: [] }); });
     return () => { active = false; };
-  }, [conversationId, historyConversationId, router, tripProjectId, refreshGeneration]);
-  if (state.loading) return <main className="grid min-h-screen place-items-center text-[#4f625a]"><p>Đang tải hành trình của bạn...</p></main>;
+  }, [conversationId, historyConversationId, refreshGeneration, router, scopeKey, tripProjectId]);
+  if (state.loading || state.scopeKey !== scopeKey) return <main className="grid min-h-screen place-items-center text-[#4f625a]"><p>Đang tải hành trình của bạn...</p></main>;
   if (!state.shell) return <main className="grid min-h-screen place-items-center px-5 text-center"><div><p className="text-[#17342c]">{state.expired ? "Phiên đăng nhập đã hết hạn." : "Không thể tải hành trình lúc này."}</p><a className="mt-4 inline-block rounded-xl bg-[#1f5f46] px-4 py-3 font-semibold text-white" href="/sign-in?next=/ai-ask">Đăng nhập lại</a></div></main>;
   const conversation = state.shell.shell.conversation;
   async function logout() {
@@ -59,7 +61,7 @@ export function DirectShellLoader({ initialQuestion, conversationId, historyConv
     return result.success ? { success: true, destination: { tripProjectId: result.project!.id } } : { success: false };
   }} deleteTripProjectAction={async (id) => {
     const result = await deleteDirectTripProject(id);
-    return result.success ? { success: true } : { success: false };
+    return result.success ? { success: true } : { success: false, ...(result.reason === "not_found" ? { reason: "not_found" as const } : {}) };
   }} deleteConversationAction={async (id) => {
     const result = await deleteDirectConversation(id);
     return result.success ? { success: true } : { success: false, ...(result.reason === "not_found" ? { reason: "not_found" as const } : { error: "Không thể xoá cuộc trò chuyện lúc này. Vui lòng thử lại." }) };
@@ -74,8 +76,8 @@ export function DirectShellLoader({ initialQuestion, conversationId, historyConv
        if (result.reason === "refresh_required") return { success: false, reason: "refresh_required" as const, error: "Kế hoạch đã thay đổi — vui lòng làm mới đề xuất." };
        return { success: false, reason: result.reason === "expired" ? "expired" as const : "not_found" as const, error: "Đề xuất không còn khả dụng." };
      } catch { return { success: false, reason: "transient" as const, error: "Lỗi tạm thời — vui lòng thử lại." }; }
-   }} saveAnswerUsefulnessFeedbackAction={async (input) => {
+  }} saveAnswerUsefulnessFeedbackAction={async (input) => {
     const result = await saveDirectAnswerUsefulnessFeedback(input);
      return result.success ? { success: true, feedback: { ...result.feedback, updatedAt: new Date(result.feedback.updatedAt) } } : { success: false, reason: result.reason };
-  }} signOutAction={logout} /></main>;
+  }} refreshShellAction={() => setRefreshGeneration((value) => value + 1)} signOutAction={logout} /></main>;
 }

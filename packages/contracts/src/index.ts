@@ -975,6 +975,7 @@ export function parseTripProjectSidebarListResponse(value: unknown): TripProject
   const projects = value.projects;
   if (!projects.every((project) => hasOnlyKeys(project, ["id", "title", "conversationId", "updatedAt"])
     && isIdentifier(project.id) && isBoundedString(project.title, 160) && isIdentifier(project.conversationId) && typeof project.updatedAt === "string" && isUtcIsoTimestamp(project.updatedAt))) return null;
+  if (new Set(projects.map((project) => project.id)).size !== projects.length) return null;
   return { projects: projects as TripProjectSidebarSummary[] };
 }
 
