@@ -56,8 +56,8 @@ pnpm typecheck
 
 ### References
 
-- [Source: docs/proposals/knowledge-lifecycle-normalization.md#Target Model]
-- [Source: docs/proposals/knowledge-lifecycle-normalization.md#Required Database Invariants]
+- [Source: _bmad-output/planning-artifacts/knowledge-lifecycle-normalization-2026-08-05.md#Target Model]
+- [Source: _bmad-output/planning-artifacts/knowledge-lifecycle-normalization-2026-08-05.md#Required Database Invariants]
 - [Source: _bmad-output/planning-artifacts/epics.md#Story 15.1]
 - [Source: _bmad-output/project-context.md#Testing Rules]
 
@@ -96,4 +96,4 @@ gpt-5.6-terra
 - packages/worker-domain/src/features/knowledge/*.ts
 - tests/*knowledge*.test.ts
 - tests/{browser-identity.integration,contracts-browser-compatibility,drizzle-migration-plan,facebook-capture-review,facebook-capture,schema-compatibility,worker-adapter-boundary}.test.ts
-- docs/proposals/knowledge-lifecycle-normalization.md
+- _bmad-output/planning-artifacts/knowledge-lifecycle-normalization-2026-08-05.md

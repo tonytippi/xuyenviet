@@ -29,7 +29,7 @@ inputDocuments:
   - _bmad-output/planning-artifacts/ux-designs/ux-xuyenviet-2026-07-05/EXPERIENCE.md
   - _bmad-output/project-context.md
   - _bmad-output/planning-artifacts/proposal-eliminate-fake-system-users-with-audit-actors.md
-  - docs/proposals/knowledge-lifecycle-normalization.md
+  - _bmad-output/planning-artifacts/knowledge-lifecycle-normalization-2026-08-05.md
 ---
 
 # xuyenviet - Epic Breakdown

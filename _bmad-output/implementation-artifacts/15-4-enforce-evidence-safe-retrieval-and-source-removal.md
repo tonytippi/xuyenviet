@@ -80,10 +80,10 @@ pnpm build
 
 ### References
 
-- [Source: docs/proposals/knowledge-lifecycle-normalization.md#Cross-Table Guarantees]
-- [Source: docs/proposals/knowledge-lifecycle-normalization.md#Clean-Break Migration]
-- [Source: docs/proposals/knowledge-lifecycle-normalization.md#Transition Ownership]
-- [Source: docs/proposals/knowledge-lifecycle-normalization.md#Transition Matrix]
+- [Source: _bmad-output/planning-artifacts/knowledge-lifecycle-normalization-2026-08-05.md#Cross-Table Guarantees]
+- [Source: _bmad-output/planning-artifacts/knowledge-lifecycle-normalization-2026-08-05.md#Clean-Break Migration]
+- [Source: _bmad-output/planning-artifacts/knowledge-lifecycle-normalization-2026-08-05.md#Transition Ownership]
+- [Source: _bmad-output/planning-artifacts/knowledge-lifecycle-normalization-2026-08-05.md#Transition Matrix]
 - [Source: _bmad-output/implementation-artifacts/15-2-complete-candidate-processing-and-technical-job-accounting.md#AI-First Discovery and Relation Semantics]
 - [Source: _bmad-output/implementation-artifacts/15-3-centralize-version-fenced-lifecycle-transitions.md#Dev Notes]
 - [Source: _bmad-output/implementation-artifacts/epic-15-context.md#Technical Decisions]

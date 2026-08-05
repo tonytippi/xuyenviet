@@ -117,7 +117,7 @@ so that AI cannot overwrite my confirmed plan or newer confirmed changes.
 
 ### Product And Authority
 
-- Authority order: `epics.md` (Story 7.5), final PRD §8.2/§10.7, `ARCHITECTURE-SPINE.md` (AD-6, AD-13, AD-29, AD-30), UX `DESIGN.md`/`EXPERIENCE.md`, the 2026-07-25 readiness report, and current code. The older `_bmad-output/implementation-artifacts/epic-7-context.md` is not authority (confirmed by Stories 7.1–7.4).
+- Authority order: `epics.md` (Story 7.5), final PRD §8.2/§10.7, `ARCHITECTURE-SPINE.md` (AD-6, AD-13, AD-29, AD-30), UX `DESIGN.md`/`EXPERIENCE.md`, the 2026-07-25 readiness report, and current code.
 - This is the fifth Epic 7 story. Sequence is fixed: aggregate (7.1 done), primary conversation (7.2 done), Trip Home/workspace (7.3 done), proposals (7.4 done), terminal proposal actions/history (7.5 — this story), safety verification (7.6).
 - FR-16H (owner-confirmed transactional proposal application) and FR-16I (owner-visible proposal change history) are the primary FRs. NFR-11 ("Applying a Trip Change Proposal validates the proposal belongs to the selected Trip Project, is still applicable, and is authorized for the owner before writing an auditable change") is the governing non-functional. NFR-10 (owner-scoped) governs every read/write.
 - Readiness report line 106: "FR-16H, FR-16I — Story 7.5 applies, dismisses, and expires proposals atomically with owner-visible history; Story 7.6 verifies safety." Line 177: "resolve the exact proposal-refresh interaction during Story 7.5 preparation if regeneration is included." This story resolves refresh as an explicit owner action that focuses the primary conversation composer; regeneration is NOT automatic (deferred).

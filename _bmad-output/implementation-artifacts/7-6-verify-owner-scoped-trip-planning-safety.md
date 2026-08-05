@@ -150,7 +150,7 @@ Third-review patch resolution (2026-07-26): all 4 actionable findings addressed.
 
 ### Product And Authority
 
-- Authority order: `epics.md` (Story 7.6), PRD §8.2/§10.7 (FR-16H, FR-16I) and §9 (NFR-10, NFR-11), `ARCHITECTURE-SPINE.md` (AD-6, AD-13, AD-29, AD-30), UX `EXPERIENCE.md` (Accessibility Floor, Responsive & Platform, Interaction Primitives, Trust/Privacy/Provenance), the 2026-07-25 readiness report, and current code. The compiled `_bmad-output/implementation-artifacts/epic-7-context.md` is NOT authority — it describes a superseded "Traveler Workspace UX" epic and does not match the implemented Trip Planning aggregate or the sprint-status keys (confirmed by Stories 7.1–7.5). Do not use it.
+- Authority order: `epics.md` (Story 7.6), PRD §8.2/§10.7 (FR-16H, FR-16I) and §9 (NFR-10, NFR-11), `ARCHITECTURE-SPINE.md` (AD-6, AD-13, AD-29, AD-30), UX `EXPERIENCE.md` (Accessibility Floor, Responsive & Platform, Interaction Primitives, Trust/Privacy/Provenance), the 2026-07-25 readiness report, and current code.
 - This is the sixth and final Epic 7 story. Sequence is fixed and all predecessors are `done`: aggregate (7.1), primary conversation (7.2), Trip Home/workspace (7.3), proposals (7.4), terminal proposal actions/history (7.5), safety verification (7.6 — this story).
 - FR-16H (owner must explicitly apply before persistent state changes; AI/provider never mutate directly) and FR-16I (owner-visible history with actor/timestamp) are the primary FRs under verification. NFR-10 (all Trip Project reads/mutations owner-scoped) and NFR-11 (apply validates ownership/applicability/authorization before writing an auditable change) are the governing non-functionals. PRD §10.7 is the Trip Planning Foundation Contract.
 - Readiness report 2026-07-25 line 143: UX specifies conflict recovery (`Làm mới đề xuất`) but Story 7.6 only requires a safe refresh request. Auto-regeneration is out of scope; verify refresh focuses the composer and does not regenerate.
@@ -252,8 +252,7 @@ Third-review patch resolution (2026-07-26): all 4 actionable findings addressed.
 2. **No new migration**: 7.6 writes no schema changes. Confirm `pnpm db:generate` has no drift.
 3. **Real PostgreSQL for AC1 DB-backed tests**: mocked DB cannot prove owner-scoping, cascade, `FOR UPDATE`, or concurrent-apply behavior.
 4. **Refresh UX scope**: `Làm mới đề xuất` focuses the composer and does NOT auto-regenerate or call the AI gateway (readiness report 2026-07-25 line 143; 7.5 decision 5). Verify this, do not implement regeneration.
-5. **epic-7-context.md is superseded**: do not use it as authority; it describes a different (Traveler Workspace UX) epic.
-6. **Do not commit** unless explicitly instructed; update the story Dev Agent Record and sprint-status.yaml only.
+5. **Do not commit** unless explicitly instructed; update the story Dev Agent Record and sprint-status.yaml only.
 
 ### Project Structure Notes
 

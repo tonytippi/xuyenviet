@@ -77,10 +77,10 @@ pnpm exec drizzle-kit check
 
 ### References
 
-- [Source: docs/proposals/knowledge-lifecycle-normalization.md#Sampling]
-- [Source: docs/proposals/knowledge-lifecycle-normalization.md#Recommendations The Actionable Operator Work Queue]
-- [Source: docs/proposals/knowledge-lifecycle-normalization.md#Transition Ownership]
-- [Source: docs/proposals/knowledge-lifecycle-normalization.md#Transition Matrix]
+- [Source: _bmad-output/planning-artifacts/knowledge-lifecycle-normalization-2026-08-05.md#Sampling]
+- [Source: _bmad-output/planning-artifacts/knowledge-lifecycle-normalization-2026-08-05.md#Recommendations The Actionable Operator Work Queue]
+- [Source: _bmad-output/planning-artifacts/knowledge-lifecycle-normalization-2026-08-05.md#Transition Ownership]
+- [Source: _bmad-output/planning-artifacts/knowledge-lifecycle-normalization-2026-08-05.md#Transition Matrix]
 - [Source: _bmad-output/planning-artifacts/epics.md#Story 15.5]
 - [Source: _bmad-output/implementation-artifacts/15-2-complete-candidate-processing-and-technical-job-accounting.md#AI-First Discovery and Relation Semantics]
 - [Source: _bmad-output/implementation-artifacts/15-3-centralize-version-fenced-lifecycle-transitions.md#Dev Notes]

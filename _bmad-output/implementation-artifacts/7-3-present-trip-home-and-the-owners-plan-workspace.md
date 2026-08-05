@@ -109,7 +109,7 @@ so that I know the most useful next planning action and can inspect my saved pla
 
 ### Product And Authority
 
-- The active authority is `epics.md`, the final PRD, `ARCHITECTURE-SPINE.md`, UX `DESIGN.md`/`EXPERIENCE.md`, the 2026-07-25 readiness report, and current code. The older `_bmad-output/implementation-artifacts/epic-7-context.md` describes an incompatible UI-convergence Epic 7 and is not authority for this story (confirmed by Stories 7.1 and 7.2 dev notes).
+- The active authority is `epics.md`, the final PRD, `ARCHITECTURE-SPINE.md`, UX `DESIGN.md`/`EXPERIENCE.md`, the 2026-07-25 readiness report, and current code.
 - This is the third Epic 7 story. Sequence is fixed: aggregate (7.1), primary conversation (7.2), Trip Home/workspace (7.3), proposals (7.4), terminal proposal actions/history (7.5), safety verification (7.6).
 - FR-16F and AD-29 require a deterministic Trip Home read model with the exact priority in AC 1. This is a read surface, not a new aggregate, not a dashboard, and not a map.
 - The workspace must not imply AI suggestions equal confirmed state. Pending proposals (Story 7.4) will be visually distinct from confirmed timeline items; this story prepares the Trip Home focus slot and the workspace panel but passes no proposals yet.

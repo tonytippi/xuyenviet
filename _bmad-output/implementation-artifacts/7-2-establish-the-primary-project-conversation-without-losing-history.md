@@ -99,7 +99,7 @@ so that I have a clear planning command surface without losing prior discussion.
 
 ### Product And Authority
 
-- The active authority is `epics.md`, the final PRD, `ARCHITECTURE-SPINE.md`, UX `DESIGN.md`/`EXPERIENCE.md`, the 2026-07-25 readiness report, and current code. The older `_bmad-output/implementation-artifacts/epic-7-context.md` describes an incompatible UI-convergence Epic 7 and is not authority for this story.
+- The active authority is `epics.md`, the final PRD, `ARCHITECTURE-SPINE.md`, UX `DESIGN.md`/`EXPERIENCE.md`, the 2026-07-25 readiness report, and current code.
 - This is the second Epic 7 story after completed Story 7.1. Sequence is fixed: aggregate (7.1), primary conversation (7.2), Trip Home/workspace (7.3), proposals (7.4), terminal proposal actions/history (7.5), safety verification (7.6).
 - FR-16E and MVP AC-21 require exactly one primary conversation while retaining historic owner-linked chats. This is not permission to hide, detach, delete, or silently reclassify historic conversations.
 - A primary conversation is the exclusive plan-authoring surface. Chat requests may later create typed proposals, but no transcript, `chat_context`, AI response, provider output, or current story UI may write confirmed plan state.

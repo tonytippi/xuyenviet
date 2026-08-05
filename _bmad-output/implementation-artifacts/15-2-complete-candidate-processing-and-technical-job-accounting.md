@@ -56,7 +56,7 @@ so that mixed candidate outcomes do not misrepresent a source's processing state
 
 ### Current Baseline and Required Changes
 
-- Stories 15.1 and 15.3 are complete. The Story 15.2 dependency block in `bmad-dev-auto-result-15-2-blocked-dependency.md` is stale and must not govern this work.
+- Stories 15.1 and 15.3 are complete.
 - `packages/worker-domain/src/features/knowledge/ingestion-jobs.ts` already claims parent jobs and candidates with `FOR UPDATE SKIP LOCKED`, leases, and fencing tokens. Keep these claim predicates and the `queued -> running -> completed | failed` parent status vocabulary.
 - `finalizeKnowledgeIngestionJob` already prevents completion until discovery is terminal and no candidate is `queued` or `processing`. Extend it or a colocated helper so counter projection and conditional finalization use the same transaction and are safely repeatable.
 - `failKnowledgeIngestionCandidate` currently increments `failedCandidateCount` procedurally. Replace this with row-derived projections for all counters, then conditionally finalize the parent.
@@ -150,8 +150,8 @@ pnpm test:integration
 - [Source: _bmad-output/implementation-artifacts/deferred-work.md#Deferred from spec-15-1-establish-target-lifecycle-schema]
 - [Source: _bmad-output/planning-artifacts/architecture/architecture-xuyenviet-2026-07-04/ARCHITECTURE-SPINE.md#AD-25]
 - [Source: _bmad-output/planning-artifacts/architecture/architecture-xuyenviet-2026-07-04/ARCHITECTURE-SPINE.md#AD-26]
-- [Source: docs/proposals/knowledge-lifecycle-normalization.md#Transition Ownership]
-- [Source: docs/proposals/knowledge-lifecycle-normalization.md#Acceptance Criteria]
+- [Source: _bmad-output/planning-artifacts/knowledge-lifecycle-normalization-2026-08-05.md#Transition Ownership]
+- [Source: _bmad-output/planning-artifacts/knowledge-lifecycle-normalization-2026-08-05.md#Acceptance Criteria]
 - [Source: _bmad-output/project-context.md#Testing Rules]
 
 ## Dev Agent Record

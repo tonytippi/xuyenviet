@@ -143,7 +143,7 @@ Third review dismissed as noise (0). Deferred (0). Decision-needed (0).
 
 ### Product And Authority
 
-- Authority order: `epics.md` (Story 7.4), final PRD §8.2/§10.7, `ARCHITECTURE-SPINE.md` (AD-29, AD-30, AD-6, AD-10, AD-11, AD-13, AD-16), UX `DESIGN.md`/`EXPERIENCE.md`, the 2026-07-25 readiness report, and current code. The older `_bmad-output/implementation-artifacts/epic-7-context.md` is not authority (confirmed by Stories 7.1–7.3).
+- Authority order: `epics.md` (Story 7.4), final PRD §8.2/§10.7, `ARCHITECTURE-SPINE.md` (AD-29, AD-30, AD-6, AD-10, AD-11, AD-13, AD-16), UX `DESIGN.md`/`EXPERIENCE.md`, the 2026-07-25 readiness report, and current code.
 - This is the fourth Epic 7 story. Sequence is fixed: aggregate (7.1 done), primary conversation (7.2 done), Trip Home/workspace (7.3 done), proposals (7.4 — this story), terminal proposal actions/history (7.5), safety verification (7.6).
 - FR-16G is the primary FR; FR-16H (owner-confirmed application) and FR-16I (history) are 7.5/7.6. NFR-10 (owner-scoped) and NFR-11 (apply validates membership/applicability/authorization) govern the fences authored in this story's draft and executed in 7.5.
 - Readiness report line 175: "preserve the requirement that every chat-originated plan mutation becomes a typed proposal before the owner explicitly applies it; do not add a separate plan editor or direct model/table mutation." This story must not introduce any direct plan mutation path.

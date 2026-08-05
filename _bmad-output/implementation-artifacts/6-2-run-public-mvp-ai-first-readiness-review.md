@@ -81,7 +81,6 @@ so that launch readiness is explicit about completed proof, accepted risk, and b
 - This is the final evidence aggregation and release-decision story for the current Epic 6. It is not an implementation, worker-hardening, deployment, provider-configuration, backup/restore, capture-authorization, or dashboard-feature story.
 - Create the safe final report only after inspecting authoritative inputs. Reuse existing read models and evidence ledgers; do not create a second coverage, sampling, evaluation, retrieval, or operations aggregate.
 - The report must be honest about the chosen public-evaluation scope. `conditional-go` describes a bounded evaluation authorization, not a general public-launch claim.
-- Do not use `_bmad-output/implementation-artifacts/epic-6-context.md`. It documents a superseded Epic 6 and conflicts with the current `epics.md` and sprint inventory.
 
 ### Evidence And Decision Contract
 

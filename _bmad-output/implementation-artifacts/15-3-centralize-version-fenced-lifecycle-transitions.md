@@ -64,8 +64,8 @@ rg 'lifecycle_state|verification_requirement|knowledge_recommendations' packages
 
 ### References
 
-- [Source: docs/proposals/knowledge-lifecycle-normalization.md#Transition Ownership]
-- [Source: docs/proposals/knowledge-lifecycle-normalization.md#Transition Matrix]
+- [Source: _bmad-output/planning-artifacts/knowledge-lifecycle-normalization-2026-08-05.md#Transition Ownership]
+- [Source: _bmad-output/planning-artifacts/knowledge-lifecycle-normalization-2026-08-05.md#Transition Matrix]
 - [Source: _bmad-output/planning-artifacts/architecture/architecture-xuyenviet-2026-07-04/ARCHITECTURE-SPINE.md#AD-7]
 
 ## Dev Agent Record

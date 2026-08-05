@@ -68,7 +68,7 @@ so that public evaluation does not rely on untested workers, retention, removal,
 - This is an operations validation and evidence story, not a technical hardening bucket or a new product feature. Create only the validation report/evidence artifacts, narrowly scoped test support if genuinely required to exercise an acceptance criterion, and safe operational documentation needed to record the results.
 - Do not implement new workers, deployment architecture, health endpoints, capture flows, retrieval behavior, provider integrations, UI features, backup systems, or public launch behavior merely to turn a failed check green. Record owner, blocker, and safe remediation; route implementation through a separately planned story or accepted-risk decision.
 - Epic 5.3 already closes the active-evidence corpus and answer-quality readiness gate. It does not prove worker supervision, canonical ingestion deployment, backup/restore, raw-capture retention, or source-removal operations. Reuse its current read-only readiness evidence; do not duplicate or mutate it.
-- The stale `_bmad-output/implementation-artifacts/epic-6-context.md` describes a previous family-planning Epic 6 and conflicts with the current Epic 6 definition. It is not authoritative for this work. Use current `epics.md` and `sprint-status.yaml`; do not implement family-context behavior.
+- Use current `epics.md` and `sprint-status.yaml`; do not implement family-context behavior.
 
 ### Operational Evidence Contract
 
@@ -168,7 +168,6 @@ gpu4ai/gpt-5.6-terra-review
 ### Debug Log References
 
 - Story creation loaded the current Epic 6 contract, launch prerequisites, PRD, architecture spine, community knowledge solution design, UX trust/privacy contract, project context, Stories 5.1-5.3, sprint status, deployment runbook/compose configuration, operational code paths, focused regression locations, and recent relevant commits.
-- The current `epic-6-context.md` is stale and describes a former family-planning epic; it conflicts with the authoritative current `epics.md` and sprint inventory, so it is explicitly excluded from implementation scope.
 - Current deployment configuration supervises legacy extraction and indexing workers, while canonical source-version ingestion is a one-job script not represented in compose. The developer must record this as a blocker unless actual deployment evidence resolves it; no readiness claim may conflate the two worker paths.
 - 2026-07-24: Reconciled `compose.yaml`, `README.md`, and the capture operations runbook. Confirmed canonical ingestion is not continuously supervised in the documented Compose deployment; recorded as OP-01 `blocked` rather than changing deployment behavior.
 - 2026-07-24: Inspected `scripts/facebook-capture.ts`; `--yes` resolves a matching user ID/email but does not enforce persisted `admin` or `operator` authorization. Recorded OP-07 `blocked` rather than hardening capture authorization in this validation story.

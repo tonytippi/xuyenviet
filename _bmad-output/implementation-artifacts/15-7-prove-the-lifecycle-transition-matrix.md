@@ -109,8 +109,8 @@ pnpm exec drizzle-kit check
 - [Source: _bmad-output/implementation-artifacts/15-4-enforce-evidence-safe-retrieval-and-source-removal.md#Completed-Story Intelligence]
 - [Source: _bmad-output/implementation-artifacts/15-5-separate-actionable-work-from-quality-sampling.md#AI-First Rule]
 - [Source: _bmad-output/implementation-artifacts/15-6-deliver-target-shaped-operator-knowledge-views.md#AI-First Contract]
-- [Source: docs/proposals/knowledge-lifecycle-normalization.md#Transition Matrix]
-- [Source: docs/proposals/knowledge-lifecycle-normalization.md#Phase 4 Verification]
+- [Source: _bmad-output/planning-artifacts/knowledge-lifecycle-normalization-2026-08-05.md#Transition Matrix]
+- [Source: _bmad-output/planning-artifacts/knowledge-lifecycle-normalization-2026-08-05.md#Phase 4 Verification]
 - [Source: _bmad-output/project-context.md#Testing Rules]
 
 ## Dev Agent Record

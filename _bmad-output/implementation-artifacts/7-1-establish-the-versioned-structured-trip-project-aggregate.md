@@ -101,7 +101,7 @@ so that confirmed trip state is durable, explicit, and separate from chat transc
 
 ### Product And Authority
 
-- The active authority is the current PRD, architecture spine, `epics.md`, and the 2026-07-25 readiness assessment. An older `epic-7-context.md` under implementation artifacts describes an incompatible UI-focused Epic 7 and must not guide this story.
+- The active authority is the current PRD, architecture spine, `epics.md`, and the 2026-07-25 readiness assessment.
 - Epic 7 follows the completed Chat/Trips baseline. Its sequence is aggregate (7.1), primary conversation (7.2), Trip Home (7.3), typed AI proposals (7.4), terminal proposal actions/history (7.5), then safety verification (7.6).
 - The primary conversation is the exclusive future authoring surface. This story establishes persistence and safe Chat/Trips ownership; it must not create a manual editor or permit AI/chat extraction to mutate structured plan state.
 
