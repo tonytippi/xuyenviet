@@ -11,10 +11,11 @@ describe("admin knowledge view boundary", () => {
     const combined = source.join("\n");
     expect(combined).toContain("@xuyenviet/contracts");
     expect(combined).toContain("NEXT_PUBLIC_API_ORIGIN");
-    expect(combined).not.toMatch(/@xuyenviet\/(database|domain|worker-domain)|server action|\/api\/bff|next\/headers/);
+    expect(combined).not.toMatch(/@xuyenviet\/(database|domain|worker-domain)|server action|\/api\/bff|next\/headers|proxy|transitionKnowledgeCard/);
     expect(combined).not.toMatch(/\.stage|reviewStatus|operationState|promptVersion/);
     expect(combined).not.toMatch(/\/knowledge\/(drafts|approved)|\/v1\/admin\/knowledge\/(drafts|approved)|approveDraft|rejectDraft|batchApprove/);
     expect(combined).toContain("/v1/admin/knowledge/cards");
+    expect(combined).toContain("/v1/admin/knowledge/recommendations");
   });
 
   test("rejects legacy batch state disclosure from the intake response", () => {

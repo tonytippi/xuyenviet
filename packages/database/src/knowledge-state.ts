@@ -48,7 +48,7 @@ export function evaluateKnowledgeTravelerPolicy(card: KnowledgeCardStateForEligi
   if (!knowledgeLifecycleStateValues.includes(card.lifecycleState)) reasons.push("invalid_lifecycle_state");
   if (!knowledgeStateValues.includes(card.knowledgeState)) reasons.push("invalid_knowledge_state");
   if (!knowledgeVerificationRequirementValues.includes(card.verificationRequirement)) reasons.push("invalid_verification_requirement");
-  if (knowledgeStateValues.includes(card.knowledgeState) && !isRecognizedTravelerKnowledgeState(card.knowledgeState)) reasons.push("unsupported_knowledge_state");
+  if (!isRecognizedTravelerKnowledgeState(card.knowledgeState)) reasons.push("unsupported_knowledge_state");
   if (card.lifecycleState !== "active") reasons.push("inactive_lifecycle");
   if (card.verificationRequirement === "failed") reasons.push("verification_failed");
   if (!hasCompleteSafeMetadata(card)) reasons.push("incomplete_metadata");

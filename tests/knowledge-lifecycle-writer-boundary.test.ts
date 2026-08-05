@@ -37,6 +37,25 @@ describe("knowledge lifecycle writer boundary", () => {
     expect(writesLifecycleTable("import { knowledgeCards } from './schema'; const tables = { card: knowledgeCards }; const card = tables.card; db.delete(card);", tables)).toBe(true);
     expect(writesLifecycleTable("import { knowledgeCards } from './schema'; const tables = { card: knowledgeCards }; db.select().from(tables.card);", tables)).toBe(false);
   });
+
+  test("keeps API admin routes out of Worker claim, run, and loop ownership", async () => {
+    const files = await sourceFiles(["apps/api/src/admin"]);
+    const violations = await Promise.all(files.map(async (file) => {
+      const content = await readFile(file, "utf8");
+      return /(?:claimNextKnowledge|runKnowledge(?:Ingestion|Indexing)|run.*Worker|start.*Loop)/.test(content) ? relative(root, file) : null;
+    }));
+    expect(violations.filter(Boolean)).toEqual([]);
+  });
+
+  test("retains the Facebook ingestion rerun route as an admitted port command, never a Worker execution path", async () => {
+    const controller = await readFile(resolve(root, "apps/api/src/admin/admin-facebook-captures.controller.ts"), "utf8");
+    const command = await readFile(resolve(root, "packages/domain/src/admin-facebook-capture.ts"), "utf8");
+
+    expect(controller).toContain("rerunAdminFacebookCaptureIngestion(this.captures, request.principal, reviewId)");
+    expect(controller).not.toMatch(/(?:claimNextKnowledge|runKnowledge(?:Ingestion|Indexing)|run.*Worker|start.*Loop|enqueue.*Loop)/);
+    expect(command).toContain("return port.rerunIngestion(actor, reviewId)");
+    expect(command).not.toMatch(/(?:claimNextKnowledge|runKnowledge(?:Ingestion|Indexing)|run.*Worker|start.*Loop)/);
+  });
 });
 
 function writesLifecycleTable(content: string, tableNames: string[]) {
