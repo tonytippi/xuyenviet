@@ -80,6 +80,7 @@ export function isAliasCompatible(artifact: CaptureArtifact, input: Pick<Paramet
 }
 
 export async function admitArtifact(sql: CacheSql, input: Omit<CaptureArtifact, "id" | "contentHash">): Promise<CaptureArtifact> {
+  if (containsOversizedString(input.payload) || containsOversizedString(input.metadata)) throw new Error("capture_artifact_payload_too_large");
   const payload = sanitizeCacheValue(input.payload) as Record<string, unknown>;
   const metadata = sanitizeCacheValue(input.metadata) as Record<string, unknown>;
   if (!payload || Array.isArray(payload) || Buffer.byteLength(JSON.stringify(payload), "utf8") > MAX_CACHE_PAYLOAD_BYTES) throw new Error("capture_artifact_payload_too_large");
@@ -87,6 +88,13 @@ export async function admitArtifact(sql: CacheSql, input: Omit<CaptureArtifact, 
   const id = randomUUID();
   const [row] = await sql`insert into capture_artifacts (id, provider, reuse_key, resource_identity, capture_method_version, payload_schema_version, prompt_version, model, payload, metadata, content_hash, captured_at) values (${id}, ${input.provider}, ${input.reuseKey}, ${input.resourceIdentity}, ${input.captureMethodVersion}, ${input.payloadSchemaVersion}, ${input.promptVersion ?? ""}, ${input.model ?? ""}, ${JSON.stringify(payload)}::jsonb, ${JSON.stringify(metadata)}::jsonb, ${contentHash}, ${input.capturedAt}::timestamptz) on conflict (provider, resource_identity, capture_method_version, payload_schema_version, prompt_version, model, content_hash) do update set updated_at = now() returning id, provider, reuse_key, resource_identity, capture_method_version, payload_schema_version, prompt_version, model, payload, metadata, content_hash, captured_at`;
   return rowToArtifact(row);
+}
+
+function containsOversizedString(value: unknown, depth = 0): boolean {
+  if (depth > MAX_CACHE_DEPTH || value === null || typeof value === "boolean" || typeof value === "number") return false;
+  if (typeof value === "string") return value.length > MAX_CACHE_STRING_LENGTH;
+  if (Array.isArray(value)) return value.some((item) => containsOversizedString(item, depth + 1));
+  return typeof value === "object" && Object.values(value as Record<string, unknown>).some((item) => containsOversizedString(item, depth + 1));
 }
 
 export async function admitArtifactAlias(sql: CacheSql, input: { artifactId: string; provider: CaptureArtifact["provider"]; aliasUrl: string; resourceIdentity: string }) {

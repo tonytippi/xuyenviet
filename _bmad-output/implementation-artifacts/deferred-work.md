@@ -143,3 +143,9 @@
 - source_spec: `spec-15-1-establish-target-lifecycle-schema.md`
   summary: Recover expired processing candidates so they become claimable or terminal without blocking job completion.
   evidence: Story 15.1 establishes target candidate processing states and preserves worker lease fields, but expiry recovery is technical job/candidate behavior explicitly owned by Story 15.2.
+- source_spec: `spec-restore-operator-capture-clis.md`
+  summary: Decide how operator capture CLIs are installed in production-only environments without making Playwright and tsx application runtime dependencies.
+  evidence: The restored explicit commands rely on root devDependencies, matching the prior operation model; moving them requires an approved operator-image or dependency-boundary decision.
+- source_spec: `spec-restore-operator-capture-clis.md`
+  summary: Require an unambiguous timestamp convention from Gemini for nonzero YouTube video windows.
+  evidence: Existing capture code accepts both absolute and clip-relative timestamps. A provider contract revision is required to reject or label ambiguous values safely without losing current compatible captures.

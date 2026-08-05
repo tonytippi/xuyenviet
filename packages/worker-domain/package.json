@@ -7,8 +7,13 @@
     "./adapters": "./src/adapters.ts",
     "./features/ai/domain-outbox-worker": "./src/features/ai/domain-outbox-worker.ts",
     "./features/knowledge/extraction-jobs": "./src/features/knowledge/extraction-jobs.ts",
+    "./features/knowledge/capture-cache": "./src/features/knowledge/capture-cache.ts",
+    "./features/knowledge/capture-orchestration": "./src/features/knowledge/capture-orchestration.ts",
+    "./features/knowledge/capture-identity": "./src/features/knowledge/capture-identity.ts",
+    "./features/knowledge/facebook-capture": "./src/features/knowledge/facebook-capture.ts",
     "./features/knowledge/indexing-worker": "./src/features/knowledge/indexing-worker.ts",
     "./features/knowledge/ingestion-worker": "./src/features/knowledge/ingestion-worker.ts",
+    "./features/knowledge/youtube-capture": "./src/features/knowledge/youtube-capture.ts",
     "./features/chat-trips/trip-proposal-expiry-worker": "./src/features/chat-trips/trip-proposal-expiry-worker.ts"
   },
   "scripts": {
