@@ -22,9 +22,7 @@ stepsCompleted:
   - step-04-knowledge-lifecycle-normalization-2026-08-04-final-validation
 inputDocuments:
   - _bmad-output/planning-artifacts/prds/prd-xuyenviet-2026-07-04/prd.md
-  - _bmad-output/planning-artifacts/prds/prd-xuyenviet-2026-07-04/addendum.md
   - _bmad-output/planning-artifacts/architecture/architecture-xuyenviet-2026-07-04/ARCHITECTURE-SPINE.md
-  - _bmad-output/planning-artifacts/architecture/architecture-xuyenviet-2026-07-04/community-knowledge-solution-design.md
   - _bmad-output/planning-artifacts/ux-designs/ux-xuyenviet-2026-07-05/DESIGN.md
   - _bmad-output/planning-artifacts/ux-designs/ux-xuyenviet-2026-07-05/EXPERIENCE.md
   - _bmad-output/project-context.md
@@ -36,7 +34,7 @@ inputDocuments:
 
 ## Overview
 
-This document will decompose the final PRD, architecture spine, community knowledge solution design, and UX contract into implementable epics and stories.
+This document decomposes the final PRD, architecture spine, UX contract, approved planning deltas, and current target lifecycle contract into implementable epics and stories.
 
 ## Requirements Inventory
 
@@ -295,9 +293,9 @@ FR-19: Epic 3 - Knowledge taxonomy.
 FR-20: Epic 3 - Explicit operator lifecycle actions.
 FR-21: Epic 3 - AI-first active publication without mandatory approval.
 FR-22: Epic 3 - Source provenance.
-FR-22A: Epic 3 - Knowledge state.
-FR-22B: Epic 3 - Independent review state.
-FR-22C: Epic 3 - Retrieval exclusion states.
+FR-22A: Epic 15 - One target card lifecycle state.
+FR-22B: Epic 15 - Domain classification separated from workflow lifecycle.
+FR-22C: Epic 15 - Verification requirement separated from lifecycle and derived corroboration.
 FR-23: Epic 3 - Operator source intake.
 FR-23A: Epic 3 - Queued Facebook capture.
 FR-23B: Epic 3 - Operator-only Facebook capture boundary.

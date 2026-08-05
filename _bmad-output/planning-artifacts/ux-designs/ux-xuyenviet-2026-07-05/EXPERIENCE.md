@@ -186,7 +186,7 @@ Behavioral patterns. Visual specs live in `DESIGN.md.Components`.
 | Applied/dismissed proposal | Timeline/history | Reconcile the plan timeline to persisted state and announce the outcome. Applied records show actor/time; dismissed records do not alter plan state. |
 | Unauthorized data access | Any owned resource | Deny server-side. Show generic not-found/permission message without exposing existence details. |
 | Admin no role | Admin | Deny route server-side; no admin navigation shown to normal travelers. |
-| AI-first ingestion pending | Admin intake/review | Status row: queued, triaging, extracting, judging, relating, published, suppressed, review recommended, verify first, or failed. |
+| AI-first ingestion pending | Admin intake/review | Show technical job status (`queued`, `running`, `completed`, or `failed`) separately from candidate processing/disposition, card lifecycle (`draft`, `pending_operator`, `active`, `suppressed`, `archived`, or `rejected`), and recommendation status (`open`, `resolved`, or `superseded`). Do not imply a technical job outcome is a publication outcome. |
 | Extraction failed | Admin intake | Error reason safe for operator. Retry or edit source. No active knowledge card is created. |
 | 100-card seed incomplete | Seed progress | Count active evidence-grounded corridor cards and remaining gap. Show distribution gaps by type/route plus review and verification signals. |
 
@@ -222,8 +222,8 @@ Behavioral requirements. Visual contrast lives in `DESIGN.md` and shadcn default
 - Sidebar navigation supports keyboard traversal, visible focus, `aria-current` for the active conversation/project route, and accessible names for row menus.
 - Focus order follows reading order on chat, source drawer, and admin forms.
 - Chat pending, answer completion, save success, and destructive success/failure states announce through polite `aria-live` regions.
-- Source chips expose accessible labels, e.g. `Nguồn curated`, `Nguồn cộng đồng chưa xác minh`.
-- Color is never the only source/confidence indicator; labels are always present.
+- Traveler verification disclosures and selectable source details expose accessible, action-oriented labels, e.g. `Thông tin cần kiểm tra lại` or `Xem nguồn tham khảo`. Source and confidence taxonomy labels are restricted to authorized admin surfaces.
+- Color is never the only indicator of a traveler-visible warning, action, or admin metadata label.
 - Vietnamese diacritics must remain legible at 200% zoom and common mobile widths.
 - Touch targets at least 44px on mobile web.
 - Reduced motion disables non-essential transitions in sheets, toasts, and answer reveal.
