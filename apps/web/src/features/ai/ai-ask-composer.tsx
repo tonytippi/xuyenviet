@@ -2,14 +2,15 @@
 
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { useActionState, useEffect, useRef, useState, type ChangeEvent, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, type RefObject } from "react";
+import { useEffect, useRef, useState, type ChangeEvent, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, type RefObject } from "react";
+import type { TripRecommendationResponse } from "@xuyenviet/contracts";
 
 import { ConversationList, type ChatSessionSummary } from "@/features/chat-trips/conversation-list";
 import { formatTripProjectLabel } from "@/features/chat-trips/labels";
 import { answerUsefulnessCommentMaxLength, countAnswerUsefulnessCommentCharacters, type AnswerAnnotation, type AnswerAnnotationActionCapability, type AnswerUsefulnessFeedbackSummary, type AnswerUsefulnessRating, type AssistantMessageProvenanceItem, type AvailableAssistantMessageProvenanceItem, type TripWorkspaceReadModel } from "@/features/chat-trips/types";
 import { tripChangeProposalLabels } from "@/features/chat-trips/trip-home-labels";
 import { TripWorkspacePanel } from "@/features/ai/trip-workspace-panel";
-import { DirectApiError, submitDirectAiAskStream } from "@/features/ai/direct-api-client";
+import { acceptDirectTripCreationRecommendation, chooseDirectPrivateTripRecommendation, continueDirectInTrip, declineDirectTripCreationRecommendation, DirectApiError, loadTripRecommendations, submitDirectAiAskStream } from "@/features/ai/direct-api-client";
 import { BrandMark } from "@/components/ui/brand-mark";
 import { AccountIcon, AttachmentIcon, ChatIcon, CloseIcon, CostIcon, HotelAreaIcon, LoadingIcon, MenuIcon, NewChatIcon, PlaceIcon, ProjectIcon, RouteSegmentIcon, SendIcon, SourceIcon } from "@/components/ui/icons";
 
@@ -55,6 +56,7 @@ export type AnswerEntityDescriptor = {
 type TripProjectSummary = {
   id: string;
   title: string;
+  conversationId?: string;
   origin: string | null;
   destination: string | null;
   startDate?: string | null;
@@ -62,8 +64,6 @@ type TripProjectSummary = {
   travelers?: string | null;
   updatedAt?: Date | string;
 };
-
-type CreateTripProjectFormState = { error?: string };
 
 export type IdempotentAiAskSubmission = {
   payloadFingerprint: string;
@@ -98,13 +98,9 @@ export function getIdempotentAiAskSubmission({
   return { payloadFingerprint, key: createKey(), requestScope: { conversationId, tripProjectId } };
 }
 
-type CreateTripProjectAction = (
-  state: CreateTripProjectFormState | undefined,
-  formData: FormData,
-) => Promise<CreateTripProjectFormState | undefined>;
-
 type DeleteConversationAction = (conversationId: string) => Promise<{ success: boolean; error?: string; reason?: "not_found" }>;
-type DeleteTripProjectAction = (tripProjectId: string) => Promise<{ success: boolean; error?: string; reason?: "not_found" }>;
+type CreateTripProjectAction = (title: string) => Promise<{ success: boolean; destination?: { tripProjectId: string } }>;
+type DeleteTripProjectAction = (tripProjectId: string) => Promise<{ success: boolean }>;
 // Story 7.5: typed server actions for owner-confirmed apply/dismiss.
 // Q3: `transient` is a retryable DB/transport failure — the client maps it to a
 // retryable "transient-error" outcome that keeps the action buttons enabled,
@@ -161,16 +157,16 @@ type AiAskComposerProps = {
   initialTripProjects?: TripProjectSummary[];
   selectedTripProject?: TripProjectSummary | null;
   historyConversation?: { id: string; messages: DisplayMessage[] } | null;
-  planningContext?: { hasProjectScope: boolean } | null;
   tripWorkspace?: TripWorkspaceReadModel | null;
   supportsImageInput?: boolean;
   userEmail?: string;
   userName?: string | null;
   userImage?: string | null;
   canAccessAdmin?: boolean;
+  recoveryNotice?: string;
   createTripProjectAction?: CreateTripProjectAction;
-  deleteConversationAction?: DeleteConversationAction;
   deleteTripProjectAction?: DeleteTripProjectAction;
+  deleteConversationAction?: DeleteConversationAction;
   applyTripChangeProposalAction?: ApplyTripChangeProposalAction;
   dismissTripChangeProposalAction?: DismissTripChangeProposalAction;
   executeAnnotationAction?: ExecuteAnnotationAction;
@@ -293,6 +289,29 @@ function AiAskConsumerStatusNotice({ statuses }: { statuses?: DisplayMessage["co
         </section>
       ) : null}
     </>
+  );
+}
+
+function TripRecommendationPanel({ recommendation, pending, onAction }: { recommendation: TripRecommendationResponse; pending: boolean; onAction: (action: "private" | "decline" | "continue" | "accept", decisionId: string, tripProjectId?: string) => void }) {
+  const creation = recommendation.tripCreationRecommendation;
+  const context = recommendation.tripContextRecommendation;
+  if (creation.kind === "none" && context.kind === "none") return null;
+  const privateDecision = creation.kind === "offer" ? creation.decisionId : context.kind === "single" || context.kind === "multiple" ? context.decisionId : undefined;
+  return (
+    <section aria-label="Gợi ý cho chuyến đi" className="mx-auto w-full max-w-[760px] rounded-2xl border border-[#8fb59f] bg-[#edf7f0] p-4 text-[#17342c]">
+      {context.kind === "single" ? <p className="text-sm leading-6">Bạn có muốn tiếp tục trong chuyến đi “{context.title}” không?</p> : null}
+      {creation.kind === "clarify" ? <p className="text-sm leading-6">{creation.question}</p> : null}
+      {context.kind === "clarify" ? <p className="text-sm leading-6">{context.question}</p> : null}
+      {context.kind === "multiple" ? <p className="text-sm leading-6">Bạn có nhiều chuyến đi phù hợp. Bạn có thể tiếp tục hỏi riêng tại đây.</p> : null}
+      {creation.kind === "offer" ? <p className="text-sm leading-6">Bạn có muốn lưu kế hoạch này thành một chuyến đi không?</p> : null}
+      <div className="mt-3 flex flex-wrap gap-2">
+        {context.kind === "single" ? <button className="min-h-11 rounded-xl bg-[#1f5f46] px-3 py-2 text-sm font-semibold text-white focus:outline-none focus:ring-4 focus:ring-[#8fb59f]/45 disabled:opacity-60" disabled={pending} onClick={() => onAction("continue", context.decisionId, context.tripProjectId)} type="button">Tiếp tục trong chuyến đi</button> : null}
+        {creation.kind === "offer" ? <button className="min-h-11 rounded-xl bg-[#1f5f46] px-3 py-2 text-sm font-semibold text-white focus:outline-none focus:ring-4 focus:ring-[#8fb59f]/45 disabled:opacity-60" disabled={pending} onClick={() => onAction("accept", creation.decisionId)} type="button">Lưu chuyến đi</button> : null}
+        {creation.kind === "offer" ? <button className="min-h-11 rounded-xl border border-[#d8c9ad] bg-white px-3 py-2 text-sm font-semibold text-[#17342c] focus:outline-none focus:ring-4 focus:ring-[#e5bd82] disabled:opacity-60" disabled={pending} onClick={() => onAction("decline", creation.decisionId)} type="button">Không lưu</button> : null}
+        {privateDecision ? <button className="min-h-11 rounded-xl border border-[#8fb59f] bg-white px-3 py-2 text-sm font-semibold text-[#17342c] focus:outline-none focus:ring-4 focus:ring-[#8fb59f]/45 disabled:opacity-60" disabled={pending} onClick={() => onAction("private", privateDecision)} type="button">Trả lời riêng</button> : null}
+      </div>
+      {pending ? <p className="mt-2 text-sm" aria-live="polite">Đang cập nhật lựa chọn...</p> : null}
+    </section>
   );
 }
 
@@ -705,16 +724,16 @@ export function AiAskComposer({
   initialTripProjects = emptyTripProjects,
   selectedTripProject = null,
   historyConversation = null,
-  planningContext = null,
   tripWorkspace = null,
   supportsImageInput = false,
   userEmail,
   userName,
   userImage,
   canAccessAdmin = false,
+  recoveryNotice,
   createTripProjectAction,
-  deleteConversationAction,
   deleteTripProjectAction,
+  deleteConversationAction,
   applyTripChangeProposalAction,
   dismissTripChangeProposalAction,
   executeAnnotationAction,
@@ -739,7 +758,6 @@ export function AiAskComposer({
   const [tripProjects, setTripProjects] = useState<TripProjectSummary[]>(initialTripProjects);
   const [isSessionSheetOpen, setSessionSheetOpen] = useState(false);
   const [deletingConversationId, setDeletingConversationId] = useState<string | null>(null);
-  const [deletingTripProjectId, setDeletingTripProjectId] = useState<string | null>(null);
   const [feedbackPendingMessageId, setFeedbackPendingMessageId] = useState<string | null>(null);
   const [selectedAnswerEntity, setSelectedAnswerEntity] = useState<AnswerEntityDescriptor | null>(null);
   const [annotationActionPending, setAnnotationActionPending] = useState(false);
@@ -749,6 +767,8 @@ export function AiAskComposer({
   // P9: plan history sheet state for mobile. Coordinates with the workspace
   // sheet so only one aria-modal dialog is open at a time.
   const [isPlanHistorySheetOpen, setPlanHistorySheetOpen] = useState(false);
+  const [tripRecommendations, setTripRecommendations] = useState<TripRecommendationResponse | null>(null);
+  const [recommendationPending, setRecommendationPending] = useState(false);
   const planHistorySheetPanelRef = useRef<HTMLDivElement>(null);
   // Story 7.5: per-proposal pending action and terminal outcome state for the workspace panel.
   const [proposalPending, setProposalPending] = useState<Record<string, { action: "apply" | "dismiss" } | undefined>>({});
@@ -759,16 +779,10 @@ export function AiAskComposer({
   // blocked immediately.
   const proposalInFlightRef = useRef<Set<string>>(new Set());
   const annotationActionInFlightRef = useRef(false);
-  const [createProjectState, createProjectFormAction, isCreatingProject] = useActionState<CreateTripProjectFormState | undefined, FormData>(
-    createTripProjectAction ?? noOpCreateTripProjectAction,
-    undefined,
-  );
-  const mutationInFlight = Boolean(deletingConversationId) || Boolean(deletingTripProjectId);
-  const createFormDisabled = isPending || isCreatingProject || mutationInFlight;
-  const sessionActionsDisabled = isPending || Boolean(deletingConversationId) || Boolean(deletingTripProjectId);
-  const projectActionsDisabled = isPending || Boolean(deletingConversationId) || Boolean(deletingTripProjectId);
+  const sessionActionsDisabled = isPending || Boolean(deletingConversationId);
+  const projectActionsDisabled = isPending || Boolean(deletingConversationId);
   const isHistoricReview = Boolean(historyConversation);
-  const askFormDisabled = isPending || Boolean(deletingTripProjectId) || isHistoricReview;
+  const askFormDisabled = isPending || isHistoricReview;
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
@@ -776,11 +790,16 @@ export function AiAskComposer({
   const abortControllerRef = useRef<AbortController | null>(null);
   const activeRequestIdRef = useRef(0);
   const idempotencyKeyRef = useRef<IdempotentAiAskSubmission | null>(null);
+  const acceptedCreationKeyRef = useRef<{ decisionId: string; key: string } | null>(null);
+  const recommendationActionInFlightRef = useRef(false);
   const deletingConversationIdRef = useRef<string | null>(null);
   const deletingTripProjectIdRef = useRef<string | null>(null);
   const sessionSheetTriggerRef = useRef<HTMLButtonElement>(null);
   const sessionSheetPanelRef = useRef<HTMLDivElement>(null);
   const sessionSheetPreviousFocusRef = useRef<HTMLElement | null>(null);
+  const focusAfterNavigationRef = useRef<"composer" | "heading" | "selection" | null>(null);
+  const scopeSelectionOriginRef = useRef<HTMLElement | null>(null);
+  const mainHeadingRef = useRef<HTMLHeadingElement>(null);
   const mobileAnswerDetailDialogRef = useRef<HTMLDivElement>(null);
   const mobileAnswerDetailPanelRef = useRef<HTMLDivElement>(null);
   const desktopAnswerDetailPanelRef = useRef<HTMLDivElement>(null);
@@ -842,6 +861,37 @@ export function AiAskComposer({
     setSelectedAnswerEntity(null);
     answerEntityTriggerRef.current = null;
   }, [initialConversationId, initialMessages]);
+
+  useEffect(() => {
+    if (recoveryNotice) {
+      setStatus(recoveryNotice);
+      focusAfterNavigationRef.current = "selection";
+    }
+  }, [recoveryNotice]);
+
+  useEffect(() => {
+    let active = true;
+    const confirmedOrdinaryConversationId = !selectedTripProject && !historyConversation ? initialConversationId : undefined;
+    setTripRecommendations(null);
+    acceptedCreationKeyRef.current = null;
+    if (!confirmedOrdinaryConversationId) return () => { active = false; };
+    void loadTripRecommendations(confirmedOrdinaryConversationId)
+      .then((response) => { if (active) setTripRecommendations(response); })
+      .catch(() => { if (active) setTripRecommendations(null); });
+    return () => { active = false; };
+  }, [historyConversation, initialConversationId, selectedTripProject]);
+
+  useEffect(() => {
+    const target = focusAfterNavigationRef.current;
+    if (!target) return;
+    focusAfterNavigationRef.current = null;
+    const focusTarget = target === "heading"
+      ? mainHeadingRef.current ?? textareaRef.current
+      : target === "selection" && scopeSelectionOriginRef.current?.isConnected
+        ? scopeSelectionOriginRef.current
+        : textareaRef.current;
+    focusTarget?.focus();
+  }, [initialConversationId, selectedTripProject]);
 
   useEffect(() => {
     if (!selectedAnswerEntity) {
@@ -1007,7 +1057,7 @@ export function AiAskComposer({
     return () => {
       window.removeEventListener("keydown", onKeyDown);
       document.body.style.overflow = previousOverflow;
-      sessionSheetPreviousFocusRef.current?.focus();
+      if (!focusAfterNavigationRef.current) sessionSheetPreviousFocusRef.current?.focus();
     };
   }, [isDesktopViewport, isSessionSheetOpen]);
 
@@ -1343,7 +1393,9 @@ export function AiAskComposer({
     if (imageInputRef.current) {
       imageInputRef.current.value = "";
     }
-    router.push(buildCanonicalAiAskUrl(undefined, activeTripProjectId));
+    focusAfterNavigationRef.current = "composer";
+    scopeSelectionOriginRef.current = null;
+    router.push(buildCanonicalAiAskUrl());
   }
 
   function handleSelectSession(id: string) {
@@ -1465,10 +1517,6 @@ export function AiAskComposer({
       sessionSheetPreviousFocusRef.current = textareaRef.current;
       setSessionSheetOpen(false);
     }
-    if (selectedTripProject) {
-      router.push(buildCanonicalAiAskUrl(conversationId, activeTripProjectId));
-      return;
-    }
     setMessages([]);
     setConversationId(undefined);
     setQuestion("");
@@ -1476,11 +1524,13 @@ export function AiAskComposer({
     setFailedQuestionIds([]);
     setSelectedImage(null);
     setSelectedAnswerEntity(null);
+    setTripRecommendations(null);
     answerEntityTriggerRef.current = null;
     if (imageInputRef.current) {
       imageInputRef.current.value = "";
     }
-    router.push(buildCanonicalAiAskUrl(undefined, activeTripProjectId));
+    focusAfterNavigationRef.current = "composer";
+    router.push(buildCanonicalAiAskUrl());
   }
 
   function handleSelectAnswerEntity(entity: AnswerEntityDescriptor, trigger: HTMLElement) {
@@ -1521,7 +1571,7 @@ export function AiAskComposer({
     }
   }
 
-  function handleSelectTripProject(projectId: string) {
+  function handleSelectTripProject(project: TripProjectSummary | null, origin?: HTMLElement) {
     if (isPending) {
       setStatus("Vui lòng chờ câu trả lời hiện tại hoàn tất trước khi đổi dự án chuyến đi.");
       return;
@@ -1532,83 +1582,101 @@ export function AiAskComposer({
       return;
     }
 
-    if (isSessionSheetOpen) {
-      sessionSheetPreviousFocusRef.current = textareaRef.current;
-      setSessionSheetOpen(false);
+    if (isSessionSheetOpen) setSessionSheetOpen(false);
+    setTripRecommendations(null);
+    if (!project) {
+      focusAfterNavigationRef.current = "composer";
+      scopeSelectionOriginRef.current = null;
+      router.push(buildCanonicalAiAskUrl());
+      return;
     }
+    if (!project.conversationId) {
+      setStatus("Không thể mở chuyến đi này lúc này. Vui lòng thử lại.");
+      return;
+    }
+    scopeSelectionOriginRef.current = origin ?? null;
+    sessionSheetPreviousFocusRef.current = origin ?? null;
+    focusAfterNavigationRef.current = "heading";
+    setStatus("Đang mở chuyến đi đã chọn...");
+    router.push(buildCanonicalAiAskUrl(project.conversationId, project.id));
+  }
 
-    router.push(buildCanonicalAiAskUrl(undefined, projectId));
+  async function handleCreateTripProject() {
+    if (!createTripProjectAction) return;
+    const title = window.prompt("Tên chuyến đi mới");
+    if (!title?.trim()) return;
+    setStatus("Đang tạo chuyến đi...");
+    const result = await createTripProjectAction(title.trim());
+    if (!result.success || !result.destination) {
+      setStatus("Không thể tạo chuyến đi lúc này. Vui lòng thử lại.");
+      return;
+    }
+    focusAfterNavigationRef.current = "heading";
+    router.push(buildCanonicalAiAskUrl(undefined, result.destination.tripProjectId));
+    router.refresh();
   }
 
   async function handleDeleteTripProject() {
-    if (!selectedTripProject || !deleteTripProjectAction) {
+    if (!selectedTripProject || !deleteTripProjectAction || !window.confirm(`Xóa chuyến đi “${selectedTripProject.title}”?`)) return;
+    setStatus("Đang xóa chuyến đi...");
+    const result = await deleteTripProjectAction(selectedTripProject.id);
+    if (!result.success) {
+      setStatus("Không thể xóa chuyến đi lúc này. Vui lòng thử lại.");
       return;
     }
+    setTripProjects((projects) => projects.filter((project) => project.id !== selectedTripProject.id));
+    focusAfterNavigationRef.current = "composer";
+    router.push(buildCanonicalAiAskUrl());
+    router.refresh();
+  }
 
-    if (isPending) {
-      setStatus("Vui lòng chờ câu trả lời hiện tại hoàn tất trước khi xoá dự án chuyến đi.");
-      return;
-    }
-
-    if (deletingConversationIdRef.current || deletingTripProjectIdRef.current) {
-      return;
-    }
-
-    const confirmed = window.confirm(`Xoá dự án chuyến đi “${selectedTripProject.title}”? Dự án này, các cuộc trò chuyện liên kết và thông tin ngữ cảnh đã lưu sẽ bị xóa khỏi giao diện thông thường và không còn được dùng để gợi ý trong tương lai. Hành động này không thể hoàn tác.`);
-
-    if (!confirmed) {
-      return;
-    }
-
-    const projectId = selectedTripProject.id;
-    deletingTripProjectIdRef.current = projectId;
-    setDeletingTripProjectId(projectId);
-    setStatus("Đang xoá dự án chuyến đi...");
-
+  async function handleRecommendationAction(action: "private" | "decline" | "continue" | "accept", decisionId: string, tripProjectId?: string) {
+    if (recommendationActionInFlightRef.current || recommendationPending || selectedTripProject || isHistoricReview || !initialConversationId) return;
+    recommendationActionInFlightRef.current = true;
+    setRecommendationPending(true);
+    setStatus("Đang cập nhật lựa chọn...");
     try {
-      const result = await deleteTripProjectAction(projectId);
-
-      if (!result.success) {
-        if (result.reason === "not_found") {
-          setTripProjects((currentProjects) => currentProjects.filter((project) => project.id !== projectId));
-          setSessionSheetOpen(false);
-          setSessions([]);
-          setMessages([]);
-          setConversationId(undefined);
-          setQuestion("");
-          setFailedQuestionIds([]);
-          setSelectedImage(null);
-          setSelectedAnswerEntity(null);
-          answerEntityTriggerRef.current = null;
-          if (imageInputRef.current) {
-            imageInputRef.current.value = "";
-          }
-          reconcileSelection();
-        }
-        setStatus(result.error ?? "Không thể xoá dự án chuyến đi lúc này. Vui lòng thử lại.");
+      if (action === "private") {
+        const result = await chooseDirectPrivateTripRecommendation({ decisionId });
+        if (!result.success) throw new Error();
+        setTripRecommendations(null);
+        setStatus("Bạn có thể tiếp tục hỏi riêng trong cuộc trò chuyện này.");
         return;
       }
-
-      setTripProjects((currentProjects) => currentProjects.filter((project) => project.id !== projectId));
-      setSessionSheetOpen(false);
-      setSessions([]);
-      setMessages([]);
-      setConversationId(undefined);
-      setQuestion("");
-      setFailedQuestionIds([]);
-      setSelectedImage(null);
-      setSelectedAnswerEntity(null);
-      answerEntityTriggerRef.current = null;
-      if (imageInputRef.current) {
-        imageInputRef.current.value = "";
+      if (action === "decline") {
+        const result = await declineDirectTripCreationRecommendation({ decisionId });
+        if (!result.success) throw new Error();
+        setTripRecommendations(null);
+        setStatus("Đã ghi nhận lựa chọn của bạn.");
+        return;
       }
-      reconcileSelection();
-      setStatus("Đã xoá dự án chuyến đi và các cuộc trò chuyện liên kết.");
+      if (action === "continue") {
+        if (!tripProjectId) return;
+        const result = await continueDirectInTrip({ decisionId, tripProjectId });
+        if (!result.success) throw new Error();
+        focusAfterNavigationRef.current = "heading";
+        setTripRecommendations(null);
+        router.push(buildCanonicalAiAskUrl(result.destination.conversationId, result.destination.tripProjectId));
+        router.refresh();
+        return;
+      }
+      const existing = acceptedCreationKeyRef.current;
+      const key = existing?.decisionId === decisionId ? existing.key : crypto.randomUUID().replaceAll("-", "");
+      acceptedCreationKeyRef.current = { decisionId, key };
+      const result = await acceptDirectTripCreationRecommendation(decisionId, key);
+      if (!result.success) {
+        acceptedCreationKeyRef.current = null;
+        throw new Error();
+      }
+      focusAfterNavigationRef.current = "heading";
+      setTripRecommendations(null);
+      router.push(buildCanonicalAiAskUrl(result.destination.conversationId, result.destination.tripProjectId));
+      router.refresh();
     } catch {
-      setStatus("Không thể xoá dự án chuyến đi lúc này. Vui lòng thử lại.");
+      setStatus("Không thể cập nhật lựa chọn lúc này. Vui lòng thử lại.");
     } finally {
-      deletingTripProjectIdRef.current = null;
-      setDeletingTripProjectId(null);
+      recommendationActionInFlightRef.current = false;
+      setRecommendationPending(false);
     }
   }
 
@@ -1739,76 +1807,6 @@ export function AiAskComposer({
     focusCard?.focus?.();
   }
 
-  const planningScope = (
-    <details className="border-t border-[#e6e6e6] pt-3 text-left">
-      <summary className="cursor-pointer px-2 text-[11px] font-medium text-[#777]">Quản lý chuyến đi</summary>
-      <div className="flex flex-col gap-3">
-        <div>
-          <h2 className="mt-3 text-sm font-semibold text-[#202020]">
-            {selectedTripProject ? `Dự án: ${formatTripProjectLabel(selectedTripProject)}` : "Trò chuyện thường"}
-          </h2>
-          <p className="mt-1 text-sm leading-6 text-[#6b6b6b]">
-            {selectedTripProject
-              ? "Tin nhắn mới sẽ vào hội thoại chính."
-              : "Tạo dự án khi bạn muốn gom kế hoạch cho một chuyến đi."}
-          </p>
-          {planningContext?.hasProjectScope ? <p className="mt-2 text-sm text-[#4f625a]">Ngữ cảnh kế hoạch đã được tải cho dự án này.</p> : null}
-          {selectedTripProject ? <p className="mt-2 text-sm font-semibold text-[#1f5f46]">Lịch sử trao đổi: chọn một hội thoại bên trên để xem lại mà không tạo nhánh soạn tin mới.</p> : null}
-        </div>
-        <label className="flex flex-col gap-2 text-sm font-semibold text-[#17342c]">
-          Chọn dự án
-          <select
-            className="min-h-11 rounded-2xl border border-[#d8c9ad] bg-[#fffdf8] px-3 py-2 text-sm text-[#17342c] outline-none focus:border-[#1f5f46] focus:ring-4 focus:ring-[#8fb59f]/45"
-            disabled={projectActionsDisabled}
-            onChange={(event) => handleSelectTripProject(event.target.value)}
-            value={activeTripProjectId ?? ""}
-          >
-            <option value="">Trò chuyện thường</option>
-            {tripProjects.map((project) => (
-              <option key={project.id} value={project.id}>{formatTripProjectLabel(project)}</option>
-            ))}
-          </select>
-        </label>
-      </div>
-
-      {selectedTripProject && deleteTripProjectAction ? (
-        <div className="mt-4 rounded-2xl border border-[#f0c8a0] bg-[#fff7ed] p-3 text-sm leading-6 text-[#6f3f12]">
-          <p>Dự án, các cuộc trò chuyện liên kết và thông tin ngữ cảnh đã lưu sẽ bị xoá khỏi giao diện thông thường và không còn được dùng để gợi ý trong tương lai.</p>
-          <button
-            className="mt-3 min-h-11 rounded-2xl border border-[#b45309] bg-white px-4 py-2 text-sm font-semibold text-[#7c2d12] transition hover:bg-[#ffedd5] focus:outline-none focus:ring-4 focus:ring-[#f0c8a0] disabled:cursor-not-allowed disabled:opacity-60"
-            disabled={projectActionsDisabled}
-            onClick={handleDeleteTripProject}
-            type="button"
-          >
-            {deletingTripProjectId === selectedTripProject.id ? "Đang xoá dự án..." : "Xoá dự án chuyến đi"}
-          </button>
-        </div>
-      ) : null}
-
-      {createTripProjectAction ? (
-        <details className="mt-4 rounded-2xl border border-dashed border-[#d8c9ad] bg-[#fffdf8] p-3">
-          <summary className="cursor-pointer text-sm font-semibold text-[#17342c]">Tạo dự án chuyến đi mới</summary>
-          <form action={createProjectFormAction} className="mt-3 grid gap-3 sm:grid-cols-2">
-            <label className="sm:col-span-2 text-sm font-semibold text-[#17342c]">
-              Tên dự án <span className="text-[#8c4f13]">*</span>
-              <input className="mt-1 min-h-11 w-full rounded-xl border border-[#d8c9ad] bg-white px-3 py-2 text-sm" disabled={createFormDisabled} maxLength={160} name="title" required placeholder="Ví dụ: Đà Nẵng 7 ngày cùng gia đình" />
-            </label>
-            <label className="text-sm font-semibold text-[#17342c]">Điểm đi<input className="mt-1 min-h-11 w-full rounded-xl border border-[#d8c9ad] bg-white px-3 py-2 text-sm" disabled={createFormDisabled} name="origin" placeholder="Hà Nội" /></label>
-            <label className="text-sm font-semibold text-[#17342c]">Điểm đến<input className="mt-1 min-h-11 w-full rounded-xl border border-[#d8c9ad] bg-white px-3 py-2 text-sm" disabled={createFormDisabled} name="destination" placeholder="Đà Nẵng" /></label>
-            <label className="text-sm font-semibold text-[#17342c]">Ngày đi<input className="mt-1 min-h-11 w-full rounded-xl border border-[#d8c9ad] bg-white px-3 py-2 text-sm" disabled={createFormDisabled} name="startDate" placeholder="2026-08-01" /></label>
-            <label className="text-sm font-semibold text-[#17342c]">Ngày về<input className="mt-1 min-h-11 w-full rounded-xl border border-[#d8c9ad] bg-white px-3 py-2 text-sm" disabled={createFormDisabled} name="endDate" placeholder="2026-08-07" /></label>
-            <label className="sm:col-span-2 text-sm font-semibold text-[#17342c]">Người đi<input className="mt-1 min-h-11 w-full rounded-xl border border-[#d8c9ad] bg-white px-3 py-2 text-sm" disabled={createFormDisabled} name="travelers" placeholder="2 người lớn, 1 trẻ em" /></label>
-            <label className="sm:col-span-2 text-sm font-semibold text-[#17342c]">Ghi chú<textarea className="mt-1 min-h-20 w-full rounded-xl border border-[#d8c9ad] bg-white px-3 py-2 text-sm" disabled={createFormDisabled} name="notes" placeholder="Sở thích, nhịp di chuyển, điều cần tránh..." /></label>
-            {createProjectState?.error ? (
-              <p className="sm:col-span-2 rounded-2xl border border-[#f0c8a0] bg-[#fff7ed] p-3 text-sm leading-6 text-[#6f3f12]" role="alert">{createProjectState.error}</p>
-            ) : null}
-            <button className="min-h-11 rounded-2xl bg-[#e5bd82] px-4 py-2 text-sm font-semibold text-[#17342c] transition hover:bg-[#d9a65c] focus:outline-none focus:ring-4 focus:ring-[#e5bd82] disabled:cursor-not-allowed disabled:opacity-60" disabled={createFormDisabled} type="submit">{isCreatingProject ? "Đang tạo dự án..." : "Tạo và chọn dự án"}</button>
-          </form>
-        </details>
-      ) : null}
-    </details>
-  );
-
   const accountName = userName?.trim() || userEmail?.split("@")[0] || "Tài khoản";
   const accountInitial = accountName.slice(0, 1).toLocaleUpperCase("vi-VN");
 
@@ -1861,11 +1859,12 @@ export function AiAskComposer({
         <section aria-labelledby="trip-project-list-heading">
           <h2 className="px-2 text-[11px] font-medium text-[#777]" id="trip-project-list-heading">Chuyến đi</h2>
           <div className="mt-2 flex flex-col gap-1">
-            <button aria-current={!selectedTripProject ? "page" : undefined} className={!selectedTripProject ? "min-h-11 rounded-xl bg-[#e5eeea] px-3 py-2 text-left text-sm font-medium text-[#285c49] focus:outline-none focus:ring-2 focus:ring-[#167c5a]" : "min-h-11 rounded-xl px-3 py-2 text-left text-sm font-medium text-[#303030] transition hover:bg-white focus:outline-none focus:ring-2 focus:ring-[#167c5a]"} disabled={projectActionsDisabled} onClick={() => handleSelectTripProject("")} type="button">Trò chuyện thường</button>
-            {tripProjects.map((project) => <button aria-current={project.id === activeTripProjectId ? "page" : undefined} className={project.id === activeTripProjectId ? "min-h-11 rounded-xl bg-[#e5eeea] px-3 py-2 text-left text-sm font-medium text-[#285c49] focus:outline-none focus:ring-2 focus:ring-[#167c5a]" : "min-h-11 rounded-xl px-3 py-2 text-left text-sm font-medium text-[#303030] transition hover:bg-white focus:outline-none focus:ring-2 focus:ring-[#167c5a]"} disabled={projectActionsDisabled} key={project.id} onClick={() => handleSelectTripProject(project.id)} type="button">{formatTripProjectLabel(project)}</button>)}
+            <button aria-current={!selectedTripProject ? "page" : undefined} className={!selectedTripProject ? "min-h-11 rounded-xl bg-[#e5eeea] px-3 py-2 text-left text-sm font-medium text-[#285c49] focus:outline-none focus:ring-2 focus:ring-[#167c5a]" : "min-h-11 rounded-xl px-3 py-2 text-left text-sm font-medium text-[#303030] transition hover:bg-white focus:outline-none focus:ring-2 focus:ring-[#167c5a]"} disabled={projectActionsDisabled} onClick={(event) => handleSelectTripProject(null, event.currentTarget)} type="button">Hỏi XuyenViet</button>
+            {tripProjects.map((project) => <button aria-current={project.id === activeTripProjectId ? "page" : undefined} className={project.id === activeTripProjectId ? "min-h-11 rounded-xl bg-[#e5eeea] px-3 py-2 text-left text-sm font-medium text-[#285c49] focus:outline-none focus:ring-2 focus:ring-[#167c5a]" : "min-h-11 rounded-xl px-3 py-2 text-left text-sm font-medium text-[#303030] transition hover:bg-white focus:outline-none focus:ring-2 focus:ring-[#167c5a]"} disabled={projectActionsDisabled} key={project.id} onClick={(event) => handleSelectTripProject(project, event.currentTarget)} type="button">{project.title}</button>)}
           </div>
+          {createTripProjectAction ? <button className="mt-2 min-h-11 w-full rounded-xl border border-dashed border-[#8fb59f] px-3 py-2 text-left text-sm font-semibold text-[#285c49] focus:outline-none focus:ring-2 focus:ring-[#167c5a]" disabled={projectActionsDisabled} onClick={handleCreateTripProject} type="button">Tạo chuyến đi</button> : null}
+          {selectedTripProject && deleteTripProjectAction ? <button className="mt-2 min-h-11 w-full rounded-xl border border-[#f0c8a0] px-3 py-2 text-left text-sm font-semibold text-[#8c4f13] focus:outline-none focus:ring-2 focus:ring-[#8c4f13]" disabled={projectActionsDisabled} onClick={handleDeleteTripProject} type="button">Xóa chuyến đi này</button> : null}
         </section>
-        {planningScope}
         <div className="min-h-0 flex-1 border-t border-[#e6e6e6] pt-4">
           <ConversationList
             sessions={sessions}
@@ -1891,11 +1890,11 @@ export function AiAskComposer({
               <MenuIcon />
             </button>
             <button
-              aria-label="Trò chuyện mới"
+               aria-label="Hỏi XuyenViet"
               className="mt-3 grid size-10 place-items-center rounded-lg text-[#555] transition hover:bg-[#ededed] focus:outline-none focus:ring-2 focus:ring-[#167c5a]"
               disabled={sessionActionsDisabled}
               onClick={handleNewChat}
-              title="Trò chuyện mới"
+               title="Hỏi XuyenViet"
               type="button"
             >
               <NewChatIcon />
@@ -1941,7 +1940,7 @@ export function AiAskComposer({
           >
             Danh sách trò chuyện
           </button>
-          <h2 className="min-w-0 flex-1 truncate text-center text-sm font-semibold text-[#17342c]" aria-label={`Không gian đang mở: ${activeWorkspaceTitle}`}>
+          <h2 ref={mainHeadingRef} tabIndex={-1} className="min-w-0 flex-1 truncate text-center text-sm font-semibold text-[#17342c]" aria-label={`Không gian đang mở: ${activeWorkspaceTitle}`}>
             {activeWorkspaceTitle}
           </h2>
           {selectedTripProject && tripWorkspace ? (
@@ -1970,6 +1969,12 @@ export function AiAskComposer({
           </Link>
         </div>
 
+        {selectedTripProject && !isHistoricReview ? (
+          <p className="mx-auto w-full max-w-[760px] rounded-xl bg-[#edf7f2] px-3 py-2 text-sm text-[#285c49]">
+            Đang lên kế hoạch cho: {selectedTripProject.title}
+          </p>
+        ) : null}
+
         {isHistoricReview ? (
           <section className="mx-auto flex w-full max-w-[760px] flex-1 flex-col justify-center gap-4 py-8" aria-label="Lịch sử trao đổi">
             <p className="w-fit rounded-full border border-[#d8c9ad] bg-[#fff8ec] px-4 py-2 text-sm font-semibold text-[#8c4f13]">Lịch sử trao đổi</p>
@@ -1983,11 +1988,6 @@ export function AiAskComposer({
         <div className="mx-auto flex w-full max-w-[760px] flex-1 flex-col justify-center gap-4 py-8 text-center">
           <h2 className="text-4xl font-semibold tracking-[-0.05em] text-[#202020] sm:text-5xl">Mình sẽ đi đâu?</h2>
 
-          {selectedTripProject ? (
-            <p className="mx-auto max-w-2xl rounded-xl bg-[#edf7f2] px-3 py-2 text-sm text-[#285c49]">
-              Dự án: {formatTripProjectLabel(selectedTripProject)}
-            </p>
-          ) : null}
         </div>
         ) : null}
 
@@ -2053,6 +2053,8 @@ export function AiAskComposer({
             </section>
           ) : null}
 
+          {!selectedTripProject && !isHistoricReview && tripRecommendations ? <TripRecommendationPanel recommendation={tripRecommendations} pending={recommendationPending} onAction={handleRecommendationAction} /> : null}
+
            {!isHistoricReview ? <form className="relative mx-auto max-w-[760px] rounded-2xl border border-[#d8d8d8] bg-white p-3 shadow-[0_2px_10px_rgba(0,0,0,0.06)]" onSubmit={handleSubmit} ref={formRef}>
             <label className="sr-only" htmlFor="ai-ask-question">
               Câu hỏi của bạn
@@ -2093,7 +2095,7 @@ export function AiAskComposer({
               />
             ) : null}
             <button
-              aria-label={isPending ? "Đang gửi câu hỏi" : deletingTripProjectId ? "Đang xoá dự án chuyến đi" : "Gửi câu hỏi"}
+              aria-label={isPending ? "Đang gửi câu hỏi" : "Gửi câu hỏi"}
               className="absolute bottom-5 right-5 grid h-10 w-10 place-items-center rounded-xl bg-[#202020] text-white transition hover:bg-[#383838] active:translate-y-px disabled:cursor-not-allowed disabled:bg-[#a3a3a3]"
               disabled={askFormDisabled}
               title="Gửi câu hỏi"
@@ -2174,9 +2176,15 @@ export function AiAskComposer({
                 >
                   Đóng danh sách
                 </button>
-                <div className="mb-3">
-                  {planningScope}
-                </div>
+                <section aria-labelledby="mobile-trip-project-list-heading" className="mb-4">
+                  <h2 className="px-2 text-[11px] font-medium text-[#777]" id="mobile-trip-project-list-heading">Chuyến đi</h2>
+                  <div className="mt-2 flex flex-col gap-1">
+                    <button aria-current={!selectedTripProject ? "page" : undefined} className={!selectedTripProject ? "min-h-11 rounded-xl bg-[#e5eeea] px-3 py-2 text-left text-sm font-medium text-[#285c49] focus:outline-none focus:ring-2 focus:ring-[#167c5a]" : "min-h-11 rounded-xl px-3 py-2 text-left text-sm font-medium text-[#303030] transition hover:bg-white focus:outline-none focus:ring-2 focus:ring-[#167c5a]"} disabled={projectActionsDisabled} onClick={(event) => handleSelectTripProject(null, event.currentTarget)} type="button">Hỏi XuyenViet</button>
+                    {tripProjects.map((project) => <button aria-current={project.id === activeTripProjectId ? "page" : undefined} className={project.id === activeTripProjectId ? "min-h-11 rounded-xl bg-[#e5eeea] px-3 py-2 text-left text-sm font-medium text-[#285c49] focus:outline-none focus:ring-2 focus:ring-[#167c5a]" : "min-h-11 rounded-xl px-3 py-2 text-left text-sm font-medium text-[#303030] transition hover:bg-white focus:outline-none focus:ring-2 focus:ring-[#167c5a]"} disabled={projectActionsDisabled} key={project.id} onClick={(event) => handleSelectTripProject(project, event.currentTarget)} type="button">{project.title}</button>)}
+                  </div>
+                  {createTripProjectAction ? <button className="mt-2 min-h-11 w-full rounded-xl border border-dashed border-[#8fb59f] px-3 py-2 text-left text-sm font-semibold text-[#285c49] focus:outline-none focus:ring-2 focus:ring-[#167c5a]" disabled={projectActionsDisabled} onClick={handleCreateTripProject} type="button">Tạo chuyến đi</button> : null}
+                  {selectedTripProject && deleteTripProjectAction ? <button className="mt-2 min-h-11 w-full rounded-xl border border-[#f0c8a0] px-3 py-2 text-left text-sm font-semibold text-[#8c4f13] focus:outline-none focus:ring-2 focus:ring-[#8c4f13]" disabled={projectActionsDisabled} onClick={handleDeleteTripProject} type="button">Xóa chuyến đi này</button> : null}
+                </section>
                 <ConversationList
                   sessions={sessions}
                   activeConversationId={conversationId}
@@ -2658,8 +2666,4 @@ function formatPreviewText(content: string): string {
   }
 
   return `${trimmed.slice(0, previewMaxLength).trimEnd()}…`;
-}
-
-async function noOpCreateTripProjectAction(state: CreateTripProjectFormState | undefined): Promise<CreateTripProjectFormState | undefined> {
-  return state;
 }

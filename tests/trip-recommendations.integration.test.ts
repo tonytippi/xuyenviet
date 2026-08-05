@@ -2,7 +2,7 @@ import { and, eq } from "drizzle-orm";
 import { beforeEach, describe, expect, test } from "vitest";
 
 import { acceptTripCreationRecommendation, choosePrivateTripRecommendation, continueInTrip, createPostgresTripRecommendationReadRepository, declineTripCreationRecommendation } from "../packages/database/src/trip-recommendations";
-import { createPostgresTravelerCommandPort } from "../packages/database/src";
+import { createPostgresTravelerCommandPort, createPostgresTripProjectSidebarReadRepository } from "../packages/database/src";
 import { aiAskCommands, chatContext, conversations, domainOutbox, messages, tripProjects, tripRecommendationContexts, users } from "@/db/schema";
 import { resetTestDatabase, testDb } from "./helpers/db";
 
@@ -18,6 +18,29 @@ async function readyConversation(owner = "owner", id = "conversation") {
 
 describe("trip recommendation aggregate", () => {
   beforeEach(async () => { await resetTestDatabase(); });
+
+  test("projects only an owner's linked primary conversation and omits stale pointers", async () => {
+    await testDb.insert(users).values([
+      { id: "owner", email: "owner@example.com" },
+      { id: "other", email: "other@example.com" },
+    ]);
+    const commands = createPostgresTravelerCommandPort();
+    const ownerProject = await commands.createTripProject("owner", { title: "Chuyến đi của tôi" });
+    const otherProject = await commands.createTripProject("other", { title: "Không được lộ" });
+    expect(ownerProject).toMatchObject({ success: true });
+    expect(otherProject).toMatchObject({ success: true });
+    if (!ownerProject.success || !otherProject.success) throw new Error("Expected project creation");
+
+    const sidebar = createPostgresTripProjectSidebarReadRepository();
+    await expect(sidebar.listOwnedTripProjectSidebarSummaries("owner")).resolves.toEqual([
+      expect.objectContaining({ id: ownerProject.project.id, title: "Chuyến đi của tôi", conversationId: expect.any(String) }),
+    ]);
+
+    const [{ conversationId }] = await sidebar.listOwnedTripProjectSidebarSummaries("owner");
+    await testDb.update(tripProjects).set({ primaryConversationId: null }).where(eq(tripProjects.id, ownerProject.project.id));
+    await testDb.update(conversations).set({ tripProjectId: null }).where(eq(conversations.id, conversationId));
+    await expect(sidebar.listOwnedTripProjectSidebarSummaries("owner")).resolves.toEqual([]);
+  });
 
   test("is non-actionable until the owner-scoped extraction effect completes", async () => {
     await testDb.insert(users).values({ id: "owner", email: "owner@example.com" });

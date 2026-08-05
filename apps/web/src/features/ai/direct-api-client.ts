@@ -1,6 +1,6 @@
 "use client";
 
-import { parseAcceptTripCreationRecommendationCommand, parseAcceptTripCreationRecommendationResult, parseAnnotationProposalActionCommand, parseAnnotationProposalActionResult, parseApplyTripChangeProposalResult, parseContinueInTripCommand, parseContinueInTripResult, parseConversationSummaryListResponse, parseCreateTripProjectCommand, parseCreateTripProjectResult, parseDeleteOwnedResourceResult, parseDismissTripChangeProposalResult, parsePlanningAnswerDetailResponse, parsePlanningContextResponse, parseRecommendationActionResult, parseRecommendationDecisionCommand, parseSafeApiError, parseSaveAnswerUsefulnessFeedbackCommand, parseSaveAnswerUsefulnessFeedbackResult, parseTravelerShellResponse, parseTripChangeProposalCommand, parseTripRecommendationResponse, type AiAskStreamEvent, type AnnotationProposalActionCommand, type CreateTripProjectCommand, type PlanningAnswerDetailResponse, type PlanningContextResponse, type TripChangeProposalCommand, type TravelerShellResponse } from "@xuyenviet/contracts";
+import { parseAcceptTripCreationRecommendationCommand, parseAcceptTripCreationRecommendationResult, parseAnnotationProposalActionCommand, parseAnnotationProposalActionResult, parseApplyTripChangeProposalResult, parseContinueInTripCommand, parseContinueInTripResult, parseConversationSummaryListResponse, parseCreateTripProjectCommand, parseCreateTripProjectResult, parseDeleteOwnedResourceResult, parseDismissTripChangeProposalResult, parsePlanningAnswerDetailResponse, parsePlanningContextResponse, parseRecommendationActionResult, parseRecommendationDecisionCommand, parseSafeApiError, parseSaveAnswerUsefulnessFeedbackCommand, parseSaveAnswerUsefulnessFeedbackResult, parseTravelerShellResponse, parseTripChangeProposalCommand, parseTripProjectSidebarListResponse, parseTripRecommendationResponse, type AiAskStreamEvent, type AnnotationProposalActionCommand, type CreateTripProjectCommand, type PlanningAnswerDetailResponse, type PlanningContextResponse, type TripChangeProposalCommand, type TravelerShellResponse } from "@xuyenviet/contracts";
 
 let csrfToken: string | null = null;
 
@@ -30,6 +30,10 @@ export function loadTravelerShell(conversationId?: string, tripProjectId?: strin
 
 export async function loadConversationSummaries() {
   return (await directRead("/v1/conversations/summaries", parseConversationSummaryListResponse)).summaries;
+}
+
+export async function loadTripProjectSidebarSummaries() {
+  return (await directRead("/v1/conversations/trip-projects", parseTripProjectSidebarListResponse)).projects;
 }
 
 export function loadPlanningContext(tripProjectId: string): Promise<PlanningContextResponse> {

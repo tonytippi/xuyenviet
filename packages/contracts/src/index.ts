@@ -352,6 +352,8 @@ export function parseAdminUserRosterPage(value: unknown): AdminUserRosterPage | 
 export const conversationSummaryLimit = 100;
 export type ConversationSummary = { id: string; updatedAt: string; preview: string };
 export type ConversationSummaryListResponse = { summaries: ConversationSummary[] };
+export type TripProjectSidebarSummary = { id: string; title: string; conversationId: string; updatedAt: string };
+export type TripProjectSidebarListResponse = { projects: TripProjectSidebarSummary[] };
 export type TravelerShellMessage = { id: string; role: "user" | "assistant"; content: string };
 export type TravelerShellProjection = {
   conversation: { id: string; tripProjectId: string | null; messages: TravelerShellMessage[] } | null;
@@ -966,6 +968,14 @@ export function parseConversationSummaryListResponse(value: unknown): Conversati
   const summaries = (value as { summaries: unknown[] }).summaries;
   if (summaries.length > conversationSummaryLimit || !summaries.every(isConversationSummary)) return null;
   return { summaries: summaries as ConversationSummary[] };
+}
+
+export function parseTripProjectSidebarListResponse(value: unknown): TripProjectSidebarListResponse | null {
+  if (!hasOnlyKeys(value, ["projects"]) || !Array.isArray(value.projects) || value.projects.length > conversationSummaryLimit) return null;
+  const projects = value.projects;
+  if (!projects.every((project) => hasOnlyKeys(project, ["id", "title", "conversationId", "updatedAt"])
+    && isIdentifier(project.id) && isBoundedString(project.title, 160) && isIdentifier(project.conversationId) && typeof project.updatedAt === "string" && isUtcIsoTimestamp(project.updatedAt))) return null;
+  return { projects: projects as TripProjectSidebarSummary[] };
 }
 
 export function parseTravelerShellResponse(value: unknown): TravelerShellResponse | null {

@@ -4,7 +4,7 @@ baseline_commit: e0173d0
 
 # Story 16.2: Preserve Explicit Trip Scope in the Planning Shell
 
-Status: ready-for-dev
+Status: review
 
 ## Story
 
@@ -46,48 +46,48 @@ so that I understand when a saved plan affects my question without learning inte
 
 ## Tasks / Subtasks
 
-- [ ] Extend the owner-scoped sidebar shell projection (AC: 3-5)
-  - [ ] Define a bounded shared Trip Project sidebar-list response/parser in `packages/contracts/src/index.ts`; include only the existing safe summary fields needed for a row and its canonical primary-conversation destination. Rows without a current owned linked primary conversation are omitted; order deterministically by project `updatedAt DESC, id DESC`.
-  - [ ] Add a named Chat/Trips read-repository port in `packages/domain/src/index.ts`; authenticated `userId` is supplied by Nest, never by browser input.
-  - [ ] Implement the PostgreSQL owner-filtered list in `packages/database/src/index.ts`. Select only projects that currently have an owned, linked primary conversation; use stable ordering and never return another owner's project, a stale primary pointer, or raw planning constraints.
-  - [ ] Expose and document the protected direct Nest read route in `apps/api/src/conversations/conversations.controller.ts`, `apps/api/src/app.module.ts`, and `apps/api/src/openapi.controller.ts`. Reuse the existing principal/session/origin boundary and safe error envelope.
-  - [ ] Add a strict relative-cookie browser wrapper in `apps/web/src/features/ai/direct-api-client.ts`; do not create a Next route handler, server action, browser database access, or local persistence. A malformed or failed project-list read must not make client-held rows authoritative or replace an otherwise usable selected shell.
+- [x] Extend the owner-scoped sidebar shell projection (AC: 3-5)
+  - [x] Define a bounded shared Trip Project sidebar-list response/parser in `packages/contracts/src/index.ts`; include only the existing safe summary fields needed for a row and its canonical primary-conversation destination. Rows without a current owned linked primary conversation are omitted; order deterministically by project `updatedAt DESC, id DESC`.
+  - [x] Add a named Chat/Trips read-repository port in `packages/domain/src/index.ts`; authenticated `userId` is supplied by Nest, never by browser input.
+  - [x] Implement the PostgreSQL owner-filtered list in `packages/database/src/index.ts`. Select only projects that currently have an owned, linked primary conversation; use stable ordering and never return another owner's project, a stale primary pointer, or raw planning constraints.
+  - [x] Expose and document the protected direct Nest read route in `apps/api/src/conversations/conversations.controller.ts`, `apps/api/src/app.module.ts`, and `apps/api/src/openapi.controller.ts`. Reuse the existing principal/session/origin boundary and safe error envelope.
+  - [x] Add a strict relative-cookie browser wrapper in `apps/web/src/features/ai/direct-api-client.ts`; do not create a Next route handler, server action, browser database access, or local persistence. A malformed or failed project-list read must not make client-held rows authoritative or replace an otherwise usable selected shell.
 
-- [ ] Load one server-owned shell model across breakpoints (AC: 1, 3-5)
-  - [ ] Update `apps/web/src/features/chat-trips/direct-shell-loader.tsx` to load conversation summaries and owned project summaries alongside the current shell, then pass them to `AiAskComposer` as initial server data. This one loader invocation is the sole source for all sidebar rows at every breakpoint; separate endpoint calls may be coordinated inside it, but no second loader, independently refreshed project list, or client-owned fallback may compete with its URL-selected shell.
-  - [ ] Preserve `apps/web/src/app/ai-ask/page.tsx` as the single URL parser for `conversationId`, `tripProjectId`, and `historyConversationId`; continue rejecting multi-valued query parameters.
-  - [ ] Keep the existing selected-project shell rule: the database resolves `tripProjectId` to its persisted primary conversation and ignores a competing browser `conversationId`.
-  - [ ] Do not add a mobile-specific loader, selection store, local-storage state, or a second scope owner. Desktop sidebar, tablet rail, and mobile sheet present the same data and URL-selected server shell.
+- [x] Load one server-owned shell model across breakpoints (AC: 1, 3-5)
+  - [x] Update `apps/web/src/features/chat-trips/direct-shell-loader.tsx` to load conversation summaries and owned project summaries alongside the current shell, then pass them to `AiAskComposer` as initial server data. This one loader invocation is the sole source for all sidebar rows at every breakpoint; separate endpoint calls may be coordinated inside it, but no second loader, independently refreshed project list, or client-owned fallback may compete with its URL-selected shell.
+  - [x] Preserve `apps/web/src/app/ai-ask/page.tsx` as the single URL parser for `conversationId`, `tripProjectId`, and `historyConversationId`; continue rejecting multi-valued query parameters.
+  - [x] Keep the existing selected-project shell rule: the database resolves `tripProjectId` to its persisted primary conversation and ignores a competing browser `conversationId`.
+  - [x] Do not add a mobile-specific loader, selection store, local-storage state, or a second scope owner. Desktop sidebar, tablet rail, and mobile sheet present the same data and URL-selected server shell.
 
-- [ ] Make active trip scope understandable without composer scope controls (AC: 1-2)
-  - [ ] In `apps/web/src/features/ai/ai-ask-composer.tsx`, replace technical project labels such as `Dự án:` and `Ngữ cảnh kế hoạch...` with the bounded traveler label `Đang lên kế hoạch cho: {title}` in the main header and adjacent composer context.
-  - [ ] Render no corresponding label for ordinary unscoped chat. Sidebar active state alone is insufficient; the main shell must disclose a selected trip.
-  - [ ] Remove the persistent `Quản lý chuyến đi`/project-select scope-control block. Do not replace it with another persistent composer action bar, dropdown, or leave/switch button.
-  - [ ] Keep existing project deletion/create controls only if their present behavior remains reachable through appropriate sidebar/sheet navigation; do not expand manual project-management UX in this story.
-  - [ ] Rename the established new-chat action and accessible labels from `Trò chuyện mới` to `Hỏi XuyenViet` where it represents the unscoped entry action.
+- [x] Make active trip scope understandable without composer scope controls (AC: 1-2)
+  - [x] In `apps/web/src/features/ai/ai-ask-composer.tsx`, replace technical project labels such as `Dự án:` and `Ngữ cảnh kế hoạch...` with the bounded traveler label `Đang lên kế hoạch cho: {title}` in the main header and adjacent composer context.
+  - [x] Render no corresponding label for ordinary unscoped chat. Sidebar active state alone is insufficient; the main shell must disclose a selected trip.
+  - [x] Remove the persistent `Quản lý chuyến đi`/project-select scope-control block. Do not replace it with another persistent composer action bar, dropdown, or leave/switch button.
+  - [x] Keep existing project deletion/create controls only if their present behavior remains reachable through appropriate sidebar/sheet navigation; do not expand manual project-management UX in this story.
+  - [x] Rename the established new-chat action and accessible labels from `Trò chuyện mới` to `Hỏi XuyenViet` where it represents the unscoped entry action.
 
-- [ ] Implement explicit unscoped navigation and validated switching (AC: 2-4)
-  - [ ] Change `handleNewChat()` so it clears the transient draft/message selection as needed and navigates to `/ai-ask` with neither `conversationId` nor `tripProjectId`, including when called from a selected Trip Project. Never submit an AI turn with project constraints after this action.
-  - [ ] Make sidebar/sheet Trip Project rows use their server-projected canonical `{ tripProjectId, conversationId }` destination. Do not build authority from a selected ID alone or infer a primary conversation on the client.
-  - [ ] Wire Story 16.1 typed recommendation actions using `loadTripRecommendations`, `continueDirectInTrip`, `chooseDirectPrivateTripRecommendation`, `declineDirectTripCreationRecommendation`, and `acceptDirectTripCreationRecommendation` only. Load recommendations only for a server-confirmed unscoped ordinary `conversationId`; ignore or cancel a response when the URL-selected shell changes, and clear recommendation UI on new chat, project selection, historic view, or stale reconciliation. Render controls only from the typed response, never assistant prose, annotations, local storage, or parsed answer text.
-  - [ ] Navigate after `continueDirectInTrip(...)` and accepted creation only from the returned canonical destination. Keep private-answer selection on the current unscoped URL; it must not load or persist selected-project constraints or link conversations.
-  - [ ] Generate an accepted-creation `Idempotency-Key` once per explicit acceptance attempt and reuse it only for an ambiguous retry of that same attempt. Do not send an idempotency header for private, decline, or continue actions.
-  - [ ] During an action, disable duplicate scope choices and expose only a concise pending status. After terminal success or failure, reconcile with router navigation/refresh so the server shell is authoritative.
+- [x] Implement explicit unscoped navigation and validated switching (AC: 2-4)
+  - [x] Change `handleNewChat()` so it clears the transient draft/message selection as needed and navigates to `/ai-ask` with neither `conversationId` nor `tripProjectId`, including when called from a selected Trip Project. Never submit an AI turn with project constraints after this action.
+  - [x] Make sidebar/sheet Trip Project rows use their server-projected canonical `{ tripProjectId, conversationId }` destination. Do not build authority from a selected ID alone or infer a primary conversation on the client.
+  - [x] Wire Story 16.1 typed recommendation actions using `loadTripRecommendations`, `continueDirectInTrip`, `chooseDirectPrivateTripRecommendation`, `declineDirectTripCreationRecommendation`, and `acceptDirectTripCreationRecommendation` only. Load recommendations only for a server-confirmed unscoped ordinary `conversationId`; ignore or cancel a response when the URL-selected shell changes, and clear recommendation UI on new chat, project selection, historic view, or stale reconciliation. Render controls only from the typed response, never assistant prose, annotations, local storage, or parsed answer text.
+  - [x] Navigate after `continueDirectInTrip(...)` and accepted creation only from the returned canonical destination. Keep private-answer selection on the current unscoped URL; it must not load or persist selected-project constraints or link conversations.
+  - [x] Generate an accepted-creation `Idempotency-Key` once per explicit acceptance attempt and reuse it only for an ambiguous retry of that same attempt. Do not send an idempotency header for private, decline, or continue actions.
+  - [x] During an action, disable duplicate scope choices and expose only a concise pending status. After terminal success or failure, reconcile with router navigation/refresh so the server shell is authoritative.
 
-- [ ] Preserve recovery and accessible focus behavior (AC: 4-5)
-  - [ ] On a null/stale shell or failed validated selection, clear pending local selection, reconcile to `/ai-ask`, and show generic practical Vietnamese recovery copy. Foreign, missing, deleted, and unlinked resources must be indistinguishable to travelers.
-  - [ ] Retain the initiating row/control before a scope selection. On successful mobile selection, close the sheet and, after the canonical shell renders, focus the main chat heading or composer. On rejected or stale desktop selection, restore focus to the initiating row when still connected, otherwise the composer. After `Hỏi XuyenViet` becomes canonical, focus the composer. Do not treat `router.push` alone as validation or focus-transfer completion.
-  - [ ] Preserve existing mobile sheet focus trapping and `Escape` close behavior. Selecting a conversation/project from the mobile sheet must close it and focus the main chat heading or composer rather than restoring focus to a now-stale row.
-  - [ ] Ensure sidebar/sheet rows expose `aria-current` for active route state, remain keyboard and touch reachable, retain visible focus, and meet the existing 44px mobile target floor.
-  - [ ] Use the established polite `aria-live` status mechanism for selection pending/recovery updates; do not expose route IDs, API codes, request IDs, state discriminators, source/provenance, retrieval, audit, provider, or diagnostic terms.
-  - [ ] Preserve historical linked conversation behavior: it remains read-only and returns to the primary conversation. It must never become a parallel project composer.
+- [x] Preserve recovery and accessible focus behavior (AC: 4-5)
+  - [x] On a null/stale shell or failed validated selection, clear pending local selection, reconcile to `/ai-ask`, and show generic practical Vietnamese recovery copy. Foreign, missing, deleted, and unlinked resources must be indistinguishable to travelers.
+  - [x] Retain the initiating row/control before a scope selection. On successful mobile selection, close the sheet and, after the canonical shell renders, focus the main chat heading or composer. On rejected or stale desktop selection, restore focus to the initiating row when still connected, otherwise the composer. After `Hỏi XuyenViet` becomes canonical, focus the composer. Do not treat `router.push` alone as validation or focus-transfer completion.
+  - [x] Preserve existing mobile sheet focus trapping and `Escape` close behavior. Selecting a conversation/project from the mobile sheet must close it and focus the main chat heading or composer rather than restoring focus to a now-stale row.
+  - [x] Ensure sidebar/sheet rows expose `aria-current` for active route state, remain keyboard and touch reachable, retain visible focus, and meet the existing 44px mobile target floor.
+  - [x] Use the established polite `aria-live` status mechanism for selection pending/recovery updates; do not expose route IDs, API codes, request IDs, state discriminators, source/provenance, retrieval, audit, provider, or diagnostic terms.
+  - [x] Preserve historical linked conversation behavior: it remains read-only and returns to the primary conversation. It must never become a parallel project composer.
 
-- [ ] Add focused regression coverage (AC: 1-5)
-  - [ ] Add pure contract/client tests for strict project-list parsing, relative cookie-authenticated reads, and canonical destination use. Preserve accepted-creation-only `Idempotency-Key` behavior.
-  - [ ] Add serial PostgreSQL/Nest integration coverage for authenticated owner-scoped project lists, foreign-project non-disclosure, primary-conversation validity, and safe stale/unlinked routing. Each clean-table suite calls `resetTestDatabase()` locally.
-  - [ ] Add focused shell/navigation coverage for `Hỏi XuyenViet` clearing both URL scope values, no project-constraint carryover, typed continue destination navigation, private-answer URL preservation, accepted-creation idempotency lifecycle, pending selection, stale recovery, and concrete focus intent.
-  - [ ] Include source-level or existing-compatible UI assertions for no persistent composer project selector, selected-trip traveler-language labels, absent unscoped technical label, shared desktop/mobile data flow, keyboard active state, and mobile selection focus transfer. Do not introduce a broad new UI test framework solely for this story.
-  - [ ] Run focused unit tests, serial integration tests, `pnpm lint`, `pnpm typecheck`, `pnpm build`, and `git diff --check`. Record exact environment blockers rather than claiming unrun verification.
+- [x] Add focused regression coverage (AC: 1-5)
+  - [x] Add pure contract/client tests for strict project-list parsing, relative cookie-authenticated reads, and canonical destination use. Preserve accepted-creation-only `Idempotency-Key` behavior.
+  - [x] Add serial PostgreSQL/Nest integration coverage for authenticated owner-scoped project lists, foreign-project non-disclosure, primary-conversation validity, and safe stale/unlinked routing. Each clean-table suite calls `resetTestDatabase()` locally.
+  - [x] Add focused shell/navigation coverage for `Hỏi XuyenViet` clearing both URL scope values, no project-constraint carryover, typed continue destination navigation, private-answer URL preservation, accepted-creation idempotency lifecycle, pending selection, stale recovery, and concrete focus intent.
+  - [x] Include source-level or existing-compatible UI assertions for no persistent composer project selector, selected-trip traveler-language labels, absent unscoped technical label, shared desktop/mobile data flow, keyboard active state, and mobile selection focus transfer. Do not introduce a broad new UI test framework solely for this story.
+  - [x] Run focused unit tests, serial integration tests, `pnpm lint`, `pnpm typecheck`, `pnpm build`, and `git diff --check`. Record exact environment blockers rather than claiming unrun verification.
 
 ## Dev Notes
 
@@ -170,13 +170,45 @@ gpt-5.6-terra
 ### Debug Log References
 
 - Story context created from the Epic 16 PRD/epic contract, architecture spine, UX specifications, readiness report, completed Story 16.1 guide and repairs, current direct shell implementation, direct API contracts, and recent git history.
+- 2026-08-05: Implemented and verified the owner-scoped canonical Trip Project sidebar projection, protected direct read route, single shell-loader list flow, explicit unscoped navigation, shared desktop/mobile project rows, and focus intent for canonical navigation. Story remains in progress because the required typed Story 16.1 recommendation UI/action lifecycle is not yet wired into the composer.
+- 2026-08-05: Wired the typed Story 16.1 recommendation lifecycle into the confirmed ordinary shell only. It discards stale loads on URL/scope/history changes, renders no action from assistant prose, calls only the typed client wrappers, uses returned canonical destinations, and retains an accepted-creation key solely for an ambiguous retry of the same attempt.
 
 ### Completion Notes List
 
 - Ultimate context engine analysis completed - comprehensive developer guide created.
 - Status set to `ready-for-dev`.
+- Partial implementation complete: the list projection omits foreign/stale/unlinked primary conversations, the browser consumes it through a strict relative credentialed read, and navigation uses its canonical `{ tripProjectId, conversationId }` destination.
+- `Hỏi XuyenViet` clears both URL scope values and returns focus to the composer after canonical navigation. Selected trips use the traveler label `Đang lên kế hoạch cho: {title}`; the persistent composer scope manager was removed.
+- Verification passed: `pnpm test:unit -- tests/ai-ask-direct-api.test.ts` (216 tests), `pnpm test:integration -- tests/trip-recommendations-api.integration.test.ts` (435 tests), `pnpm typecheck`, `pnpm lint` (0 errors; 45 existing unrelated warnings), `pnpm build`, and `git diff --check`.
+- Remaining required work: render and execute the typed Story 16.1 recommendation decisions only for confirmed unscoped ordinary shells, including URL-bound cancellation, private/continue/decline/accepted-creation action handling, accepted-creation retry-key lifecycle, and focused navigation regressions.
+- Typed recommendation lifecycle is now implemented and source-level regression-tested: no recommendation loads in project/history shells; private/decline retain the ordinary URL; continue/accepted creation navigate only to returned canonical destinations; duplicate choices are disabled while pending; accepted creation uses a distinct per-decision key and clears it after a terminal API response.
+- The story remains `in-progress` pending interaction-level validation of stale-route recovery and focus transfer. Existing tests are source-level for the client shell; no UI interaction framework was introduced by this story.
+- User accepted the existing source-level regression coverage for stale recovery and focus transfer on 2026-08-05; no UI interaction framework was added because that is explicitly out of scope.
+- Definition-of-done reconciliation: Story remains `in-progress` because subtask completion cannot be asserted until the existing project create/delete navigation remains reachable and stale selected-shell reconciliation is exercised. The user acceptance covers the test-framework decision only, not these functional requirements.
+- Final recovery implementation: create/delete controls now live in desktop/sidebar and mobile navigation only; create atomically assigns the initial primary conversation; stale scoped shell resolution clears to `/ai-ask` and supplies a generic Vietnamese notice with composer focus intent. Source-level regression verifies these boundaries.
+- Final verification passed: `pnpm test:unit -- tests/direct-shell-proposal-actions.test.ts` (218 tests), `pnpm test:integration -- tests/trip-recommendations-api.integration.test.ts` (435 tests), `pnpm lint` (0 errors; 45 pre-existing warnings), `pnpm typecheck`, `pnpm build`, and `git diff --check`.
+- Checklist reconciliation completed: all ACs and subtasks have implementation and regression evidence. A late audit moved the selected-trip label into the shared shell and restored stale desktop selection focus to the initiating row when connected. Final focused unit coverage passed (219 tests); expanded serial integration coverage passed (436 tests). Status changed to `review`.
 
 ### File List
 
 - `_bmad-output/implementation-artifacts/16-2-preserve-explicit-trip-scope-in-the-planning-shell.md`
 - `_bmad-output/implementation-artifacts/sprint-status.yaml`
+- `apps/api/src/app.module.ts`
+- `apps/api/src/conversations/conversations.controller.ts`
+- `apps/api/src/main.ts`
+- `apps/api/src/openapi.controller.ts`
+- `apps/web/src/features/ai/ai-ask-composer.tsx`
+- `apps/web/src/features/ai/direct-api-client.ts`
+- `apps/web/src/features/chat-trips/direct-shell-loader.tsx`
+- `packages/contracts/src/index.ts`
+- `packages/database/src/index.ts`
+- `packages/domain/src/index.ts`
+- `tests/ai-ask-direct-api.test.ts`
+- `tests/trip-recommendations-api.integration.test.ts`
+- `tests/direct-shell-proposal-actions.test.ts`
+
+### Change Log
+
+- 2026-08-05: Added canonical owner-scoped Trip Project sidebar reads and explicit unscoped shell navigation; Story remains in progress pending typed recommendation lifecycle integration.
+- 2026-08-05: Added URL-bound typed recommendation actions and canonical destination navigation; Story remains in progress pending interaction-level stale recovery/focus validation.
+- 2026-08-05: User accepted existing coverage for stale recovery and focus transfer; story remains in progress while existing project-management reachability and stale selected-shell reconciliation are completed.

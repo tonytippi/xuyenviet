@@ -1,4 +1,4 @@
-import { conversationSummaryLimit, type AcceptTripCreationRecommendationCommand, type AcceptTripCreationRecommendationResult, type AiAskStreamEvent, type AiAskStreamInput, type AnnotationProposalActionCommand, type AnnotationProposalActionResult, type ApplyTripChangeProposalResult, type ContinueInTripCommand, type ContinueInTripResult, type ConversationSummary, type CreateTripProjectCommand, type CreateTripProjectResult, type DeleteOwnedResourceResult, type DismissTripChangeProposalResult, type PlanningAnswerDetailResponse, type RecommendationActionResult, type RecommendationDecisionCommand, type RequestPrincipal, type SaveAnswerUsefulnessFeedbackCommand, type SaveAnswerUsefulnessFeedbackResult, type TripAnswerContextResponse, type TripChangeProposalCommand, type TripRecommendationResponse } from "@xuyenviet/contracts";
+import { conversationSummaryLimit, type AcceptTripCreationRecommendationCommand, type AcceptTripCreationRecommendationResult, type AiAskStreamEvent, type AiAskStreamInput, type AnnotationProposalActionCommand, type AnnotationProposalActionResult, type ApplyTripChangeProposalResult, type ContinueInTripCommand, type ContinueInTripResult, type ConversationSummary, type CreateTripProjectCommand, type CreateTripProjectResult, type DeleteOwnedResourceResult, type DismissTripChangeProposalResult, type PlanningAnswerDetailResponse, type RecommendationActionResult, type RecommendationDecisionCommand, type RequestPrincipal, type SaveAnswerUsefulnessFeedbackCommand, type SaveAnswerUsefulnessFeedbackResult, type TripAnswerContextResponse, type TripChangeProposalCommand, type TripProjectSidebarListResponse, type TripRecommendationResponse } from "@xuyenviet/contracts";
 
 export type ConversationSummaryRepository = {
   listOwnedConversationSummaryRows(userId: string, limit: number): Promise<Array<{ id: string; updatedAt: Date; messageContent: string | null }>>;
@@ -10,6 +10,8 @@ export type PlanningReadRepository = {
   loadOwnedAnswerDetail(userId: string, conversationId: string, assistantMessageId: string): Promise<PlanningAnswerDetailResponse["detail"]>;
 };
 export type TripRecommendationReadRepository = { loadOwnedTripRecommendations(userId: string, conversationId: string): Promise<TripRecommendationResponse> };
+/** Owner scope is supplied by the authenticated HTTP adapter, never by browser input. */
+export type TripProjectSidebarReadRepository = { listOwnedTripProjectSidebarSummaries(userId: string): Promise<TripProjectSidebarListResponse["projects"]> };
 
 /** The HTTP adapter supplies the admitted principal; this port never reads a cookie. */
 export type TravelerCommandPort = {

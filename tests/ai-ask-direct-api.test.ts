@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 
-import { acceptDirectTripCreationRecommendation, declineDirectTripCreationRecommendation, loadTravelerShell, submitDirectAiAskStream } from "../apps/web/src/features/ai/direct-api-client";
+import { acceptDirectTripCreationRecommendation, declineDirectTripCreationRecommendation, loadTravelerShell, loadTripProjectSidebarSummaries, submitDirectAiAskStream } from "../apps/web/src/features/ai/direct-api-client";
 
 describe("direct traveler API client", () => {
   afterEach(() => { vi.unstubAllGlobals(); });
@@ -10,6 +10,18 @@ describe("direct traveler API client", () => {
     vi.stubGlobal("fetch", fetch);
     await expect(loadTravelerShell("conversation-1")).resolves.toEqual({ shell: { conversation: null, tripProject: null, workspace: null } });
     expect(fetch).toHaveBeenCalledWith("/v1/conversations/shell?conversationId=conversation-1", expect.objectContaining({ credentials: "include" }));
+  });
+
+  test("uses a strict relative cookie-authenticated Trip Project list read", async () => {
+    const fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ projects: [{ id: "project-1", title: "Hè miền Trung", conversationId: "conversation-1", updatedAt: "2026-08-05T00:00:00.000Z" }] }), { status: 200 }));
+    vi.stubGlobal("fetch", fetch);
+    await expect(loadTripProjectSidebarSummaries()).resolves.toEqual([{ id: "project-1", title: "Hè miền Trung", conversationId: "conversation-1", updatedAt: "2026-08-05T00:00:00.000Z" }]);
+    expect(fetch).toHaveBeenCalledWith("/v1/conversations/trip-projects", expect.objectContaining({ credentials: "include" }));
+  });
+
+  test("rejects malformed Trip Project list rows", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ projects: [{ id: "project-1", title: "Hè miền Trung", updatedAt: "2026-08-05T00:00:00.000Z" }] }), { status: 200 })));
+    await expect(loadTripProjectSidebarSummaries()).rejects.toThrow();
   });
 
   test("accepts a shell conversation with persisted messages", async () => {

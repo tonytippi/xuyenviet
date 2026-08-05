@@ -5,13 +5,13 @@ import { and, asc, desc, eq, sql } from "drizzle-orm";
 import { loadAnswerContext } from "./answer-context";
 import { formatAssistantMessageProvenance } from "./provenance";
 import { answerUsefulnessFeedback, assistantResponseProvenance, conversations, messages, tripChangeProposals, tripPlanChangeHistory, tripPlanItems, tripProjectConstraints, tripProjects, users } from "./schema";
-import { adminUserRosterPageSize, encodeAdminUserRosterCursor, evaluateSchemaAdmission, parsePlanningAnswerDetailResponse, planningDetailProvenanceLimit, type AdminAiGatewayModel, type AdminAiGatewayModelInput, type AdminAiGatewayModelUpdate, type PlanningJsonValue, type PlanningProvenance, type RequestPrincipal, type RequestRole, type SchemaCompatibilityDeclaration, type TravelerShellProjection, type TripAnswerContextResponse } from "@xuyenviet/contracts";
+import { adminUserRosterPageSize, conversationSummaryLimit, encodeAdminUserRosterCursor, evaluateSchemaAdmission, parsePlanningAnswerDetailResponse, planningDetailProvenanceLimit, type AdminAiGatewayModel, type AdminAiGatewayModelInput, type AdminAiGatewayModelUpdate, type PlanningJsonValue, type PlanningProvenance, type RequestPrincipal, type RequestRole, type SchemaCompatibilityDeclaration, type TravelerShellProjection, type TripAnswerContextResponse } from "@xuyenviet/contracts";
 import { createAiAskStreamExecutionPort } from "./ai-ask-stream-execution";
 import { discardAiAskCommandsForDeletedConversations } from "./ai-ask-commands";
 import { acceptTripCreationRecommendation, choosePrivateTripRecommendation, continueInTrip, declineTripCreationRecommendation, discardTripRecommendationAcceptancesForDeletedResources } from "./trip-recommendations";
 import { recordAuditEvent } from "./audit-writers";
 import { toUserAuditActor } from "./actors";
-import type { TravelerCommandPort } from "@xuyenviet/domain";
+import type { TravelerCommandPort, TripProjectSidebarReadRepository } from "@xuyenviet/domain";
 
 const answerUsefulnessCommentMaxLength = 500;
 
@@ -95,6 +95,21 @@ export interface TravelerShellRepository {
   loadOwnedTravelerShell(userId: string, conversationId?: string, tripProjectId?: string): Promise<TravelerShellProjection>;
 }
 
+export function createPostgresTripProjectSidebarReadRepository(): TripProjectSidebarReadRepository {
+  return {
+    async listOwnedTripProjectSidebarSummaries(userId) {
+      const db = (await import("./client")).getDb();
+      const rows = await db.select({ id: tripProjects.id, title: tripProjects.title, conversationId: conversations.id, updatedAt: tripProjects.updatedAt })
+        .from(tripProjects)
+        .innerJoin(conversations, and(eq(conversations.id, tripProjects.primaryConversationId), eq(conversations.tripProjectId, tripProjects.id), eq(conversations.userId, userId)))
+        .where(eq(tripProjects.userId, userId))
+        .orderBy(desc(tripProjects.updatedAt), desc(tripProjects.id))
+        .limit(conversationSummaryLimit);
+      return rows.map((row) => ({ ...row, updatedAt: row.updatedAt.toISOString() }));
+    },
+  };
+}
+
 export function createPostgresConversationSummaryRepository(databaseUrl: string): ConversationSummaryRepository {
   const sql = postgres(databaseUrl, { max: 1 });
   return {
@@ -173,8 +188,10 @@ export function createPostgresTravelerCommandPort(): TravelerCommandPort {
         const project = await (await import("./client")).getDb().transaction(async (transaction) => {
           const [actor] = await transaction.select({ email: users.email }).from(users).where(eq(users.id, userId)).limit(1);
           if (!actor?.email) throw new Error("Audit actor unavailable.");
-          const [created] = await transaction.insert(tripProjects).values({ userId, title, origin, destination, startDate, endDate, travelers, notes }).returning();
-          await recordAuditEvent({ actor: toUserAuditActor({ userId, email: actor.email }), operation: "create", targetType: "trip_project", targetId: created!.id, afterSummary: JSON.stringify({ titleLength: created!.title.length, hasOrigin: Boolean(created!.origin), hasDestination: Boolean(created!.destination), hasStartDate: Boolean(created!.startDate), hasEndDate: Boolean(created!.endDate), hasTravelers: Boolean(created!.travelers), hasNotes: Boolean(created!.notes) }) }, transaction);
+           const [created] = await transaction.insert(tripProjects).values({ userId, title, origin, destination, startDate, endDate, travelers, notes }).returning();
+           const [primaryConversation] = await transaction.insert(conversations).values({ userId, tripProjectId: created!.id }).returning({ id: conversations.id });
+           await transaction.update(tripProjects).set({ primaryConversationId: primaryConversation!.id, updatedAt: new Date() }).where(eq(tripProjects.id, created!.id));
+           await recordAuditEvent({ actor: toUserAuditActor({ userId, email: actor.email }), operation: "create", targetType: "trip_project", targetId: created!.id, afterSummary: JSON.stringify({ titleLength: created!.title.length, hasOrigin: Boolean(created!.origin), hasDestination: Boolean(created!.destination), hasStartDate: Boolean(created!.startDate), hasEndDate: Boolean(created!.endDate), hasTravelers: Boolean(created!.travelers), hasNotes: Boolean(created!.notes) }) }, transaction);
           return created!;
         });
         return { success: true, project: { id: project.id, title: project.title, origin: project.origin, destination: project.destination, startDate: project.startDate, endDate: project.endDate, travelers: project.travelers, notes: project.notes, updatedAt: project.updatedAt.toISOString() } };

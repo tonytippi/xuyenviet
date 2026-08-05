@@ -15,16 +15,19 @@ const browserAuth = { googleClientId: "client", googleClientSecret: "secret", ca
 let app: INestApplication;
 const loadRecommendations = vi.fn();
 const acceptTripCreationRecommendation = vi.fn();
+const listTripProjects = vi.fn();
 
 beforeEach(async () => {
   await resetTestDatabase();
   loadRecommendations.mockReset().mockResolvedValue({ tripCreationRecommendation: { kind: "none" }, tripContextRecommendation: { kind: "none" } });
   acceptTripCreationRecommendation.mockReset().mockResolvedValue({ success: true, destination: { tripProjectId: "project-1", conversationId: "conversation-1" } });
+  listTripProjects.mockReset().mockResolvedValue([]);
   const commands: Pick<TravelerCommandPort, "acceptTripCreationRecommendation"> = { acceptTripCreationRecommendation };
   const identities = createPostgresApiIdentityRepository(getTestDatabaseUrl(), browserAuth.sessionLookupKey, browserAuth.oauthTransactionProtectionKey);
   const ApiModule = createApiModule(identities, {
     conversationSummaries: { async listOwnedConversationSummaryRows() { return []; } },
     tripRecommendations: { loadOwnedTripRecommendations: loadRecommendations },
+    tripProjectSidebarReads: { listOwnedTripProjectSidebarSummaries: listTripProjects },
     travelerCommands: commands as TravelerCommandPort,
     schemaVersions: { async hasCompatibleSchemaVersion() { return true; }, async recordSchemaVersion() {} },
     browserAuth,
@@ -46,6 +49,13 @@ async function travelerSession(userId = "traveler") {
 }
 
 describe("trip recommendation direct API", () => {
+  test("uses the authenticated principal for canonical Trip Project sidebar rows", async () => {
+    const traveler = await travelerSession();
+    listTripProjects.mockResolvedValueOnce([{ id: "project-1", title: "Hè miền Trung", conversationId: "conversation-1", updatedAt: "2026-08-05T00:00:00.000Z" }]);
+    await request(app.getHttpServer()).get("/v1/conversations/trip-projects").set({ Cookie: traveler.cookie, Origin: "https://web.xuyenviet.vn" }).expect(200).expect({ projects: [{ id: "project-1", title: "Hè miền Trung", conversationId: "conversation-1", updatedAt: "2026-08-05T00:00:00.000Z" }] });
+    expect(listTripProjects).toHaveBeenCalledWith("traveler");
+  });
+
   test("uses the authenticated principal for the owner-scoped projection", async () => {
     const traveler = await travelerSession();
     loadRecommendations.mockResolvedValueOnce({ tripCreationRecommendation: { kind: "clarify", question: "Bạn dự định đi đâu?", actions: ["private_answer"] }, tripContextRecommendation: { kind: "none" } });

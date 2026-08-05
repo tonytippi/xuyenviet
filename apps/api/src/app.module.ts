@@ -5,7 +5,7 @@ import { APP_FILTER, APP_GUARD, APP_PIPE } from "@nestjs/core";
 import type { BrowserAuthConfig } from "@xuyenviet/config";
 import { consoleOperationalTelemetrySink, type OperationalTelemetrySink } from "@xuyenviet/contracts";
 import type { ApiIdentityRepository, ConversationSummaryRepository, ReleaseSchemaVersionRepository, TravelerShellRepository } from "@xuyenviet/database";
-import type { AdminAiModelCatalogPort, AdminFacebookCapturePort, AdminKnowledgeCoveragePort, AdminKnowledgeIntakePort, AdminKnowledgeReviewPort, AdminOverviewPort, AdminQualityPort, AdminYoutubeCapturePort, PlanningReadRepository, TravelerCommandPort, TripRecommendationReadRepository, UserRoleGovernancePort } from "@xuyenviet/domain";
+import type { AdminAiModelCatalogPort, AdminFacebookCapturePort, AdminKnowledgeCoveragePort, AdminKnowledgeIntakePort, AdminKnowledgeReviewPort, AdminOverviewPort, AdminQualityPort, AdminYoutubeCapturePort, PlanningReadRepository, TravelerCommandPort, TripProjectSidebarReadRepository, TripRecommendationReadRepository, UserRoleGovernancePort } from "@xuyenviet/domain";
 
 import { API_IDENTITY_REPOSITORY, ResourceServerGuard } from "./auth/resource-server.guard";
 import { AdminCapabilityGuard } from "./auth/admin-capability.guard";
@@ -24,7 +24,7 @@ import { AdminQualityController, ADMIN_QUALITY_PORT } from "./admin/admin-qualit
 import { RequestIdMiddleware } from "./common/request-id.middleware";
 import { SafeValidationPipe } from "./common/safe-validation.pipe";
 import { SafeApiExceptionFilter } from "./safe-api-exception.filter";
-import { ConversationsController, CONVERSATION_SUMMARY_REPOSITORY, PLANNING_READ_REPOSITORY, TRAVELER_SHELL_REPOSITORY, TRIP_RECOMMENDATION_READ_REPOSITORY } from "./conversations/conversations.controller";
+import { ConversationsController, CONVERSATION_SUMMARY_REPOSITORY, PLANNING_READ_REPOSITORY, TRAVELER_SHELL_REPOSITORY, TRIP_PROJECT_SIDEBAR_READ_REPOSITORY, TRIP_RECOMMENDATION_READ_REPOSITORY } from "./conversations/conversations.controller";
 import { TravelerCommandsController, TRAVELER_COMMAND_PORT } from "./conversations/traveler-commands.controller";
 import { HealthController } from "./health/health.controller";
 import { OpenApiController } from "./openapi.controller";
@@ -33,7 +33,7 @@ import { VersionController } from "./version/version.controller";
 import { AiAskController, AI_ASK_STREAM_EXECUTION, OPERATIONAL_TELEMETRY_SINK } from "./ai-ask/ai-ask.controller";
 import type { AiAskStreamExecution } from "@xuyenviet/domain";
 
-export function createApiModule(identities: ApiIdentityRepository, dependencies?: { conversationSummaries: ConversationSummaryRepository; travelerShells?: TravelerShellRepository; planningReads?: PlanningReadRepository; tripRecommendations?: TripRecommendationReadRepository; travelerCommands?: TravelerCommandPort; userRoleGovernance?: UserRoleGovernancePort; adminAiModelCatalog?: AdminAiModelCatalogPort; adminOverview?: AdminOverviewPort; adminQuality?: AdminQualityPort; adminKnowledgeIntake?: AdminKnowledgeIntakePort; adminKnowledgeReview?: AdminKnowledgeReviewPort; adminKnowledgeCoverage?: AdminKnowledgeCoveragePort; adminFacebookCaptures?: AdminFacebookCapturePort; adminYoutubeCaptures?: AdminYoutubeCapturePort; schemaVersions: ReleaseSchemaVersionRepository; aiAskExecution?: AiAskStreamExecution; telemetry?: OperationalTelemetrySink; configValid?: boolean; releasePhasePolicy?: import("@xuyenviet/contracts").SchemaReleasePhasePolicy | null; browserAuth?: BrowserAuthConfig }) {
+export function createApiModule(identities: ApiIdentityRepository, dependencies?: { conversationSummaries: ConversationSummaryRepository; travelerShells?: TravelerShellRepository; planningReads?: PlanningReadRepository; tripRecommendations?: TripRecommendationReadRepository; tripProjectSidebarReads?: TripProjectSidebarReadRepository; travelerCommands?: TravelerCommandPort; userRoleGovernance?: UserRoleGovernancePort; adminAiModelCatalog?: AdminAiModelCatalogPort; adminOverview?: AdminOverviewPort; adminQuality?: AdminQualityPort; adminKnowledgeIntake?: AdminKnowledgeIntakePort; adminKnowledgeReview?: AdminKnowledgeReviewPort; adminKnowledgeCoverage?: AdminKnowledgeCoveragePort; adminFacebookCaptures?: AdminFacebookCapturePort; adminYoutubeCaptures?: AdminYoutubeCapturePort; schemaVersions: ReleaseSchemaVersionRepository; aiAskExecution?: AiAskStreamExecution; telemetry?: OperationalTelemetrySink; configValid?: boolean; releasePhasePolicy?: import("@xuyenviet/contracts").SchemaReleasePhasePolicy | null; browserAuth?: BrowserAuthConfig }) {
   @Module({
      controllers: [...(dependencies ? [HealthController, VersionController, ConversationsController, OpenApiController, BrowserIdentityController, ...(dependencies.travelerCommands ? [TravelerCommandsController] : []), ...(dependencies.aiAskExecution ? [AiAskController] : []), ...(dependencies.userRoleGovernance ? [AdminUsersController] : []), ...(dependencies.adminAiModelCatalog ? [AdminAiModelsController] : []), ...(dependencies.adminOverview ? [AdminOverviewController] : []), ...(dependencies.adminQuality ? [AdminQualityController] : []), ...(dependencies.adminKnowledgeIntake ? [AdminKnowledgeIntakeController] : []), ...(dependencies.adminKnowledgeReview ? [AdminKnowledgeReviewController] : []), ...(dependencies.adminKnowledgeCoverage ? [AdminKnowledgeCoverageController] : []), ...(dependencies.adminFacebookCaptures ? [AdminFacebookCapturesController] : []), ...(dependencies.adminYoutubeCaptures ? [AdminYoutubeCapturesController] : [])] : []), AdminWorkspaceController],
     providers: [
@@ -43,7 +43,8 @@ export function createApiModule(identities: ApiIdentityRepository, dependencies?
          { provide: CONVERSATION_SUMMARY_REPOSITORY, useValue: dependencies.conversationSummaries },
           { provide: PLANNING_READ_REPOSITORY, useValue: dependencies.planningReads ?? unavailablePlanningReads },
            { provide: TRAVELER_SHELL_REPOSITORY, useValue: dependencies.travelerShells ?? unavailableTravelerShells },
-           { provide: TRIP_RECOMMENDATION_READ_REPOSITORY, useValue: dependencies.tripRecommendations ?? unavailableTripRecommendations },
+            { provide: TRIP_RECOMMENDATION_READ_REPOSITORY, useValue: dependencies.tripRecommendations ?? unavailableTripRecommendations },
+            { provide: TRIP_PROJECT_SIDEBAR_READ_REPOSITORY, useValue: dependencies.tripProjectSidebarReads ?? unavailableTripProjectSidebarReads },
           ...(dependencies.travelerCommands ? [{ provide: TRAVELER_COMMAND_PORT, useValue: dependencies.travelerCommands }] : []),
           ...(dependencies.userRoleGovernance ? [{ provide: USER_ROLE_GOVERNANCE_PORT, useValue: dependencies.userRoleGovernance }] : []),
            ...(dependencies.adminAiModelCatalog ? [{ provide: ADMIN_AI_MODEL_CATALOG_PORT, useValue: dependencies.adminAiModelCatalog }] : []),
@@ -83,3 +84,4 @@ const unavailablePlanningReads: PlanningReadRepository = {
 };
 const unavailableTravelerShells: TravelerShellRepository = { async loadOwnedTravelerShell() { return { conversation: null, tripProject: null, workspace: null }; } };
 const unavailableTripRecommendations: TripRecommendationReadRepository = { async loadOwnedTripRecommendations() { return { tripCreationRecommendation: { kind: "none" }, tripContextRecommendation: { kind: "none" } }; } };
+const unavailableTripProjectSidebarReads: TripProjectSidebarReadRepository = { async listOwnedTripProjectSidebarSummaries() { return []; } };
