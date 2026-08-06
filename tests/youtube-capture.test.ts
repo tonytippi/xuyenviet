@@ -130,6 +130,19 @@ describe("YouTube capture", () => {
     await expect(requestYoutubeEvidence("https://www.youtube.com/watch?v=abcDEF12345", "secret-key", "gemini-3.5-flash", { startOffsetSeconds: 1800, endOffsetSeconds: 3600 }, undefined, fetchMock)).resolves.toMatchObject({ evidence: parseYoutubeEvidence({ evidence }) });
   });
 
+  test("retries an otherwise valid Gemini response whose timestamps do not match the requested window", async () => {
+    let calls = 0;
+    const fetchMock = async () => {
+      calls += 1;
+      const timestamp_start_seconds = calls === 1 ? 3601 : 1860;
+      const timestamp_end_seconds = calls === 1 ? 3602 : 1890;
+      return new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: JSON.stringify({ evidence: [{ ...evidence[0], timestamp_start_seconds, timestamp_end_seconds }] }) }] } }] }), { status: 200 });
+    };
+
+    await expect(requestYoutubeEvidence("https://www.youtube.com/watch?v=abcDEF12345", "secret-key", "gemini-3.5-flash", { startOffsetSeconds: 1800, endOffsetSeconds: 3600 }, undefined, fetchMock)).resolves.toMatchObject({ evidence: [{ timestamp_start_seconds: 60, timestamp_end_seconds: 90 }] });
+    expect(calls).toBe(2);
+  });
+
   test("reports only the Gemini error status without changing the failure code", async () => {
     const fetchMock = async () => new Response(JSON.stringify({ error: { status: "INVALID_ARGUMENT", message: "Invalid file URI; api_key=provider-secret; Authorization: Bearer provider-token" } }), { status: 400 });
 

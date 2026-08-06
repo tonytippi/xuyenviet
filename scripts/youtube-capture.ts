@@ -17,7 +17,7 @@ export const youtubeWindowSeconds = 30 * 60;
 export const retainedYoutubeEvidenceItemsPerWindow = 10;
 const geminiRetryDelaysMs = [1_000, 2_000];
 const youtubeCaptureProgressIntervalMs = 30_000;
-const prompt = `Analyze this public YouTube video window as a Vietnam road-trip research source. Return JSON only: {"evidence":[{"category":"road_condition|route|toll|fuel|charging|rest_stop|parking|accommodation|food|attraction|safety|weather|cost","claim_vi":"Vietnamese factual claim (non-empty, max 500 chars)","evidence_type":"spoken|on_screen|both","timestamp_start_seconds":0,"timestamp_end_seconds":0,"confidence":"high|medium|low","freshness_sensitive":true,"evidence_excerpt":"non-empty excerpt, max 240 chars","uncertainty_or_condition":null}]}. Every evidence item must include every key exactly as shown. Use only the listed enum values. Timestamps must be non-negative integer seconds relative to the full video and fall within the requested window. If the API constrains you to report clip-relative timestamps, use offsets relative to the requested window for every item; never mix timestamp conventions. End must not precede start. uncertainty_or_condition must be null or a non-empty string under 400 characters. Extract at most ${maxYoutubeEvidenceItemsPerWindow} items. Include only explicitly spoken or clearly shown facts. Do not infer missing facts or return a transcript. Return {"evidence":[]} if no reliable travel evidence exists.`;
+const prompt = `Analyze this public YouTube video window as a Vietnam road-trip research source. Return JSON only: {"evidence":[{"category":"road_condition|route|toll|fuel|charging|rest_stop|parking|accommodation|food|attraction|safety|weather|cost","claim_vi":"Vietnamese factual claim (non-empty, max 500 chars)","evidence_type":"spoken|on_screen|both","timestamp_start_seconds":0,"timestamp_end_seconds":0,"confidence":"high|medium|low","freshness_sensitive":true,"evidence_excerpt":"non-empty excerpt, max 240 chars","uncertainty_or_condition":null}]}. Every evidence item must include every key exactly as shown. Use only the listed enum values. Timestamps must be non-negative integer seconds relative to the full video and fall within the requested window. Use exactly one timestamp convention for the complete response: full-video timestamps are preferred; otherwise use offsets relative to the requested window for every item. Never mix conventions, never report timestamps outside the requested window, and do not use the duration of the full video as a timestamp. End must not precede start. uncertainty_or_condition must be null or a non-empty string under 400 characters. Extract at most ${maxYoutubeEvidenceItemsPerWindow} items. Include only explicitly spoken or clearly shown facts. Do not infer missing facts or return a transcript. Return {"evidence":[]} if no reliable travel evidence exists.`;
 type GeminiMediaResolution = "MEDIA_RESOLUTION_LOW" | "MEDIA_RESOLUTION_MEDIUM" | "MEDIA_RESOLUTION_HIGH";
 const defaultMediaResolution: GeminiMediaResolution = "MEDIA_RESOLUTION_LOW";
 
@@ -72,7 +72,17 @@ export async function requestYoutubeEvidence(url: string, apiKey: string, model:
         const text = payload.candidates?.[0]?.content?.parts?.find((part) => typeof part.text === "string")?.text;
         if (!text) throw new Error("gemini_empty_response");
         const responseValue = JSON.parse(text) as unknown;
-        const evidence = normalizeYoutubeWindowTimestamps(parseYoutubeEvidence(responseValue, maxYoutubeEvidenceItemsPerWindow), window);
+        let evidence: YoutubeEvidence[];
+        try {
+          evidence = normalizeYoutubeWindowTimestamps(parseYoutubeEvidence(responseValue, maxYoutubeEvidenceItemsPerWindow), window);
+        } catch (error) {
+          // Gemini can occasionally produce an otherwise valid response with timestamps for a different window.
+          if (attempt < geminiRetryDelaysMs.length && isRetryableGeminiOutputError(error)) {
+            await new Promise((resolve) => setTimeout(resolve, geminiRetryDelaysMs[attempt]));
+            continue;
+          }
+          throw error;
+        }
         return { evidence, latencyMs: Date.now() - startedAt, usage: payload.usageMetadata };
       } finally {
         clearTimeout(timeout);
@@ -369,6 +379,10 @@ async function readGeminiErrorDiagnostic(response: Response) {
 
 function isRetryableGeminiError(error: GeminiRequestError) {
   return /^(?:gemini_http_(?:429|500|502|503|504))$/.test(error.message) || error.diagnostic === "UNAVAILABLE" || error.diagnostic === "INTERNAL" || error.diagnostic === "DEADLINE_EXCEEDED";
+}
+
+function isRetryableGeminiOutputError(error: unknown) {
+  return error instanceof Error && error.message === "gemini_window_timestamp_out_of_range";
 }
 
 export function captureFailureCode(error: unknown) {
