@@ -155,7 +155,7 @@ export async function streamInitialAiAskAnswer({
       latencyMs,
       model,
       timeoutMs: gatewayTimeoutMs,
-      reason: error instanceof Error ? error.name : "unknown_error",
+      reason: gatewayFailureReason(error),
     });
 
      return { ok: false, provider: "ai_gateway", model, latencyMs, errorCode: "gateway_network_error", requestMetadata: { providerRequestId: null } };
@@ -309,7 +309,7 @@ async function completeGatewayPrompt({
       latencyMs,
       model,
       timeoutMs: gatewayTimeoutMs,
-      reason: error instanceof Error ? error.name : "unknown_error",
+      reason: gatewayFailureReason(error),
       purpose,
     });
 
@@ -361,6 +361,14 @@ function logGatewayFailure(details: {
     statusText: details.statusText,
     reason: details.reason,
   });
+}
+
+function gatewayFailureReason(error: unknown) {
+  if (!(error instanceof Error)) return "unknown_error";
+  if (error.name === "AbortError") return "timeout";
+  const cause = error.cause;
+  if (cause && typeof cause === "object" && "code" in cause && typeof cause.code === "string" && /^[A-Z0-9_]{1,64}$/.test(cause.code)) return cause.code;
+  return error.name;
 }
 
 function parseModel(payload: unknown) {

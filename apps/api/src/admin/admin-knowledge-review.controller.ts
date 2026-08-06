@@ -2,6 +2,7 @@ import { BadRequestException, Body, Controller, Get, HttpCode, HttpStatus, Injec
 import { parseAdminKnowledgeCard, parseAdminKnowledgeCardList, parseAdminKnowledgeCardListQuery, parseAdminKnowledgeRecommendationDetail, parseAdminKnowledgeRecommendationList, parseAdminKnowledgeRecommendationListQuery, parseAdminKnowledgeRecommendationResolve, parseAdminKnowledgeRecommendationResult, type RequestPrincipal } from "@xuyenviet/contracts";
 import { type AdminKnowledgeReviewPort, KnowledgeDraftReviewPolicyError } from "@xuyenviet/domain";
 import { AllowsAdminBrowserSession, RequiresAdminCapability } from "../auth/admin-capability.decorator";
+import { SafeValidationPipe } from "../common/safe-validation.pipe";
 export const ADMIN_KNOWLEDGE_REVIEW_PORT = Symbol("ADMIN_KNOWLEDGE_REVIEW_PORT");
 class ResolveKnowledgeRecommendationDto {
   static parse(value: unknown) { const parsed = parseAdminKnowledgeRecommendationResolve(value); return parsed ? { ok: true as const, value: parsed } : { ok: false as const }; }
@@ -13,7 +14,7 @@ export class AdminKnowledgeReviewController {
   @Get("cards/:id") async card(@Param("id") id: string) { return found(await this.review.getCard(id), parseAdminKnowledgeCard); }
   @Get("recommendations") async recommendations(@Query() query: Record<string, unknown>) { const input = parseAdminKnowledgeRecommendationListQuery(query); if (!input) throw invalid(); return checked(await this.review.listRecommendations(input as Parameters<AdminKnowledgeReviewPort["listRecommendations"]>[0]), parseAdminKnowledgeRecommendationList); }
   @Get("recommendations/:id") async recommendation(@Param("id") id: string) { return found(await this.review.getRecommendation(id), parseAdminKnowledgeRecommendationDetail); }
-  @Post("recommendations/:id/resolve") @HttpCode(HttpStatus.OK) async resolve(@Param("id") id: string, @Body() input: ResolveKnowledgeRecommendationDto, @Req() request: { principal?: RequestPrincipal }) { const principal = request.principal; if (!principal) throw invalid(); return mutation(() => this.review.resolveRecommendation(id, input as Parameters<AdminKnowledgeReviewPort["resolveRecommendation"]>[1], principal), parseAdminKnowledgeRecommendationResult); }
+  @Post("recommendations/:id/resolve") @HttpCode(HttpStatus.OK) async resolve(@Param("id") id: string, @Body(new SafeValidationPipe(ResolveKnowledgeRecommendationDto)) input: ResolveKnowledgeRecommendationDto, @Req() request: { principal?: RequestPrincipal }) { const principal = request.principal; if (!principal) throw invalid(); return mutation(() => this.review.resolveRecommendation(id, input as Parameters<AdminKnowledgeReviewPort["resolveRecommendation"]>[1], principal), parseAdminKnowledgeRecommendationResult); }
 }
 function checked<T>(value: unknown, parser: (value: unknown) => T | null): T { const parsed = parser(value); if (!parsed) throw unavailable(); return parsed; }
 function found<T>(value: unknown, parser: (value: unknown) => T | null): T { if (value === null) throw invalid(); return checked(value, parser); }

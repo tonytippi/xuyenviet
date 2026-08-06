@@ -33,6 +33,11 @@ export async function transitionKnowledgeCardInTransaction(transaction: Lifecycl
   return transitionSupportLoss(transaction, input);
 }
 
+/** Clears superseded candidate work after a version-fenced ingestion rerun. */
+export async function clearKnowledgeIngestionCandidatesForRerun(transaction: LifecycleTransaction, ingestionJobId: string) {
+  await transaction.delete(knowledgeIngestionCandidates).where(eq(knowledgeIngestionCandidates.ingestionJobId, ingestionJobId));
+}
+
 async function transitionSamplingContainment(transaction: LifecycleTransaction, input: TransitionKnowledgeCardInput): Promise<TransitionKnowledgeCardResult> {
   const trigger = input.trigger as Extract<KnowledgeLifecycleTrigger, { kind: "sampling_containment" }>;
   const fences = versionFences(input);

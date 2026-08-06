@@ -12,7 +12,7 @@ export class KnowledgeDraftReviewError extends KnowledgeDraftReviewPolicyError {
 export function isKnowledgeDraftReviewError(error: unknown) { return error instanceof KnowledgeDraftReviewError; }
 
 type Source = Pick<typeof sources.$inferSelect, "id" | "kind" | "url" | "canonicalUrl" | "label" | "publisher" | "collectedDate" | "sourceType" | "verificationStatus" | "official" | "partner"> & { supportLevel: KnowledgeSourceSupport };
-type Card = Pick<typeof knowledgeCards.$inferSelect, "id" | "type" | "title" | "locationName" | "routeSegment" | "summary" | "practicalDetails" | "tags" | "confidence" | "freshnessSensitive" | "lifecycleState" | "knowledgeState" | "verificationRequirement" | "updatedAt" | "createdAt">;
+type Card = Pick<typeof knowledgeCards.$inferSelect, "id" | "type" | "title" | "locationName" | "routeSegment" | "summary" | "conditions" | "practicalDetails" | "tags" | "confidence" | "freshnessSensitive" | "lifecycleState" | "knowledgeState" | "verificationRequirement" | "updatedAt" | "createdAt">;
 export type KnowledgeDraftReviewCard = Card & { sources: Source[]; suggestion: { action: string; beforeSummary: string | null; afterSummary: string | null; conflictSummary: string | null; rationale: string | null; targetCard: { id: string; title: string } | null } | null };
 export type ApprovedKnowledgeCard = Card & { sources: Source[] };
 export type ApprovedKnowledgeIndexStatus = { state: "evidence_pending" | "indexed" | "needs_indexing" | "stale_index" | "inactive_index"; label: string; documentStatus: string | null; indexedAt: Date | null };

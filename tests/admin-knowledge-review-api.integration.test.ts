@@ -61,6 +61,13 @@ describe("admin knowledge review direct API", () => {
     expect(resolveRecommendation).toHaveBeenCalledWith(recommendationId, { action: "verify" }, expect.objectContaining({ userId: "operator", roles: ["operator"] }));
   });
 
+  test("accepts a relation-resolution action through the explicit safe DTO", async () => {
+    const operator = await browserSession("operator", "operator");
+    const response = await request(app.getHttpServer()).post(`/v1/admin/knowledge/recommendations/${recommendationId}/resolve`).set({ Cookie: operator.cookie, Origin: "https://admin.xuyenviet.app", "x-xuyenviet-csrf": operator.csrf }).send({ action: "resolve_relation" });
+    expect(response.status).toBe(200);
+    expect(resolveRecommendation).toHaveBeenCalledWith(recommendationId, { action: "resolve_relation" }, expect.objectContaining({ userId: "operator", roles: ["operator"] }));
+  });
+
   test("maps an admitted port policy rejection without a successful lifecycle result", async () => {
     resolveRecommendation.mockRejectedValueOnce(new KnowledgeDraftReviewPolicyError("rejected", "not_reviewable"));
     const operator = await browserSession("operator", "operator");

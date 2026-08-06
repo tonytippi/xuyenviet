@@ -228,6 +228,19 @@ export function getYoutubeMediaResolution(value = getEnvValue("GEMINI_YOUTUBE_ME
   throw new Error("GEMINI_YOUTUBE_MEDIA_RESOLUTION must be MEDIA_RESOLUTION_LOW, MEDIA_RESOLUTION_MEDIUM, or MEDIA_RESOLUTION_HIGH.");
 }
 
+export function canonicalizeYoutubeCaptureUrl(value: string | null) {
+  if (!value) return null;
+  try {
+    const url = new URL(value);
+    const hostname = url.hostname.toLowerCase();
+    if (!(hostname === "youtu.be" || hostname === "youtube.com" || hostname.endsWith(".youtube.com"))) return null;
+    const videoId = youtubeVideoId(value);
+    return videoId ? `https://www.youtube.com/watch?v=${videoId}` : null;
+  } catch {
+    return null;
+  }
+}
+
 async function main() {
   const options = parseArgs(process.argv.slice(2));
   const client = postgres(getDatabaseUrl(), { max: 1 });
@@ -240,10 +253,10 @@ async function main() {
     if (!queued.length) { console.log("No queued YouTube sources need evidence."); return; }
     for (const source of queued) {
       const startedAt = Date.now();
-      const url = source.canonicalUrl ?? source.url;
+      const url = canonicalizeYoutubeCaptureUrl(source.canonicalUrl ?? source.url);
       let stage = "setup";
       console.log(`${source.sourceId}: capture started ${url ?? "youtube_url_unavailable"}`);
-      if (!url || !/^https:\/\/www\.youtube\.com\/watch\?v=[A-Za-z0-9_-]{6,20}$/.test(url)) { await recordYoutubeCaptureFailure(db, { sourceId: source.sourceId, reason: "youtube_video_url_required" }); console.log(`${source.sourceId}: finished youtube_video_url_required (${formatDuration(startedAt)})`); continue; }
+      if (!url) { await recordYoutubeCaptureFailure(db, { sourceId: source.sourceId, reason: "youtube_video_url_required" }); console.log(`${source.sourceId}: finished youtube_video_url_required (${formatDuration(startedAt)})`); continue; }
       try {
         stage = "resource_identity";
         const resourceIdentity = youtubeResourceIdentity(url);

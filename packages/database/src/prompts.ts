@@ -10,7 +10,7 @@ export const sourceKnowledgeSuggestionPurpose = aiUsagePurposes.extraction;
 export const sourceKnowledgeSuggestionPromptVersion = aiUsagePromptVersions.sourceKnowledgeSuggestion;
 export const knowledgePipelineExtractionPurpose = aiUsagePurposes.extraction;
 export const knowledgePipelineExtractionPromptVersion = aiUsagePromptVersions.knowledgePipelineExtraction;
-export const knowledgePipelineMultiFactExtractionPromptVersion = "knowledge_pipeline_multi_fact_extraction_v2";
+export const knowledgePipelineMultiFactExtractionPromptVersion = "knowledge_pipeline_multi_fact_extraction_v3";
 export const knowledgePipelineJudgmentPurpose = aiUsagePurposes.evaluation;
 export const knowledgePipelineJudgmentPromptVersion = aiUsagePromptVersions.knowledgePipelineJudgment;
 export const tripChangeProposalDraftPurpose = aiUsagePurposes.tripChangeProposalDraft;
@@ -88,15 +88,16 @@ const sourceKnowledgeSuggestionSystemPrompt = [
 const knowledgePipelineExtractionSystemPrompt = [
   "Extract at most one atomic Vietnam road-trip fact from an immutable source capture.",
   "Return strict JSON only. Never return personal data, contacts, or a fact that is only an opinion, question, advertisement, or unsupported claim.",
-  "Return {candidate:null} when no safe fact exists. Otherwise candidate must include type, title, summary, location_name or route_segment, conditions, freshness_sensitive, and evidence {quote_text, span_start, span_end}.",
-  "quote_text must be an exact contiguous substring of source_text and the offsets are zero-based PostgreSQL character offsets (Unicode code points, not UTF-16 code units). Paraphrase every non-evidence field.",
+  "Return {candidate:null} when no safe fact exists. Otherwise candidate must include type, title, summary, location_name or route_segment, conditions, freshness_sensitive, and evidence {quote_text}.",
+  "quote_text must follow one contiguous source passage. Preserve its words and punctuation, but do not include invisible formatting characters or decorative symbols. The system resolves the original evidence location. Paraphrase every non-evidence field.",
 ].join("\n");
 
 const knowledgePipelineMultiFactExtractionSystemPrompt = [
-  "Extract every independently useful, atomic Vietnam road-trip fact whose exact evidence begins inside the supplied core range.",
+  "Extract every independently useful, atomic Vietnam road-trip fact from the supplied source text.",
   "Return strict JSON only: {candidates:[...]}. Return an empty candidates array when none qualify; never select a representative fact or impose a fact quota.",
-  "Each candidate requires type, title, summary, location_name or route_segment, conditions, freshness_sensitive, and evidence {quote_text, span_start, span_end}.",
-  "Offsets are absolute zero-based Unicode code-point offsets in the complete source_text. quote_text must exactly equal that contiguous source substring.",
+  "Each candidate requires type, title, summary, location_name or route_segment, conditions, freshness_sensitive, and evidence {quote_text}.",
+  "Write every user-facing candidate value in natural Vietnamese, including title, summary, location_name, route_segment, conditions, practical_details values, and tags. Keep JSON keys, enum values, and evidence.quote_text exactly as specified; evidence.quote_text stays in the source language.",
+  "quote_text must follow one contiguous source passage. Preserve its words and punctuation, but do not include invisible formatting characters or decorative symbols. The system resolves the original evidence location.",
   "Paraphrase title, summary, and conditions. Do not return contacts, personal data, opinions, questions, advertisements, raw provider data, or claims without independent actionable travel value.",
 ].join("\n");
 

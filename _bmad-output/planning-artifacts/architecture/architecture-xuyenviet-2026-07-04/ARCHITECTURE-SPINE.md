@@ -2,7 +2,7 @@
 title: XuyenViet AI Travel Information MVP Architecture Spine
 status: final
 created: 2026-07-04
-updated: 2026-08-05
+updated: 2026-08-06
 altitude: project MVP
 source_prd: ../../prds/prd-xuyenviet-2026-07-04/prd.md
 source_ux: ../../ux-designs/ux-xuyenviet-2026-07-05/EXPERIENCE.md
@@ -156,6 +156,8 @@ Rule: `lifecycle_state` is exactly `draft | pending_operator | active | suppress
 Rule: Only an evidence-eligible `active` card may be retrieved. `draft`, `pending_operator`, `suppressed`, `archived`, and `rejected` cards are not retrievable. `conflicted` cards cannot support a factual itinerary recommendation. An active card has `verification_requirement = none` and no open primary operator work.
 
 Rule: Every card has one or more current `knowledge_card_evidence` records. Evidence contains only a bounded validated quote/span, source reference, observed/captured time, conditions, support level, display policy, and active/inactive/removed state. Raw source material remains operator-only and never enters traveler source bundles.
+
+Rule: A model may propose an evidence quote but never provides authoritative offsets. Knowledge resolves a quote only when Unicode-normalized matching, limited to formatting/decorative-character removal and whitespace normalization, maps it to exactly one passage in the immutable capture. It persists the exact raw substring and system-derived Unicode code-point span. No match or multiple matches fails closed; normalized text and model offsets are never persisted or accepted as evidence.
 
 Rule: A card may be active without operator review only when code validates its evidence span and privacy policy and the independent judge meets the PRD hard gates and thresholds. Operator approval records review; it is not a publication prerequisite.
 
@@ -440,7 +442,7 @@ Binds: source triage, extraction, independent judging, relation matching, retrie
 
 Prevents: separate queues re-running completed AI stages, disagreeing about the source lifecycle, or leaving operators unable to identify the current outcome.
 
-Rule: Knowledge owns one stateful ingestion job for each source capture version. For v2 text ingestion, discovery submits the complete immutable redacted capture once and persists scoped semantic candidates; one independent batch grounding-and-judgment call returns exactly one exact-contiguous quote or `evidence:null` for every candidate. The server derives Unicode code-point spans and only grounded candidates enter relation work. Job status is technical only: `queued -> running -> completed | failed`; resumable execution detail belongs in a checkpoint, and aggregate counters are observability only.
+Rule: Knowledge owns one stateful ingestion job for each source capture version. For v2 text ingestion, discovery submits the complete immutable redacted capture once and persists scoped semantic candidates; one independent batch grounding-and-judgment call returns exactly one quote proposal or `evidence:null` for every candidate. The server resolves a unique normalized quote match, then derives the exact raw Unicode code-point span; only grounded candidates enter relation work. Job status is technical only: `queued -> running -> completed | failed`; resumable execution detail belongs in a checkpoint, and aggregate counters are observability only.
 
 Rule: A candidate has `processing_status = queued | processing | completed | failed` and non-null immutable `ai_disposition = apply | needs_operator | discard` plus immutable `outcome_reason_code` once completed; a failed candidate has no business disposition. A database trigger rejects changes to either decision field after completion. Human action never rewrites the AI decision. `candidateCount` counts persisted discoveries, `completedCandidateCount` and `failedCandidateCount` count terminal processing states, and `needsOperatorCandidateCount` is the completed `needs_operator` subset; counters are idempotent observability projections only. A job completes only after discovery is terminal and every candidate is completed or failed.
 

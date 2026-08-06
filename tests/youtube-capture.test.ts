@@ -5,7 +5,7 @@ import { auditEvents, knowledgeCardSearchDocuments, knowledgeCardSources, knowle
 import { validateSafeCaptureMetadata } from "@/features/knowledge/source-captures";
 import { admitArtifact } from "@/features/knowledge/capture-cache";
 import { listQueuedYoutubeSources, maxYoutubeEvidenceItemsPerVideo, maxYoutubeEvidenceItemsPerWindow, parseYoutubeEvidence, recordYoutubeCaptureFailure, saveYoutubeEvidence, serializeYoutubeEvidence } from "@/features/knowledge/youtube-capture";
-import { captureFailureCode, captureFailureReason, getYoutubeMediaResolution, mergeYoutubeWindowEvidence, normalizeYoutubeWindowTimestamps, parseCachedYoutubePayload, parseCachedYoutubeSegmentPayload, parseYoutubeDuration, requestYoutubeEvidence, requestYoutubeTitle, retainedYoutubeEvidenceItemsPerWindow, youtubeWindows } from "../scripts/youtube-capture";
+import { canonicalizeYoutubeCaptureUrl, captureFailureCode, captureFailureReason, getYoutubeMediaResolution, mergeYoutubeWindowEvidence, normalizeYoutubeWindowTimestamps, parseCachedYoutubePayload, parseCachedYoutubeSegmentPayload, parseYoutubeDuration, requestYoutubeEvidence, requestYoutubeTitle, retainedYoutubeEvidenceItemsPerWindow, youtubeWindows } from "../scripts/youtube-capture";
 
 import { resetTestDatabase, testDb } from "./helpers/db";
 import { seedSourceCaptureVersion } from "./helpers/source-captures";
@@ -49,6 +49,13 @@ describe("YouTube capture", () => {
     await expect(listQueuedYoutubeSources(testDb, { limit: 10 })).resolves.toMatchObject([
       { sourceId: "legacy-intake", rawMaterialId: null },
     ]);
+  });
+
+  test("canonicalizes timestamped YouTube URLs before capture", () => {
+    expect(canonicalizeYoutubeCaptureUrl("https://www.youtube.com/watch?t=8s&v=lpvvY2qqL2c")).toBe("https://www.youtube.com/watch?v=lpvvY2qqL2c");
+    expect(canonicalizeYoutubeCaptureUrl("https://youtu.be/lpvvY2qqL2c?t=8")).toBe("https://www.youtube.com/watch?v=lpvvY2qqL2c");
+    expect(canonicalizeYoutubeCaptureUrl("https://www.youtube.com/channel/example")).toBeNull();
+    expect(canonicalizeYoutubeCaptureUrl("https://example.com/watch?v=lpvvY2qqL2c")).toBeNull();
   });
 
   test("persists bounded evidence and a content-free audit summary", async () => {

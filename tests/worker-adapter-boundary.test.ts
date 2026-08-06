@@ -181,7 +181,7 @@ describe("compiled worker adapters", () => {
     await runCompiledAdapter("outbox", "compiled-outbox-worker");
 
     await expect(testDb.select().from(knowledgeIngestionJobs).where(eq(knowledgeIngestionJobs.id, ingestion.id))).resolves.toMatchObject([
-      { status: "failed", discoveryTerminal: false, attemptCount: 1, claimedBy: null, fencingToken: null, lastErrorCode: "discovery_failed" },
+      { status: "failed", discoveryTerminal: false, attemptCount: 1, claimedBy: null, fencingToken: null, lastErrorCode: "discovery_model_unavailable" },
     ]);
     await expect(testDb.select().from(domainOutbox).where(eq(domainOutbox.id, annotation.id))).resolves.toMatchObject([
       { status: "completed", attemptCount: 1, claimedBy: null, fencingToken: null },
@@ -318,7 +318,7 @@ describe("compiled worker adapters", () => {
       await testDb.update(knowledgeIngestionJobs).set({ nextRunAt: new Date(0) }).where(eq(knowledgeIngestionJobs.id, first.id));
       const retryEvents = await runCompiledAdapter("ingestion", "recovery-worker");
       await expect(testDb.select().from(knowledgeIngestionJobs).where(eq(knowledgeIngestionJobs.id, first.id))).resolves.toMatchObject([
-        { status: "failed", attemptCount: 2, lastErrorCode: "discovery_failed", claimedBy: null, fencingToken: null },
+        { status: "failed", attemptCount: 2, lastErrorCode: "discovery_model_unavailable", claimedBy: null, fencingToken: null },
       ]);
       expectCompiledWorkerEvent(retryEvents, {
         resultCode: "failure",

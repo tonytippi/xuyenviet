@@ -30,6 +30,11 @@ describe("SafeValidationPipe", () => {
     }
   });
 
+  test("defers Object metadata to an explicit parameter-level parser", () => {
+    const body = { action: "resolve_relation" };
+    expect(new SafeValidationPipe().transform(body, { type: "body", metatype: Object })).toBe(body);
+  });
+
   test("rejects malformed parser results and successful results without a value", () => {
     const pipe = new SafeValidationPipe();
     const malformedResults = [null, undefined, {}, { ok: "true" }, { ok: true }, { ok: true, value: undefined }];

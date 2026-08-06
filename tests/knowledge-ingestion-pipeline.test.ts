@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, test } from "vitest";
 
 import { knowledgeCardEvidence, knowledgeCardSources, knowledgeCards, knowledgeIngestionCandidates, knowledgeIngestionJobs, knowledgeRecommendations, sources, userRoles } from "@/db/schema";
 import { claimNextKnowledgeIngestionCandidate, claimNextKnowledgeIngestionJob } from "@/features/knowledge/ingestion-jobs";
-import { runKnowledgeIngestionCandidatePipeline, runKnowledgeIngestionPipeline } from "@/features/knowledge/ingestion-pipeline";
+import { DiscoveryFailure, resolveEvidenceSpan, runKnowledgeIngestionCandidatePipeline, runKnowledgeIngestionPipeline } from "@/features/knowledge/ingestion-pipeline";
 import { appendSourceCaptureVersion } from "@/features/knowledge/source-captures";
 
 import { resetTestDatabase, seedTestOperator, testDb } from "./helpers/db";
@@ -14,6 +14,15 @@ describe("target knowledge ingestion pipeline", () => {
     await seedTestOperator();
     await testDb.insert(userRoles).values({ userId: "operator", role: "operator" });
     await testDb.insert(sources).values({ id: "source", kind: "pasted_text", label: "Safe source", sourceType: "curated", verificationStatus: "unverified", official: false, partner: false, eligibility: "eligible", submittedByUserId: "operator" });
+  });
+
+  test("resolves model evidence without offsets across decorative Unicode", () => {
+    const capture = "📍 Hội\u200b An ✨ có chỗ đậu xe.";
+    expect(resolveEvidenceSpan(capture, "Hội An có chỗ đậu xe.")).toEqual([3, Array.from(capture).length]);
+  });
+
+  test("rejects normalized evidence that maps to more than one capture passage", () => {
+    expect(resolveEvidenceSpan("✨ Hội An. Hội An.", "Hội An.")).toBeNull();
   });
 
   test("records the target discovery checkpoint and completes a no-candidate job", async () => {
@@ -72,7 +81,7 @@ describe("target knowledge ingestion pipeline", () => {
     const capture = await appendSourceCaptureVersion(testDb, { sourceId: "source", captureKind: "pasted_text", rawText: "Đèo Hải Vân có điểm dừng ngắm cảnh.", metadata: { kind: "submitted" } });
     const claim = await claimNextKnowledgeIngestionJob({ workerId: "discovery-worker", now: new Date(Date.now() + 1_000) }, testDb);
     if (!claim) throw new Error("expected job claim");
-    const discovery = async () => [{ fingerprint: "discovered", type: "place" as const, title: "Điểm dừng", summary: "Có điểm dừng phù hợp.", spanStart: 0, spanEnd: 1 }];
+    const discovery = async () => [{ fingerprint: "discovered", type: "place" as const, title: "Điểm dừng", summary: "Có điểm dừng phù hợp.", locationName: "Đèo Hải Vân", spanStart: 0, spanEnd: 1 }];
 
     await expect(runKnowledgeIngestionPipeline(claim, testDb, discovery)).resolves.toMatchObject({ outcome: "completed", candidateCount: 1 });
     await expect(testDb.select().from(knowledgeIngestionCandidates)).resolves.toMatchObject([{ fingerprint: "discovered", processingStatus: "queued", spanStart: 0, spanEnd: 1 }]);
@@ -83,8 +92,8 @@ describe("target knowledge ingestion pipeline", () => {
     const capture = await appendSourceCaptureVersion(testDb, { sourceId: "source", captureKind: "pasted_text", rawText: "Đèo Hải Vân có điểm dừng ngắm cảnh.", metadata: { kind: "submitted" } });
     const claim = await claimNextKnowledgeIngestionJob({ workerId: "discovery-worker", now: new Date(Date.now() + 1_000) }, testDb);
     if (!claim) throw new Error("expected job claim");
-    const firstDiscovery = async () => [{ fingerprint: "first", type: "place" as const, title: "Điểm dừng", summary: "Có điểm dừng phù hợp.", spanStart: 0, spanEnd: 1 }];
-    const duplicateDiscovery = async () => [{ fingerprint: "duplicate", type: "place" as const, title: "Khác", summary: "Không được lưu.", spanStart: 0, spanEnd: 1 }];
+    const firstDiscovery = async () => [{ fingerprint: "first", type: "place" as const, title: "Điểm dừng", summary: "Có điểm dừng phù hợp.", locationName: "Đèo Hải Vân", spanStart: 0, spanEnd: 1 }];
+    const duplicateDiscovery = async () => [{ fingerprint: "duplicate", type: "place" as const, title: "Khác", summary: "Không được lưu.", locationName: "Đèo Hải Vân", spanStart: 0, spanEnd: 1 }];
 
     await expect(runKnowledgeIngestionPipeline(claim, testDb, firstDiscovery)).resolves.toMatchObject({ outcome: "completed" });
     await expect(runKnowledgeIngestionPipeline(claim, testDb, duplicateDiscovery)).resolves.toBeNull();
@@ -108,7 +117,48 @@ describe("target knowledge ingestion pipeline", () => {
     if (!claim) throw new Error("expected job claim");
 
     await expect(runKnowledgeIngestionPipeline(claim, testDb, async () => [{ fingerprint: "bad", type: "place" as const, title: "Điểm dừng", summary: "Có điểm dừng phù hợp.", spanStart: 1, spanEnd: 0 }])).resolves.toMatchObject({ outcome: "failed" });
-    await expect(testDb.select().from(knowledgeIngestionJobs).where(eq(knowledgeIngestionJobs.id, claim.jobId))).resolves.toMatchObject([{ status: "failed", lastErrorCode: "discovery_failed", claimedBy: null, fencingToken: null }]);
+    await expect(testDb.select().from(knowledgeIngestionJobs).where(eq(knowledgeIngestionJobs.id, claim.jobId))).resolves.toMatchObject([{ status: "failed", lastErrorCode: "discovery_invalid_output", claimedBy: null, fencingToken: null }]);
+  });
+
+  test("persists scoped multi-fact discovery candidates with their travel metadata", async () => {
+    const capture = await appendSourceCaptureVersion(testDb, { sourceId: "source", captureKind: "pasted_text", rawText: "Quán có chỗ đậu xe.", metadata: { kind: "submitted" } });
+    const claim = await claimNextKnowledgeIngestionJob({ workerId: "discovery-worker", now: new Date(Date.now() + 1_000) }, testDb);
+    if (!claim) throw new Error("expected job claim");
+
+    await expect(runKnowledgeIngestionPipeline(claim, testDb, async () => [{ fingerprint: "food-with-parking", type: "food" as const, title: "Quán ăn có chỗ đậu xe", summary: "Phù hợp dừng ăn khi đi ô tô.", locationName: "Hải Vân", conditions: ["Nên kiểm tra chỗ trống trước khi đến."], freshnessSensitive: true, practicalDetails: { parking_notes: ["Có chỗ đậu xe."] }, tags: ["ăn uống", "đậu xe"], spanStart: 0, spanEnd: 1 }])).resolves.toMatchObject({ outcome: "completed", candidateCount: 1 });
+    await expect(testDb.select().from(knowledgeIngestionCandidates).where(eq(knowledgeIngestionCandidates.captureVersionId, capture.id))).resolves.toMatchObject([{ type: "food", locationName: "Hải Vân", conditions: ["Nên kiểm tra chỗ trống trước khi đến."], freshnessSensitive: true, practicalDetails: { parking_notes: ["Có chỗ đậu xe."] }, tags: ["ăn uống", "đậu xe"], extractionPromptVersion: "knowledge_pipeline_multi_fact_extraction_v2" }]);
+  });
+
+  test("records an unexpected discovery exception with the generic safe code", async () => {
+    await appendSourceCaptureVersion(testDb, { sourceId: "source", captureKind: "pasted_text", rawText: "Đèo Hải Vân có điểm dừng ngắm cảnh.", metadata: { kind: "submitted" } });
+    const claim = await claimNextKnowledgeIngestionJob({ workerId: "discovery-worker", now: new Date(Date.now() + 1_000) }, testDb);
+    if (!claim) throw new Error("expected job claim");
+
+    await expect(runKnowledgeIngestionPipeline(claim, testDb, async () => { throw new Error("provider failure with unsafe details"); })).resolves.toMatchObject({ outcome: "failed" });
+    await expect(testDb.select().from(knowledgeIngestionJobs).where(eq(knowledgeIngestionJobs.id, claim.jobId))).resolves.toMatchObject([{ status: "failed", lastErrorCode: "discovery_failed" }]);
+  });
+
+  test("requeues retryable discovery failures with a bounded backoff", async () => {
+    await appendSourceCaptureVersion(testDb, { sourceId: "source", captureKind: "pasted_text", rawText: "Đèo Hải Vân có điểm dừng ngắm cảnh.", metadata: { kind: "submitted" } });
+    const claim = await claimNextKnowledgeIngestionJob({ workerId: "discovery-worker", now: new Date(Date.now() + 1_000) }, testDb);
+    if (!claim) throw new Error("expected job claim");
+    const before = Date.now();
+
+    await expect(runKnowledgeIngestionPipeline(claim, testDb, async () => { throw new DiscoveryFailure("discovery_gateway_network_error"); })).resolves.toMatchObject({ outcome: "retry" });
+    const [job] = await testDb.select().from(knowledgeIngestionJobs).where(eq(knowledgeIngestionJobs.id, claim.jobId));
+    expect(job).toMatchObject({ status: "queued", attemptCount: 1, lastErrorCode: "discovery_gateway_network_error", claimedBy: null, fencingToken: null });
+    expect(job!.nextRunAt.getTime()).toBeGreaterThanOrEqual(before + 30_000);
+  });
+
+  test("terminalizes a retryable discovery failure after its final attempt", async () => {
+    await appendSourceCaptureVersion(testDb, { sourceId: "source", captureKind: "pasted_text", rawText: "Đèo Hải Vân có điểm dừng ngắm cảnh.", metadata: { kind: "submitted" } });
+    const [job] = await testDb.select().from(knowledgeIngestionJobs);
+    await testDb.update(knowledgeIngestionJobs).set({ maxAttempts: 1 }).where(eq(knowledgeIngestionJobs.id, job!.id));
+    const claim = await claimNextKnowledgeIngestionJob({ workerId: "discovery-worker", now: new Date(Date.now() + 1_000) }, testDb);
+    if (!claim) throw new Error("expected job claim");
+
+    await expect(runKnowledgeIngestionPipeline(claim, testDb, async () => { throw new DiscoveryFailure("discovery_gateway_http_error"); })).resolves.toMatchObject({ outcome: "failed" });
+    await expect(testDb.select().from(knowledgeIngestionJobs).where(eq(knowledgeIngestionJobs.id, claim.jobId))).resolves.toMatchObject([{ status: "failed", attemptCount: 1, lastErrorCode: "discovery_gateway_http_error", claimedBy: null, fencingToken: null }]);
   });
 
   test("records discard as a terminal AI outcome without card or lifecycle effects", async () => {

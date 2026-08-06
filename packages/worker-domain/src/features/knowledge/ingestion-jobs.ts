@@ -19,7 +19,7 @@ export class KnowledgeIngestionJobError extends Error {
 }
 
 export type KnowledgeIngestionJobStatus = Pick<typeof knowledgeIngestionJobs.$inferSelect, "id" | "sourceId" | "captureVersionId" | "status" | "discoveryTerminal" | "candidateCount" | "completedCandidateCount" | "needsOperatorCandidateCount" | "failedCandidateCount" | "attemptCount" | "maxAttempts" | "nextRunAt" | "lastErrorCode" | "requeueReasonCode" | "claimedBy" | "claimedAt" | "leaseExpiresAt" | "createdAt" | "updatedAt"> & { expired: boolean };
-export type KnowledgeIngestionClaim = { jobId: string; sourceId: string; captureVersionId: string; status: "running"; attemptCount: number; claimedAt: Date; nextRunAt: Date; leaseExpiresAt: Date; fencingToken: string };
+export type KnowledgeIngestionClaim = { jobId: string; sourceId: string; captureVersionId: string; status: "running"; attemptCount: number; maxAttempts: number; claimedAt: Date; nextRunAt: Date; leaseExpiresAt: Date; fencingToken: string };
 export type KnowledgeIngestionCandidateClaim = { candidateId: string; jobId: string; sourceId: string; captureVersionId: string; processingStatus: "processing"; attemptCount: number; claimedAt: Date; nextRunAt: Date; fencingToken: string; leaseExpiresAt: Date };
 
 export async function ensureIngestionJobForCaptureVersion(db: IngestionJobDb, input: { sourceId: string; captureVersionId: string }) {
@@ -47,7 +47,7 @@ export async function claimNextKnowledgeIngestionJob(input: { workerId: string; 
     const rows = await tx.execute(sql`select id from knowledge_ingestion_jobs where status = 'queued' and next_run_at <= ${now.toISOString()}::timestamptz and attempt_count < max_attempts and claimed_by is null order by next_run_at, created_at for update skip locked limit 1`) as Array<{ id: string }>;
     if (!rows[0]) return null;
     const [job] = await tx.update(knowledgeIngestionJobs).set({ status: "running", claimedBy: workerId, claimedAt: now, leaseExpiresAt, fencingToken, attemptCount: sql`${knowledgeIngestionJobs.attemptCount} + 1`, requeueReasonCode: null, updatedAt: now }).where(and(eq(knowledgeIngestionJobs.id, rows[0].id), eq(knowledgeIngestionJobs.status, "queued"), isNull(knowledgeIngestionJobs.claimedBy))).returning();
-    return job ? { jobId: job.id, sourceId: job.sourceId, captureVersionId: job.captureVersionId, status: "running", attemptCount: job.attemptCount, claimedAt: job.claimedAt!, nextRunAt: job.nextRunAt, leaseExpiresAt: job.leaseExpiresAt!, fencingToken } : null;
+    return job ? { jobId: job.id, sourceId: job.sourceId, captureVersionId: job.captureVersionId, status: "running", attemptCount: job.attemptCount, maxAttempts: job.maxAttempts, claimedAt: job.claimedAt!, nextRunAt: job.nextRunAt, leaseExpiresAt: job.leaseExpiresAt!, fencingToken } : null;
   });
 }
 
