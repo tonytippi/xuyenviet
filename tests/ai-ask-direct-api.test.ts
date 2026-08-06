@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 
-import { loadTravelerShell, submitDirectAiAskStream } from "../apps/web/src/features/ai/direct-api-client";
+import { acceptDirectTripCreationRecommendation, declineDirectTripCreationRecommendation, loadAnswerDetail, loadTravelerShell, loadTripProjectSidebarSummaries, saveDirectAnswerUsefulnessFeedback, submitDirectAiAskStream } from "../apps/web/src/features/ai/direct-api-client";
 
 describe("direct traveler API client", () => {
   afterEach(() => { vi.unstubAllGlobals(); });
@@ -12,11 +12,43 @@ describe("direct traveler API client", () => {
     expect(fetch).toHaveBeenCalledWith("/v1/conversations/shell?conversationId=conversation-1", expect.objectContaining({ credentials: "include" }));
   });
 
+  test("uses a strict relative cookie-authenticated Trip Project list read", async () => {
+    const fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ projects: [{ id: "project-1", title: "Hè miền Trung", conversationId: "conversation-1", updatedAt: "2026-08-05T00:00:00.000Z" }] }), { status: 200 }));
+    vi.stubGlobal("fetch", fetch);
+    await expect(loadTripProjectSidebarSummaries()).resolves.toEqual([{ id: "project-1", title: "Hè miền Trung", conversationId: "conversation-1", updatedAt: "2026-08-05T00:00:00.000Z" }]);
+    expect(fetch).toHaveBeenCalledWith("/v1/conversations/trip-projects", expect.objectContaining({ credentials: "include" }));
+  });
+
+  test("rejects malformed Trip Project list rows", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ projects: [{ id: "project-1", title: "Hè miền Trung", updatedAt: "2026-08-05T00:00:00.000Z" }] }), { status: 200 })));
+    await expect(loadTripProjectSidebarSummaries()).rejects.toThrow();
+  });
+
+  test("rejects duplicate Trip Project sidebar identities", async () => {
+    const project = { id: "project-1", title: "Hè miền Trung", conversationId: "conversation-1", updatedAt: "2026-08-05T00:00:00.000Z" };
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ projects: [project, { ...project, conversationId: "conversation-2" }] }), { status: 200 })));
+    await expect(loadTripProjectSidebarSummaries()).rejects.toThrow();
+  });
+
   test("accepts a shell conversation with persisted messages", async () => {
     const shell = { conversation: { id: "conversation-1", tripProjectId: null, messages: [{ id: "message-1", role: "assistant", content: "Đi Huế." }] }, tripProject: null, workspace: null };
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ shell }), { status: 200 })));
 
     await expect(loadTravelerShell("conversation-1")).resolves.toEqual({ shell });
+  });
+
+  test("loads only a strict cookie-authenticated persisted answer detail projection", async () => {
+    const detail = { conversationId: "conversation-1", assistantMessageId: "assistant-1", content: "Đi Huế.", provenance: [], annotations: [] };
+    const fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ detail }), { status: 200 }));
+    vi.stubGlobal("fetch", fetch);
+
+    await expect(loadAnswerDetail("conversation-1", "assistant-1")).resolves.toEqual({ detail });
+    expect(fetch).toHaveBeenCalledWith("/v1/conversations/conversation-1/answers/assistant-1", expect.objectContaining({ credentials: "include" }));
+  });
+
+  test("rejects malformed persisted answer detail without exposing a fallback", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ detail: { conversationId: "conversation-1", assistantMessageId: "assistant-1", content: "Đi Huế.", provenance: "unsafe", annotations: [] } }), { status: 200 })));
+    await expect(loadAnswerDetail("conversation-1", "assistant-1")).rejects.toThrow();
   });
 
   test("accepts a non-null production workspace shell", async () => {
@@ -37,6 +69,24 @@ describe("direct traveler API client", () => {
     const events = await submitDirectAiAskStream({ question: "Đi đâu?", image: null, idempotencyKey: "a".repeat(16), onPreparing: () => undefined, onDelta: () => undefined });
     expect(events.map((event) => event.type)).toEqual(["preparing", "done"]);
     expect(fetch).toHaveBeenLastCalledWith("/v1/ai-ask/stream", expect.objectContaining({ credentials: "include", headers: expect.objectContaining({ "X-XuyenViet-CSRF": "a".repeat(43), "Idempotency-Key": "a".repeat(16) }) }));
+  });
+
+  test("forwards Idempotency-Key only for accepted trip creation", async () => {
+    const fetch = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ success: true }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ success: true, destination: { tripProjectId: "project-1", conversationId: "conversation-1" } }), { status: 200 }));
+    vi.stubGlobal("fetch", fetch);
+    await expect(declineDirectTripCreationRecommendation({ decisionId: "decision-1" })).resolves.toEqual({ success: true });
+    await expect(acceptDirectTripCreationRecommendation("decision-2", "a".repeat(16))).resolves.toEqual({ success: true, destination: { tripProjectId: "project-1", conversationId: "conversation-1" } });
+    expect(fetch.mock.calls[0]![1]).toEqual(expect.objectContaining({ headers: expect.not.objectContaining({ "Idempotency-Key": expect.anything() }) }));
+    expect(fetch.mock.calls[1]![1]).toEqual(expect.objectContaining({ headers: expect.objectContaining({ "Idempotency-Key": "a".repeat(16) }) }));
+  });
+
+  test("rejects an invalid accepted-creation command before it reaches the API", async () => {
+    const fetch = vi.fn();
+    vi.stubGlobal("fetch", fetch);
+    await expect(acceptDirectTripCreationRecommendation("decision-2", "short")).resolves.toEqual({ success: false, reason: "not_found" });
+    expect(fetch).not.toHaveBeenCalled();
   });
 
   test("accepts the persisted terminal answer with provenance", async () => {
@@ -91,5 +141,16 @@ describe("direct traveler API client", () => {
     vi.stubGlobal("fetch", fetch);
 
     await expect(submitDirectAiAskStream({ question: "Đi đâu?", image: null, idempotencyKey: "a".repeat(16), onPreparing: () => undefined, onDelta: () => undefined })).rejects.toThrow("Luồng trả lời bị gián đoạn trước khi hoàn tất.");
+  });
+
+  test("saves direct feedback through the cached CSRF boundary and rejects malformed results", async () => {
+    const fetch = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({ success: true, feedback: { rating: "not_useful", comment: "Thiếu điểm dừng", updatedAt: "2026-08-05T00:00:00.000Z" } }), { status: 200 }));
+    vi.stubGlobal("fetch", fetch);
+
+    await expect(saveDirectAnswerUsefulnessFeedback({ assistantMessageId: "assistant-1", rating: "not_useful", comment: "Thiếu điểm dừng" })).resolves.toMatchObject({ success: true, feedback: { rating: "not_useful" } });
+    expect(fetch).toHaveBeenCalledWith("/v1/answer-usefulness-feedback", expect.objectContaining({ credentials: "include", headers: expect.objectContaining({ "X-XuyenViet-CSRF": "a".repeat(43) }) }));
+
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ success: true, feedback: { rating: "not_useful" } }), { status: 200 })));
+    await expect(saveDirectAnswerUsefulnessFeedback({ assistantMessageId: "assistant-2", rating: "not_useful" })).rejects.toThrow();
   });
 });

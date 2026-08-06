@@ -5,12 +5,13 @@ import { and, asc, desc, eq, sql } from "drizzle-orm";
 import { loadAnswerContext } from "./answer-context";
 import { formatAssistantMessageProvenance } from "./provenance";
 import { answerUsefulnessFeedback, assistantResponseProvenance, conversations, messages, tripChangeProposals, tripPlanChangeHistory, tripPlanItems, tripProjectConstraints, tripProjects, users } from "./schema";
-import { adminUserRosterPageSize, encodeAdminUserRosterCursor, parsePlanningAnswerDetailResponse, planningDetailProvenanceLimit, type AdminAiGatewayModel, type AdminAiGatewayModelInput, type AdminAiGatewayModelUpdate, type PlanningJsonValue, type PlanningProvenance, type RequestPrincipal, type RequestRole, type TravelerShellProjection, type TripAnswerContextResponse } from "@xuyenviet/contracts";
+import { adminUserRosterPageSize, conversationSummaryLimit, encodeAdminUserRosterCursor, parsePlanningAnswerDetailResponse, planningDetailProvenanceLimit, type AdminAiGatewayModel, type AdminAiGatewayModelInput, type AdminAiGatewayModelUpdate, type PlanningJsonValue, type PlanningProvenance, type RequestPrincipal, type RequestRole, type TravelerShellProjection, type TripAnswerContextResponse } from "@xuyenviet/contracts";
 import { createAiAskStreamExecutionPort } from "./ai-ask-stream-execution";
 import { discardAiAskCommandsForDeletedConversations } from "./ai-ask-commands";
+import { acceptTripCreationRecommendation, choosePrivateTripRecommendation, continueInTrip, declineTripCreationRecommendation, discardTripRecommendationAcceptancesForDeletedResources } from "./trip-recommendations";
 import { recordAuditEvent } from "./audit-writers";
 import { toUserAuditActor } from "./actors";
-import type { TravelerCommandPort } from "@xuyenviet/domain";
+import type { TravelerCommandPort, TripProjectSidebarReadRepository } from "@xuyenviet/domain";
 
 const answerUsefulnessCommentMaxLength = 500;
 
@@ -53,6 +54,7 @@ export * from "./admin-knowledge-coverage";
 export * from "./trip-plan-commands";
 export * from "./plan-references";
 export * from "./traveler-proposal-commands";
+export * from "./trip-recommendations";
 
 export type ApiIdentityRecord = {
   userId: string;
@@ -85,6 +87,21 @@ export interface ConversationSummaryRepository {
 }
 export interface TravelerShellRepository {
   loadOwnedTravelerShell(userId: string, conversationId?: string, tripProjectId?: string): Promise<TravelerShellProjection>;
+}
+
+export function createPostgresTripProjectSidebarReadRepository(): TripProjectSidebarReadRepository {
+  return {
+    async listOwnedTripProjectSidebarSummaries(userId) {
+      const db = (await import("./client")).getDb();
+      const rows = await db.select({ id: tripProjects.id, title: tripProjects.title, conversationId: conversations.id, updatedAt: tripProjects.updatedAt })
+        .from(tripProjects)
+        .innerJoin(conversations, and(eq(conversations.id, tripProjects.primaryConversationId), eq(conversations.tripProjectId, tripProjects.id), eq(conversations.userId, userId)))
+        .where(eq(tripProjects.userId, userId))
+        .orderBy(desc(tripProjects.updatedAt), desc(tripProjects.id))
+        .limit(conversationSummaryLimit);
+      return rows.map((row) => ({ ...row, updatedAt: row.updatedAt.toISOString() }));
+    },
+  };
 }
 
 export function createPostgresConversationSummaryRepository(databaseUrl: string): ConversationSummaryRepository {
@@ -165,8 +182,10 @@ export function createPostgresTravelerCommandPort(): TravelerCommandPort {
         const project = await (await import("./client")).getDb().transaction(async (transaction) => {
           const [actor] = await transaction.select({ email: users.email }).from(users).where(eq(users.id, userId)).limit(1);
           if (!actor?.email) throw new Error("Audit actor unavailable.");
-          const [created] = await transaction.insert(tripProjects).values({ userId, title, origin, destination, startDate, endDate, travelers, notes }).returning();
-          await recordAuditEvent({ actor: toUserAuditActor({ userId, email: actor.email }), operation: "create", targetType: "trip_project", targetId: created!.id, afterSummary: JSON.stringify({ titleLength: created!.title.length, hasOrigin: Boolean(created!.origin), hasDestination: Boolean(created!.destination), hasStartDate: Boolean(created!.startDate), hasEndDate: Boolean(created!.endDate), hasTravelers: Boolean(created!.travelers), hasNotes: Boolean(created!.notes) }) }, transaction);
+           const [created] = await transaction.insert(tripProjects).values({ userId, title, origin, destination, startDate, endDate, travelers, notes }).returning();
+           const [primaryConversation] = await transaction.insert(conversations).values({ userId, tripProjectId: created!.id }).returning({ id: conversations.id });
+           await transaction.update(tripProjects).set({ primaryConversationId: primaryConversation!.id, updatedAt: new Date() }).where(eq(tripProjects.id, created!.id));
+           await recordAuditEvent({ actor: toUserAuditActor({ userId, email: actor.email }), operation: "create", targetType: "trip_project", targetId: created!.id, afterSummary: JSON.stringify({ titleLength: created!.title.length, hasOrigin: Boolean(created!.origin), hasDestination: Boolean(created!.destination), hasStartDate: Boolean(created!.startDate), hasEndDate: Boolean(created!.endDate), hasTravelers: Boolean(created!.travelers), hasNotes: Boolean(created!.notes) }) }, transaction);
           return created!;
         });
         return { success: true, project: { id: project.id, title: project.title, origin: project.origin, destination: project.destination, startDate: project.startDate, endDate: project.endDate, travelers: project.travelers, notes: project.notes, updatedAt: project.updatedAt.toISOString() } };
@@ -188,7 +207,8 @@ export function createPostgresTravelerCommandPort(): TravelerCommandPort {
               await transaction.update(tripProjects).set({ primaryConversationId: replacement.id, aggregateVersion: sql`${tripProjects.aggregateVersion} + 1`, updatedAt: new Date() }).where(eq(tripProjects.id, project.id));
              }
            }
-           await discardAiAskCommandsForDeletedConversations(transaction, userId, [conversation.id]);
+            await discardAiAskCommandsForDeletedConversations(transaction, userId, [conversation.id]);
+            await discardTripRecommendationAcceptancesForDeletedResources(transaction, userId, [conversation.id], []);
            await transaction.update(conversations).set({ lifecycleVersion: sql`${conversations.lifecycleVersion} + 1`, updatedAt: new Date() }).where(eq(conversations.id, conversation.id));
           const deleted = await transaction.delete(conversations).where(and(eq(conversations.id, conversation.id), eq(conversations.userId, userId))).returning({ id: conversations.id });
           if (deleted.length !== 1) return { success: false, reason: "not_found" } as const;
@@ -208,7 +228,8 @@ export function createPostgresTravelerCommandPort(): TravelerCommandPort {
           const linkedConversationCount = linkedConversations.length;
           await transaction.update(tripProjects).set({ primaryConversationId: null, aggregateVersion: sql`${tripProjects.aggregateVersion} + 1`, updatedAt: new Date() }).where(eq(tripProjects.id, project.id));
           await transaction.update(conversations).set({ lifecycleVersion: sql`${conversations.lifecycleVersion} + 1`, updatedAt: new Date() }).where(and(eq(conversations.tripProjectId, project.id), eq(conversations.userId, userId)));
-          await discardAiAskCommandsForDeletedConversations(transaction, userId, linkedConversations.map((conversation) => conversation.id));
+           await discardAiAskCommandsForDeletedConversations(transaction, userId, linkedConversations.map((conversation) => conversation.id));
+           await discardTripRecommendationAcceptancesForDeletedResources(transaction, userId, linkedConversations.map((conversation) => conversation.id), [project.id]);
           await transaction.delete(conversations).where(and(eq(conversations.tripProjectId, project.id), eq(conversations.userId, userId)));
           const deleted = await transaction.delete(tripProjects).where(and(eq(tripProjects.id, project.id), eq(tripProjects.userId, userId))).returning({ id: tripProjects.id });
           if (deleted.length !== 1) return { success: false, reason: "not_found" } as const;
@@ -239,6 +260,10 @@ export function createPostgresTravelerCommandPort(): TravelerCommandPort {
     async executeAnnotationProposalAction(userId, input) {
       try { const result = await import("./traveler-proposal-commands").then(({ executeAnnotationProposalAction }) => executeAnnotationProposalAction(userId, input)); return result.success ? "aggregateVersion" in result ? { success: true, aggregateVersion: result.aggregateVersion as number, proposalStatus: "applied" } : { success: true, proposalStatus: "dismissed" } : result; } catch { return { success: false, reason: "failed" }; }
     },
+    declineTripCreationRecommendation,
+    choosePrivateTripRecommendation,
+    continueInTrip,
+    acceptTripCreationRecommendation,
   };
 }
 

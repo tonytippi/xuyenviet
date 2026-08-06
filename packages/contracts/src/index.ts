@@ -354,6 +354,8 @@ export function parseAdminUserRosterPage(value: unknown): AdminUserRosterPage | 
 export const conversationSummaryLimit = 100;
 export type ConversationSummary = { id: string; updatedAt: string; preview: string };
 export type ConversationSummaryListResponse = { summaries: ConversationSummary[] };
+export type TripProjectSidebarSummary = { id: string; title: string; conversationId: string; updatedAt: string };
+export type TripProjectSidebarListResponse = { projects: TripProjectSidebarSummary[] };
 export type TravelerShellMessage = { id: string; role: "user" | "assistant"; content: string };
 export type TravelerShellProjection = {
   conversation: { id: string; tripProjectId: string | null; messages: TravelerShellMessage[] } | null;
@@ -596,6 +598,37 @@ export function parseAiAskIdempotencyKey(value: unknown): string | null {
   return typeof value === "string" && /^[A-Za-z0-9_-]{16,128}$/.test(value) ? value : null;
 }
 
+export type TripCreationRecommendation = { kind: "none" } | { kind: "clarify"; question: string; actions: ["private_answer"] } | { kind: "offer"; decisionId: string; actions: ["save_trip", "private_answer"] };
+export type TripContextRecommendation = { kind: "none" } | { kind: "clarify"; question: string; actions: ["private_answer"] } | { kind: "single"; decisionId: string; tripProjectId: string; title: string; actions: ["continue_in_trip", "private_answer"] } | { kind: "multiple"; decisionId: string; actions: ["private_answer"] };
+export type TripRecommendationResponse = { tripCreationRecommendation: TripCreationRecommendation; tripContextRecommendation: TripContextRecommendation };
+export type RecommendationDecisionCommand = { decisionId: string };
+export type ContinueInTripCommand = { decisionId: string; tripProjectId: string };
+export type AcceptTripCreationRecommendationCommand = { decisionId: string; idempotencyKey: string };
+export type RecommendationActionResult = { success: true } | { success: false; reason: "not_found" | "refresh_required" | "failed" };
+export type ContinueInTripResult = { success: true; destination: { tripProjectId: string; conversationId: string } } | { success: false; reason: "not_found" | "refresh_required" | "failed" };
+export type AcceptTripCreationRecommendationResult = { success: true; destination: { tripProjectId: string; conversationId: string } } | { success: false; reason: "not_found" | "refresh_required" | "key_reused" | "failed" };
+
+export function parseRecommendationDecisionCommand(value: unknown): RecommendationDecisionCommand | null { return hasOnlyKeys(value, ["decisionId"]) && isIdentifier(value.decisionId) ? { decisionId: value.decisionId } : null; }
+export function parseContinueInTripCommand(value: unknown): ContinueInTripCommand | null { return hasOnlyKeys(value, ["decisionId", "tripProjectId"]) && isIdentifier(value.decisionId) && isIdentifier(value.tripProjectId) ? { decisionId: value.decisionId, tripProjectId: value.tripProjectId } : null; }
+export function parseAcceptTripCreationRecommendationCommand(value: unknown): AcceptTripCreationRecommendationCommand | null { if (!hasOnlyKeys(value, ["decisionId", "idempotencyKey"]) || !isIdentifier(value.decisionId)) return null; const idempotencyKey = parseAiAskIdempotencyKey(value.idempotencyKey); return idempotencyKey ? { decisionId: value.decisionId, idempotencyKey } : null; }
+export function parseTripRecommendationResponse(value: unknown): TripRecommendationResponse | null {
+  if (!hasOnlyKeys(value, ["tripCreationRecommendation", "tripContextRecommendation"])) return null;
+  const creation = value.tripCreationRecommendation;
+  const context = value.tripContextRecommendation;
+  const question = (item: unknown) => typeof item === "string" && item.length > 0 && item.length <= 240;
+  const creationValid = hasOnlyKeys(creation, ["kind"]) && creation.kind === "none"
+    || hasOnlyKeys(creation, ["kind", "question", "actions"]) && creation.kind === "clarify" && question(creation.question) && Array.isArray(creation.actions) && creation.actions.length === 1 && creation.actions[0] === "private_answer"
+    || hasOnlyKeys(creation, ["kind", "decisionId", "actions"]) && creation.kind === "offer" && isIdentifier(creation.decisionId) && Array.isArray(creation.actions) && creation.actions.length === 2 && creation.actions[0] === "save_trip" && creation.actions[1] === "private_answer";
+  const contextValid = hasOnlyKeys(context, ["kind"]) && context.kind === "none"
+    || hasOnlyKeys(context, ["kind", "question", "actions"]) && context.kind === "clarify" && question(context.question) && Array.isArray(context.actions) && context.actions.length === 1 && context.actions[0] === "private_answer"
+    || hasOnlyKeys(context, ["kind", "decisionId", "tripProjectId", "title", "actions"]) && context.kind === "single" && isIdentifier(context.decisionId) && isIdentifier(context.tripProjectId) && question(context.title) && Array.isArray(context.actions) && context.actions.length === 2 && context.actions[0] === "continue_in_trip" && context.actions[1] === "private_answer"
+    || hasOnlyKeys(context, ["kind", "decisionId", "actions"]) && context.kind === "multiple" && isIdentifier(context.decisionId) && Array.isArray(context.actions) && context.actions.length === 1 && context.actions[0] === "private_answer";
+  return creationValid && contextValid ? value as TripRecommendationResponse : null;
+}
+export function parseRecommendationActionResult(value: unknown): RecommendationActionResult | null { return hasOnlyKeys(value, ["success"]) && value.success === true ? { success: true } : hasOnlyKeys(value, ["success", "reason"]) && value.success === false && (value.reason === "not_found" || value.reason === "refresh_required" || value.reason === "failed") ? value as RecommendationActionResult : null; }
+export function parseContinueInTripResult(value: unknown): ContinueInTripResult | null { return hasOnlyKeys(value, ["success", "destination"]) && value.success === true && hasOnlyKeys(value.destination, ["tripProjectId", "conversationId"]) && isIdentifier(value.destination.tripProjectId) && isIdentifier(value.destination.conversationId) ? value as ContinueInTripResult : hasOnlyKeys(value, ["success", "reason"]) && value.success === false && (value.reason === "not_found" || value.reason === "refresh_required" || value.reason === "failed") ? value as ContinueInTripResult : null; }
+export function parseAcceptTripCreationRecommendationResult(value: unknown): AcceptTripCreationRecommendationResult | null { return hasOnlyKeys(value, ["success", "destination"]) && value.success === true && hasOnlyKeys(value.destination, ["tripProjectId", "conversationId"]) && isIdentifier(value.destination.tripProjectId) && isIdentifier(value.destination.conversationId) ? value as AcceptTripCreationRecommendationResult : hasOnlyKeys(value, ["success", "reason"]) && value.success === false && (value.reason === "not_found" || value.reason === "refresh_required" || value.reason === "key_reused" || value.reason === "failed") ? value as AcceptTripCreationRecommendationResult : null; }
+
 export function parseAiAskStreamInput(value: {
   question: unknown;
   conversationId?: unknown;
@@ -641,6 +674,15 @@ export function parseConversationSummaryListResponse(value: unknown): Conversati
   const summaries = (value as { summaries: unknown[] }).summaries;
   if (summaries.length > conversationSummaryLimit || !summaries.every(isConversationSummary)) return null;
   return { summaries: summaries as ConversationSummary[] };
+}
+
+export function parseTripProjectSidebarListResponse(value: unknown): TripProjectSidebarListResponse | null {
+  if (!hasOnlyKeys(value, ["projects"]) || !Array.isArray(value.projects) || value.projects.length > conversationSummaryLimit) return null;
+  const projects = value.projects;
+  if (!projects.every((project) => hasOnlyKeys(project, ["id", "title", "conversationId", "updatedAt"])
+    && isIdentifier(project.id) && isBoundedString(project.title, 160) && isIdentifier(project.conversationId) && typeof project.updatedAt === "string" && isUtcIsoTimestamp(project.updatedAt))) return null;
+  if (new Set(projects.map((project) => project.id)).size !== projects.length) return null;
+  return { projects: projects as TripProjectSidebarSummary[] };
 }
 
 export function parseTravelerShellResponse(value: unknown): TravelerShellResponse | null {

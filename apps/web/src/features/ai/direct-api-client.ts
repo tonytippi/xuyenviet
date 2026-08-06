@@ -1,6 +1,6 @@
 "use client";
 
-import { parseAnnotationProposalActionCommand, parseAnnotationProposalActionResult, parseApplyTripChangeProposalResult, parseConversationSummaryListResponse, parseCreateTripProjectCommand, parseCreateTripProjectResult, parseDeleteOwnedResourceResult, parseDismissTripChangeProposalResult, parsePlanningAnswerDetailResponse, parsePlanningContextResponse, parseSafeApiError, parseSaveAnswerUsefulnessFeedbackCommand, parseSaveAnswerUsefulnessFeedbackResult, parseTravelerShellResponse, parseTripChangeProposalCommand, type AiAskStreamEvent, type AnnotationProposalActionCommand, type CreateTripProjectCommand, type PlanningAnswerDetailResponse, type PlanningContextResponse, type TripChangeProposalCommand, type TravelerShellResponse } from "@xuyenviet/contracts";
+import { parseAcceptTripCreationRecommendationCommand, parseAcceptTripCreationRecommendationResult, parseAnnotationProposalActionCommand, parseAnnotationProposalActionResult, parseApplyTripChangeProposalResult, parseContinueInTripCommand, parseContinueInTripResult, parseConversationSummaryListResponse, parseCreateTripProjectCommand, parseCreateTripProjectResult, parseDeleteOwnedResourceResult, parseDismissTripChangeProposalResult, parsePlanningAnswerDetailResponse, parsePlanningContextResponse, parseRecommendationActionResult, parseRecommendationDecisionCommand, parseSafeApiError, parseSaveAnswerUsefulnessFeedbackCommand, parseSaveAnswerUsefulnessFeedbackResult, parseTravelerShellResponse, parseTripChangeProposalCommand, parseTripProjectSidebarListResponse, parseTripRecommendationResponse, type AiAskStreamEvent, type AnnotationProposalActionCommand, type CreateTripProjectCommand, type PlanningAnswerDetailResponse, type PlanningContextResponse, type TripChangeProposalCommand, type TravelerShellResponse } from "@xuyenviet/contracts";
 
 let csrfToken: string | null = null;
 
@@ -32,6 +32,10 @@ export async function loadConversationSummaries() {
   return (await directRead("/v1/conversations/summaries", parseConversationSummaryListResponse)).summaries;
 }
 
+export async function loadTripProjectSidebarSummaries() {
+  return (await directRead("/v1/conversations/trip-projects", parseTripProjectSidebarListResponse)).projects;
+}
+
 export function loadPlanningContext(tripProjectId: string): Promise<PlanningContextResponse> {
   return directRead(`/v1/conversations/planning-context/${encodeURIComponent(tripProjectId)}`, parsePlanningContextResponse);
 }
@@ -39,6 +43,7 @@ export function loadPlanningContext(tripProjectId: string): Promise<PlanningCont
 export function loadAnswerDetail(conversationId: string, assistantMessageId: string): Promise<PlanningAnswerDetailResponse> {
   return directRead(`/v1/conversations/${encodeURIComponent(conversationId)}/answers/${encodeURIComponent(assistantMessageId)}`, parsePlanningAnswerDetailResponse);
 }
+export function loadTripRecommendations(conversationId: string) { return directRead(`/v1/conversations/${encodeURIComponent(conversationId)}/trip-recommendation`, parseTripRecommendationResponse); }
 
 async function getCsrfToken() {
   if (csrfToken) return csrfToken;
@@ -49,9 +54,9 @@ async function getCsrfToken() {
   return csrfToken;
 }
 
-async function directCommand<T>(path: string, method: "POST" | "DELETE", body?: unknown): Promise<T> {
+async function directCommand<T>(path: string, method: "POST" | "DELETE", body?: unknown, extraHeaders?: Record<string, string>): Promise<T> {
   const token = await getCsrfToken();
-  const response = await fetch(path, { method, credentials: "include", headers: { "Content-Type": "application/json", "X-XuyenViet-CSRF": token, "x-request-id": crypto.randomUUID() }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
+  const response = await fetch(path, { method, credentials: "include", headers: { "Content-Type": "application/json", "X-XuyenViet-CSRF": token, "x-request-id": crypto.randomUUID(), ...extraHeaders }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
   const payload = await readJson(response);
   if (!response.ok) {
     const error = parseSafeApiError(payload);
@@ -104,6 +109,10 @@ export async function executeDirectAnnotationProposalAction(input: AnnotationPro
   const result = await directCommand<unknown>("/v1/trip-change-proposals/annotation-action", "POST", command);
   const parsed = parseAnnotationProposalActionResult(result); if (!parsed) throw new DirectApiError(); return parsed;
 }
+export async function declineDirectTripCreationRecommendation(input: { decisionId: string }) { const command = parseRecommendationDecisionCommand(input); if (!command) return { success: false as const, reason: "not_found" as const }; const parsed = parseRecommendationActionResult(await directCommand<unknown>("/v1/trip-recommendations/decline-creation", "POST", command)); if (!parsed) throw new DirectApiError(); return parsed; }
+export async function chooseDirectPrivateTripRecommendation(input: { decisionId: string }) { const command = parseRecommendationDecisionCommand(input); if (!command) return { success: false as const, reason: "not_found" as const }; const parsed = parseRecommendationActionResult(await directCommand<unknown>("/v1/trip-recommendations/private", "POST", command)); if (!parsed) throw new DirectApiError(); return parsed; }
+export async function continueDirectInTrip(input: { decisionId: string; tripProjectId: string }) { const command = parseContinueInTripCommand(input); if (!command) return { success: false as const, reason: "not_found" as const }; const parsed = parseContinueInTripResult(await directCommand<unknown>("/v1/trip-recommendations/continue", "POST", command)); if (!parsed) throw new DirectApiError(); return parsed; }
+export async function acceptDirectTripCreationRecommendation(decisionId: string, idempotencyKey: string) { const command = parseAcceptTripCreationRecommendationCommand({ decisionId, idempotencyKey }); if (!command) return { success: false as const, reason: "not_found" as const }; const parsed = parseAcceptTripCreationRecommendationResult(await directCommand<unknown>("/v1/trip-recommendations/accept-creation", "POST", { decisionId: command.decisionId }, { "Idempotency-Key": command.idempotencyKey })); if (!parsed) throw new DirectApiError(); return parsed; }
 
 
 export async function directLogout() {

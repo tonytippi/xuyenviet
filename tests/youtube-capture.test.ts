@@ -57,7 +57,7 @@ describe("YouTube capture", () => {
     const [raw] = await testDb.select().from(sourceCaptureVersions).where(eq(sourceCaptureVersions.sourceId, "queued"));
     expect(raw.rawText).toContain("NovaWorld Phan Thiết");
     expect(raw.rawMetadata).not.toHaveProperty("importActorId");
-    await expect(testDb.select().from(knowledgeIngestionJobs).where(eq(knowledgeIngestionJobs.captureVersionId, raw.id))).resolves.toMatchObject([{ stage: "queued" }]);
+    await expect(testDb.select().from(knowledgeIngestionJobs).where(eq(knowledgeIngestionJobs.captureVersionId, raw.id))).resolves.toMatchObject([{ status: "queued" }]);
     await expect(testDb.select({ label: sources.label }).from(sources).where(eq(sources.id, "queued"))).resolves.toEqual([{ label: "Hành trình qua Phan Thiết" }]);
     const [audit] = await testDb.select().from(auditEvents).where(eq(auditEvents.targetType, "source_capture_version"));
     expect(audit).toMatchObject({ actorClass: "system", actorUserId: null, actorEmail: null, actorSystem: "system-youtube-capture" });

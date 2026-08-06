@@ -1,5 +1,5 @@
 # generated: 2026-07-25
-# last_updated: 2026-08-05 (Schema release matrix/policy retired; Drizzle forward migrations and migration ordering are the active deployment contract.)
+# last_updated: 2026-08-06 (Story 16.4 review repairs complete; browser accessibility evidence remains blocked.)
 # project: xuyenviet
 # project_key: NOKEY
 # tracking_system: file-system
@@ -33,7 +33,7 @@
 #   - done: Completed
 
 generated: 2026-07-25
-last_updated: 2026-08-05 (Schema release matrix/policy retired; Drizzle forward migrations and migration ordering are the active deployment contract.)
+last_updated: 2026-08-06 (Story 16.4 review repairs complete; browser accessibility evidence remains blocked.)
 project: xuyenviet
 project_key: NOKEY
 tracking_system: file-system
@@ -385,10 +385,12 @@ development_status:
 
   # Epic 16 passed implementation-readiness assessment on 2026-08-05.
   epic-16: in-progress
-  16-1-recommend-and-save-trip-projects-through-typed-owner-decisions: ready-for-dev
-  16-2-preserve-explicit-trip-scope-in-the-planning-shell: backlog
-  16-3-present-practical-vietnamese-answer-trust-and-recovery-states: backlog
-  16-4-prove-chat-first-scope-trust-and-accessibility-boundaries: backlog
+  16-1-recommend-and-save-trip-projects-through-typed-owner-decisions: done
+  # 2026-08-05: BMad code review repaired stale-shell submit exposure, terminal recommendation reconciliation, create/delete duplicate mutations, desktop focus, and duplicate sidebar identities. Focused 222-test unit suite, typecheck, build, and diff check passed; lint had 0 errors and 45 pre-existing warnings.
+  16-2-preserve-explicit-trip-scope-in-the-planning-shell: done
+  # 2026-08-05: BMad code review repaired traveler-visible stream error interpolation, raw source URL quick facts, unsafe disclosure labels, and unavailable-shell recovery. A provenance-state report was dismissed after contract inspection because that state is not projected to the browser. Focused unit suite passed (23 files, 228 tests); lint had 0 errors and 45 pre-existing warnings; typecheck, build, and diff check passed.
+  16-3-present-practical-vietnamese-answer-trust-and-recovery-states: done
+  16-4-prove-chat-first-scope-trust-and-accessibility-boundaries: in-progress
   epic-16-retrospective: optional
 
 action_items:

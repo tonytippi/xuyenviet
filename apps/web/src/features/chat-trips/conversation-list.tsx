@@ -24,7 +24,7 @@ export function ConversationList({ sessions, activeConversationId, isDisabled = 
         type="button"
         onClick={onNewChat}
         disabled={isDisabled}
-        className="min-h-10 w-full rounded-lg bg-[#202020] px-3 py-2 text-sm font-medium text-white transition hover:bg-[#383838] active:translate-y-px disabled:cursor-not-allowed disabled:bg-[#a3a3a3]"
+        className="min-h-11 w-full rounded-lg bg-[#202020] px-3 py-2 text-sm font-medium text-white transition hover:bg-[#383838] active:translate-y-px disabled:cursor-not-allowed disabled:bg-[#a3a3a3]"
       >
         Trò chuyện mới
       </button>
@@ -50,8 +50,8 @@ export function ConversationList({ sessions, activeConversationId, isDisabled = 
                   aria-current={isActive ? "page" : undefined}
                   className={
                     isActive
-                      ? "min-w-0 flex-1 truncate rounded-lg px-3 py-2.5 pr-10 text-left text-sm font-medium text-[#285c49] focus:outline-none focus:ring-2 focus:ring-[#167c5a] disabled:cursor-not-allowed disabled:opacity-70"
-                      : "min-w-0 flex-1 truncate rounded-lg px-3 py-2.5 pr-10 text-left text-sm font-medium text-[#303030] focus:outline-none focus:ring-2 focus:ring-[#167c5a] disabled:cursor-not-allowed disabled:opacity-70"
+                        ? "min-w-0 flex-1 truncate rounded-lg px-3 py-2.5 pr-12 text-left text-sm font-medium text-[#285c49] focus:outline-none focus:ring-2 focus:ring-[#167c5a] disabled:cursor-not-allowed disabled:opacity-70"
+                        : "min-w-0 flex-1 truncate rounded-lg px-3 py-2.5 pr-12 text-left text-sm font-medium text-[#303030] focus:outline-none focus:ring-2 focus:ring-[#167c5a] disabled:cursor-not-allowed disabled:opacity-70"
                   }
                 >
                   {session.preview}
@@ -66,7 +66,7 @@ export function ConversationList({ sessions, activeConversationId, isDisabled = 
                     }}
                     disabled={isDisabled}
                     aria-label={`Xoá cuộc trò chuyện: ${session.preview}`}
-                    className="absolute right-1 top-1/2 grid size-8 -translate-y-1/2 place-items-center rounded-md bg-[#fafafa] text-[#777] opacity-0 transition hover:bg-[#f1e6e4] hover:text-[#a33a32] focus:opacity-100 focus:outline-none focus:ring-2 focus:ring-[#a33a32] group-hover:opacity-100 disabled:cursor-not-allowed disabled:opacity-40"
+                    className="absolute right-1 top-1/2 grid min-h-11 min-w-11 -translate-y-1/2 place-items-center rounded-md bg-[#fafafa] text-[#777] opacity-0 transition hover:bg-[#f1e6e4] hover:text-[#a33a32] focus:opacity-100 focus:outline-none focus:ring-2 focus:ring-[#a33a32] group-hover:opacity-100 disabled:cursor-not-allowed disabled:opacity-40"
                   >
                     <TrashIcon className="size-4" />
                     <span className="sr-only">Xoá</span>
