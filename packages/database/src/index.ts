@@ -5,7 +5,7 @@ import { and, asc, desc, eq, sql } from "drizzle-orm";
 import { loadAnswerContext } from "./answer-context";
 import { formatAssistantMessageProvenance } from "./provenance";
 import { answerUsefulnessFeedback, assistantResponseProvenance, conversations, messages, tripChangeProposals, tripPlanChangeHistory, tripPlanItems, tripProjectConstraints, tripProjects, users } from "./schema";
-import { adminUserRosterPageSize, encodeAdminUserRosterCursor, evaluateSchemaAdmission, parsePlanningAnswerDetailResponse, planningDetailProvenanceLimit, type AdminAiGatewayModel, type AdminAiGatewayModelInput, type AdminAiGatewayModelUpdate, type PlanningJsonValue, type PlanningProvenance, type RequestPrincipal, type RequestRole, type SchemaCompatibilityDeclaration, type TravelerShellProjection, type TripAnswerContextResponse } from "@xuyenviet/contracts";
+import { adminUserRosterPageSize, encodeAdminUserRosterCursor, parsePlanningAnswerDetailResponse, planningDetailProvenanceLimit, type AdminAiGatewayModel, type AdminAiGatewayModelInput, type AdminAiGatewayModelUpdate, type PlanningJsonValue, type PlanningProvenance, type RequestPrincipal, type RequestRole, type TravelerShellProjection, type TripAnswerContextResponse } from "@xuyenviet/contracts";
 import { createAiAskStreamExecutionPort } from "./ai-ask-stream-execution";
 import { discardAiAskCommandsForDeletedConversations } from "./ai-ask-commands";
 import { recordAuditEvent } from "./audit-writers";
@@ -80,13 +80,6 @@ export interface BrowserIdentityRepository extends ApiIdentityRepository {
 }
 
 export type StoredConversationSummaryRow = { id: string; updatedAt: Date; messageContent: string | null };
-export type ReleaseSchemaVersionRepository = {
-  hasCompatibleSchemaVersion(declaration: SchemaCompatibilityDeclaration): Promise<boolean>;
-  getResolvedTargetIdentity?(): Promise<string>;
-  readSchemaAdmission?(): Promise<{ rows: Array<{ version: string }>; resolvedTargetIdentity: string }>;
-  recordSchemaVersion(version: string): Promise<void>;
-  close?(): Promise<void>;
-};
 export interface ConversationSummaryRepository {
   listOwnedConversationSummaryRows(userId: string, limit: number): Promise<StoredConversationSummaryRow[]>;
 }
@@ -264,35 +257,6 @@ function workspaceHistoryLabels(value: unknown): string[] { return Array.isArray
 function workspaceChildren(value: unknown): Array<{ ageRange: string | null; comfortTags: string[]; preferenceTags: string[] }> { return Array.isArray(value) ? value.slice(0, 10).flatMap((child) => { if (!child || typeof child !== "object" || Array.isArray(child)) return []; const item = child as Record<string, unknown>; if (!Number.isInteger(item.ageMin) || !Number.isInteger(item.ageMax) || (item.ageMin as number) < 0 || (item.ageMax as number) > 17 || (item.ageMin as number) > (item.ageMax as number)) return []; const tags = (tags: unknown) => Array.isArray(tags) ? tags.slice(0, 6).flatMap((tag) => typeof tag === "string" && tag.trim() === tag && tag.length > 0 && tag.length <= 160 ? [tag] : []) : []; const ageMin = item.ageMin as number; const ageMax = item.ageMax as number; return [{ ageRange: ageMin === ageMax ? `${ageMin} tuổi` : `${ageMin}-${ageMax} tuổi`, comfortTags: tags(item.comfortTags), preferenceTags: tags(item.preferenceTags) }]; }) : []; }
 function workspacePreferenceTags(value: unknown): string[] { return Array.isArray(value) ? value.slice(0, 20).flatMap((tag) => typeof tag === "string" && tag.trim() === tag && tag.length > 0 && tag.length <= 160 ? [tag] : []) : []; }
 function workspaceAvoidItems(value: unknown): Array<{ category: "place" | "activity"; label: string }> { return Array.isArray(value) ? value.slice(0, 20).flatMap((item) => { if (!item || typeof item !== "object" || Array.isArray(item)) return []; const entry = item as Record<string, unknown>; return (entry.category === "place" || entry.category === "activity") && typeof entry.label === "string" && entry.label.trim() === entry.label && entry.label.length > 0 && entry.label.length <= 120 ? [{ category: entry.category, label: entry.label }] : []; }) : []; }
-
-export function createPostgresReleaseSchemaVersionRepository(databaseUrl: string): ReleaseSchemaVersionRepository {
-  const sql = postgres(databaseUrl, { max: 1 });
-  return {
-    async hasCompatibleSchemaVersion(version) {
-      const rows = await sql<{ version: string }[]>`select version from release_schema_versions`;
-      return evaluateSchemaAdmission(version, rows).compatible;
-    },
-    async getResolvedTargetIdentity() {
-      const [target] = await sql<{ identity: string }[]>`select 'database=' || current_database() || ';host=' || coalesce(host(inet_server_addr()), 'local') || ';port=' || coalesce(inet_server_port()::text, '5432') as identity`;
-      if (!target?.identity) throw new Error("Could not resolve database target identity.");
-      return target.identity;
-    },
-    async readSchemaAdmission() {
-      const rows = await sql<{ version: string | null; identity: string }[]>`select release_schema_versions.version, target.identity from (select 'database=' || current_database() || ';host=' || coalesce(host(inet_server_addr()), 'local') || ';port=' || coalesce(inet_server_port()::text, '5432') as identity) target left join release_schema_versions on true`;
-      const identity = rows[0]?.identity;
-      if (typeof identity !== "string") throw new Error("Could not resolve database target identity.");
-      return { rows: rows.flatMap((row) => typeof row.version === "string" ? [{ version: row.version }] : []), resolvedTargetIdentity: identity };
-    },
-    async recordSchemaVersion(version) {
-      await sql.begin(async (transaction) => {
-        await transaction`select pg_advisory_xact_lock(918_040_004)`;
-        await transaction`delete from release_schema_versions`;
-        await transaction`insert into release_schema_versions (version) values (${version})`;
-      });
-    },
-    async close() { await sql.end({ timeout: 5 }); },
-  };
-}
 
 export function createPostgresApiIdentityRepository(databaseUrl: string, browserSessionLookupKey: string, browserOAuthTransactionProtectionKey?: string): BrowserIdentityRepository {
   if (browserOAuthTransactionProtectionKey !== undefined && browserOAuthTransactionProtectionKey.length < 32) throw new Error("Browser OAuth transaction protection key is invalid.");

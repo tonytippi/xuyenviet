@@ -94,7 +94,7 @@ pnpm --filter @xuyenviet/api build
 pnpm api dev
 ```
 
-The API listens on `PORT`, defaulting to `3001`. Deployment is browser-facing over public HTTPS with credentialed CORS restricted to exact origins in `XV_BROWSER_ALLOWED_ORIGINS`. Local development may instead use exact HTTP loopback origins and admits the local API schema compatibility range without a deployment release policy. Never use wildcard or prefix origins/return URLs.
+The API listens on `PORT`, defaulting to `3001`. Deployment is browser-facing over public HTTPS with credentialed CORS restricted to exact origins in `XV_BROWSER_ALLOWED_ORIGINS`. Local development may instead use exact HTTP loopback origins. Never use wildcard or prefix origins/return URLs.
 
 Use these endpoints to verify a local API process:
 
@@ -103,7 +103,7 @@ curl http://127.0.0.1:3001/health/live
 curl http://127.0.0.1:3001/openapi.json
 ```
 
-`GET /health/ready` additionally requires valid API configuration, database connectivity, and a compatible schema-release record. Run `pnpm db:migrate` against the intended `DATABASE_URL` before treating an API instance as ready.
+Run `pnpm db:migrate` against the intended `DATABASE_URL` before starting workloads that use the changed schema.
 
 ### Other local workloads
 
@@ -198,7 +198,7 @@ pnpm trip-proposal-expiry --once
 pnpm knowledge:assistant-provenance-withdrawal-backfill --execute
 ```
 
-`pnpm worker` is the sole continuous owner for extraction, canonical ingestion, indexing, and AI Ask domain-outbox delivery. The Worker invokes package-owned work paths without changing their PostgreSQL claim, lease, fencing, CAS, or idempotency protocols. See [`docs/runbooks/worker-operations.md`](docs/runbooks/worker-operations.md) for schema admission, safe telemetry, lifecycle checks, and repository proof.
+`pnpm worker` is the sole continuous owner for extraction, canonical ingestion, indexing, and AI Ask domain-outbox delivery. The Worker invokes package-owned work paths without changing their PostgreSQL claim, lease, fencing, CAS, or idempotency protocols. See [`docs/runbooks/worker-operations.md`](docs/runbooks/worker-operations.md) for safe telemetry, lifecycle checks, and repository proof.
 
 `pnpm trip-proposal-expiry --once` is a finite scheduled-maintenance command. A scheduler may launch exactly this command, never a perpetual proposal-expiry process. It rejects every argument other than `--once`; source-retention and provenance-withdrawal commands remain explicit operator operations, and Facebook/YouTube capture remains external operator-controlled work.
 

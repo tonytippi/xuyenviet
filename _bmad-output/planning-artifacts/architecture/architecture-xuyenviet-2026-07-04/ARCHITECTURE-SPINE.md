@@ -82,6 +82,12 @@ Prevents: ad hoc SQL drift across AI Ask, admin, retrieval, and evaluation work.
 
 Rule: All persistent tables and indexes are introduced through migrations; raw SQL is allowed only inside reviewed migration/query helpers for pgvector/full-text operations.
 
+Rule: Deployments run forward Drizzle migrations before starting or routing traffic to a workload that needs the changed schema. The migration command uses the target-scoped PostgreSQL advisory lock and Drizzle's applied-migration ledger; it does not require a schema release matrix, runtime policy, or separately recorded global schema version.
+
+Rule: Runtime readiness reports process configuration, database reachability, and assigned dependency/loop health. API, web, admin, and Worker runtimes must not gate readiness, traffic, or job claiming on a global schema version, a release matrix, or environment-provided schema policy.
+
+Rule: Backward compatibility is a concrete domain/data concern. When a durable representation needs a transition, the owning migration and domain reader/writer must define and test the old-data handling explicitly. Worker leases, fencing, retries, and idempotency remain the protection against interrupted or overlapping job processing.
+
 ### AD-4: NestJS Auth Is Public Sign-In Plus Google OAuth And Server-Side Roles
 
 Binds: public sign-in access, required Google OAuth before AI Ask, and server-side role checks for admin/operator capabilities.

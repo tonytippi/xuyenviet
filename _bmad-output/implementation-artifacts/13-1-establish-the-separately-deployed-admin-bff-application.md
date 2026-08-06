@@ -1,5 +1,7 @@
 # Story 13.1: Establish the Separately Deployed Admin BFF Application
 
+> **Schema-admission portions superseded on 2026-08-05.** The admin deployment and identity record remains historical context, but release matrices, `SCHEMA_RELEASE_*` policy, and global schema-version readiness were removed. Use `ARCHITECTURE-SPINE.md` AD-3 for the active forward-migration and runtime-readiness contract.
+
 Status: done
 
 ## Story

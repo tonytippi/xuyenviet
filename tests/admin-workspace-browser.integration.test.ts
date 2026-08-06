@@ -16,7 +16,7 @@ let app: INestApplication;
 beforeEach(async () => {
   await resetTestDatabase();
   const identities = createPostgresApiIdentityRepository(getTestDatabaseUrl(), browserAuth.sessionLookupKey, browserAuth.oauthTransactionProtectionKey);
-  const ApiModule = createApiModule(identities, { conversationSummaries: { async listOwnedConversationSummaryRows() { return []; } }, schemaVersions: { async hasCompatibleSchemaVersion() { return true; }, async recordSchemaVersion() {} }, browserAuth });
+  const ApiModule = createApiModule(identities, { conversationSummaries: { async listOwnedConversationSummaryRows() { return []; } }, browserAuth });
   @Module({ imports: [ApiModule] }) class TestModule {}
   app = await NestFactory.create(TestModule, { logger: false });
   await app.init();

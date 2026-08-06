@@ -6,9 +6,9 @@ import { join, resolve } from "node:path";
 
 import { eq } from "drizzle-orm";
 import { describe, expect, test } from "vitest";
-import { schemaCompatibilityDeclarations, type OperationalTelemetryEvent } from "@xuyenviet/contracts";
+import type { OperationalTelemetryEvent } from "@xuyenviet/contracts";
 
-import { aiAskCommands, aiGatewayModels, conversations, domainOutbox, domainOutboxEffects, knowledgeCards, knowledgeExtractionJobs, knowledgeIndexDirtyMarkers, knowledgeIngestionCandidates, knowledgeIngestionJobs, messages, releaseSchemaVersions, sourceCaptureVersions, sources } from "@/db/schema";
+import { aiAskCommands, aiGatewayModels, conversations, domainOutbox, domainOutboxEffects, knowledgeCards, knowledgeExtractionJobs, knowledgeIndexDirtyMarkers, knowledgeIngestionCandidates, knowledgeIngestionJobs, messages, sourceCaptureVersions, sources } from "@/db/schema";
 import { acquireAiAskCommand, finalizeAiAskCommand } from "@/features/ai/ai-ask-commands";
 import { hashCaptureText } from "@/features/knowledge/source-captures";
 
@@ -251,9 +251,6 @@ describe("compiled worker adapters", () => {
   test.runIf(Boolean(process.env.DATABASE_URL_TEST))("drains real child adapters without claiming new work and recovers an interrupted lease", async () => {
     await resetTestDatabase();
     await seedTestOperator();
-    // This compiled-runtime proof intentionally has no deployment policy
-    // projection, so it must use the policy-free pre-overlap release.
-    await testDb.insert(releaseSchemaVersions).values({ version: schemaCompatibilityDeclarations.worker.minimumVersion });
     const first = await seedIngestionJob("drain-first", "Điểm dừng trên đèo Hải Vân có bãi đỗ xe an toàn.");
     await testDb.insert(aiGatewayModels).values({
       id: "drain-extraction-model",

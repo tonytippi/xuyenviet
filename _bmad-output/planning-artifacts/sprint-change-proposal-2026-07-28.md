@@ -87,7 +87,7 @@ Add and reorganize backlog work without reducing the approved MVP or rolling bac
 - Add FR-51 through FR-60 and NFR-12 through NFR-18 with authoritative PRD wording.
 - Extend the FR Coverage Map and add an NFR Coverage Map.
 - Map FR-51, FR-54 through FR-56 to API contracts/protected capability stories; FR-52 to BFF boundary migration; FR-53 to separate admin migration; FR-57 to worker runtime; FR-58 to capability cutovers; FR-59 to AI Ask streaming; and FR-60 to legacy retirement.
-- Map NFR-12 through NFR-18 to deployment, readiness, telemetry, private networking, schema compatibility, worker proof, and launch-evidence stories.
+- Map NFR-12 through NFR-18 to deployment, readiness, telemetry, private networking, forward migration, worker proof, and launch-evidence stories.
 
 **Rationale:** Restores full, auditable PRD-to-backlog coverage without claiming the requirements are already implemented.
 
@@ -102,7 +102,7 @@ Add and reorganize backlog work without reducing the approved MVP or rolling bac
 | 9. Trusted Private API Foundation | BFFs call documented, protected `/v1` APIs using validated principals. | Credential issuance/validation, role governance, safe error envelope, OpenAPI, health/version, first protected read capability. | FR-51, FR-52, FR-54, FR-55, FR-56; NFR-14, NFR-15 |
 | 10. Reliable AI Ask API Cutover | Travelers use AI Ask through BFF and API with no duplicate provider work or stale final answer. | Command ledger, fences, outbox, consumer state, API NDJSON endpoint, protocol tests, legacy AI Ask writer retirement. | FR-58, FR-59; supports FR-51, FR-54 to FR-56; NFR-13, NFR-14 |
 | 11. Explainable, Withdrawable Planning Context | API-served answers use canonical trip state and traveler-safe details remain correct after source removal. | TripAnswerContext, source bundles, withdrawal, annotations, ownership-bound detail/actions, legacy read migration. | FR-51, FR-54 to FR-56, FR-58; NFR-2 to NFR-4, NFR-10, NFR-11, NFR-14 |
-| 12. Operable Worker and Migration Runtime | Background work runs in a separately deployable, observable, schema-compatible runtime. | Worker bootstrap, bounded sweeps, health/readiness/shutdown, lease/fencing tests, telemetry, compatibility checks, loop cutovers. | FR-57, FR-58; NFR-12 to NFR-17 |
+| 12. Operable Worker and Migration Runtime | Background work runs in a separately deployable, observable runtime. | Worker bootstrap, bounded sweeps, health/readiness/shutdown, lease/fencing tests, telemetry, forward-migration ordering, loop cutovers. | FR-57, FR-58; NFR-12 to NFR-17 |
 | 13. Separate Operator Application Cutover | Operators use a separately deployed admin app via protected API without DB access. | Admin BFF/app deployment, capability migration, role enforcement, private networking, legacy `/admin` retirement. | FR-53 to FR-56, FR-58, FR-60; NFR-12, NFR-15 |
 | 14. Public Launch Cutover and Operational Evidence | Every public domain capability has one transport owner and launch operations have approved proof. | Capability inventory, dual-write prohibition checks, legacy retirement, migration gates, Railway/backup/monitoring/on-call/load proof. | FR-58, FR-60; NFR-12, NFR-16 to NFR-18 |
 

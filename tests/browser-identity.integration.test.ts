@@ -15,7 +15,7 @@ const browserAuth = { googleClientId: "client", googleClientSecret: "secret", ca
 
 beforeEach(async () => {
   await resetTestDatabase();
-  const ApiModule = createApiModule(browserRepository(), { conversationSummaries: { async listOwnedConversationSummaryRows() { return []; } }, schemaVersions: { async hasCompatibleSchemaVersion() { return true; }, async recordSchemaVersion() {} }, browserAuth });
+  const ApiModule = createApiModule(browserRepository(), { conversationSummaries: { async listOwnedConversationSummaryRows() { return []; } }, browserAuth });
   @Module({ imports: [ApiModule] })
   class TestModule {}
   app = await NestFactory.create(TestModule, { logger: false });
@@ -293,7 +293,7 @@ describe("browser Google identity callback", () => {
 });
 
 async function startBrowserApp(schemaReady = true) {
-  const ApiModule = createApiModule(browserRepository(), { conversationSummaries: { async listOwnedConversationSummaryRows() { return []; } }, schemaVersions: { async hasCompatibleSchemaVersion() { return schemaReady; }, async recordSchemaVersion() {} }, browserAuth });
+  const ApiModule = createApiModule(browserRepository(), { conversationSummaries: { async listOwnedConversationSummaryRows() { return []; } }, browserAuth });
   @Module({ imports: [ApiModule] })
   class TestModule {}
   app = await NestFactory.create(TestModule, { logger: false });

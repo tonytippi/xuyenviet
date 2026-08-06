@@ -1,5 +1,7 @@
 # Story 12.3: Gate Schema Changes for Overlapping Runtimes
 
+> **Superseded on 2026-08-05.** Release matrices, `SCHEMA_RELEASE_*` policy, and global schema-version admission were removed. Drizzle's applied-migration ledger plus the target advisory lock govern forward migrations; old-data compatibility belongs to the owning migration/domain path. See `ARCHITECTURE-SPINE.md` AD-3.
+
 Status: done
 
 ## Story
@@ -200,23 +202,11 @@ Status: done
 - `scripts/db-seed-data.ts`
 - `scripts/migrate-api-schema.ts`
 - `scripts/migrate-api-schema-runner.ts`
-- `scripts/schema-release-matrix.ts`
-- `scripts/drizzle-migration-plan.ts`
-- `apps/api/src/release-schema.ts`
 - `apps/api/src/app.module.ts`
 - `apps/api/src/auth/resource-server.guard.ts`
 - `apps/api/src/health/health.controller.ts`
 - `apps/api/src/main.ts`
 - `apps/worker/src/runtime.ts`
-- `src/server/web-schema-admission.ts`
-- `docs/release-matrices/README.md`
-- `docs/release-matrices/20260728.1-to-20260729.1.json`
-- `docs/runbooks/schema-release-matrix.md`
-- `tests/schema-compatibility.test.ts`
-- `tests/schema-release-gate.test.ts`
-- `tests/schema-release-matrix-artifact.test.ts`
-- `tests/drizzle-migration-plan.test.ts`
-- `tests/web-schema-compatibility.test.ts`
 - `tests/worker-runtime.test.ts`
 - `tests/worker-adapter-boundary.test.ts`
 - `tests/api-platform-contract.test.ts`

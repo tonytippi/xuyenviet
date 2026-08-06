@@ -4,7 +4,7 @@ import { MiddlewareConsumer, Module, type NestModule } from "@nestjs/common";
 import { APP_FILTER, APP_GUARD, APP_PIPE } from "@nestjs/core";
 import type { BrowserAuthConfig } from "@xuyenviet/config";
 import { consoleOperationalTelemetrySink, type OperationalTelemetrySink } from "@xuyenviet/contracts";
-import type { ApiIdentityRepository, ConversationSummaryRepository, ReleaseSchemaVersionRepository, TravelerShellRepository } from "@xuyenviet/database";
+import type { ApiIdentityRepository, ConversationSummaryRepository, TravelerShellRepository } from "@xuyenviet/database";
 import type { AdminAiModelCatalogPort, AdminFacebookCapturePort, AdminKnowledgeCoveragePort, AdminKnowledgeIntakePort, AdminKnowledgeReviewPort, AdminOverviewPort, AdminQualityPort, AdminYoutubeCapturePort, PlanningReadRepository, TravelerCommandPort, UserRoleGovernancePort } from "@xuyenviet/domain";
 
 import { API_IDENTITY_REPOSITORY, ResourceServerGuard } from "./auth/resource-server.guard";
@@ -28,12 +28,11 @@ import { ConversationsController, CONVERSATION_SUMMARY_REPOSITORY, PLANNING_READ
 import { TravelerCommandsController, TRAVELER_COMMAND_PORT } from "./conversations/traveler-commands.controller";
 import { HealthController } from "./health/health.controller";
 import { OpenApiController } from "./openapi.controller";
-import { API_CONFIGURATION_VALID, API_RELEASE_PHASE_POLICY, RELEASE_SCHEMA_VERSION_REPOSITORY } from "./release-schema";
 import { VersionController } from "./version/version.controller";
 import { AiAskController, AI_ASK_STREAM_EXECUTION, OPERATIONAL_TELEMETRY_SINK } from "./ai-ask/ai-ask.controller";
 import type { AiAskStreamExecution } from "@xuyenviet/domain";
 
-export function createApiModule(identities: ApiIdentityRepository, dependencies?: { conversationSummaries: ConversationSummaryRepository; travelerShells?: TravelerShellRepository; planningReads?: PlanningReadRepository; travelerCommands?: TravelerCommandPort; userRoleGovernance?: UserRoleGovernancePort; adminAiModelCatalog?: AdminAiModelCatalogPort; adminOverview?: AdminOverviewPort; adminQuality?: AdminQualityPort; adminKnowledgeIntake?: AdminKnowledgeIntakePort; adminKnowledgeReview?: AdminKnowledgeReviewPort; adminKnowledgeCoverage?: AdminKnowledgeCoveragePort; adminFacebookCaptures?: AdminFacebookCapturePort; adminYoutubeCaptures?: AdminYoutubeCapturePort; schemaVersions: ReleaseSchemaVersionRepository; aiAskExecution?: AiAskStreamExecution; telemetry?: OperationalTelemetrySink; configValid?: boolean; releasePhasePolicy?: import("@xuyenviet/contracts").SchemaReleasePhasePolicy | null; browserAuth?: BrowserAuthConfig }) {
+export function createApiModule(identities: ApiIdentityRepository, dependencies?: { conversationSummaries: ConversationSummaryRepository; travelerShells?: TravelerShellRepository; planningReads?: PlanningReadRepository; travelerCommands?: TravelerCommandPort; userRoleGovernance?: UserRoleGovernancePort; adminAiModelCatalog?: AdminAiModelCatalogPort; adminOverview?: AdminOverviewPort; adminQuality?: AdminQualityPort; adminKnowledgeIntake?: AdminKnowledgeIntakePort; adminKnowledgeReview?: AdminKnowledgeReviewPort; adminKnowledgeCoverage?: AdminKnowledgeCoveragePort; adminFacebookCaptures?: AdminFacebookCapturePort; adminYoutubeCaptures?: AdminYoutubeCapturePort; aiAskExecution?: AiAskStreamExecution; telemetry?: OperationalTelemetrySink; browserAuth?: BrowserAuthConfig }) {
   @Module({
      controllers: [...(dependencies ? [HealthController, VersionController, ConversationsController, OpenApiController, BrowserIdentityController, ...(dependencies.travelerCommands ? [TravelerCommandsController] : []), ...(dependencies.aiAskExecution ? [AiAskController] : []), ...(dependencies.userRoleGovernance ? [AdminUsersController] : []), ...(dependencies.adminAiModelCatalog ? [AdminAiModelsController] : []), ...(dependencies.adminOverview ? [AdminOverviewController] : []), ...(dependencies.adminQuality ? [AdminQualityController] : []), ...(dependencies.adminKnowledgeIntake ? [AdminKnowledgeIntakeController] : []), ...(dependencies.adminKnowledgeReview ? [AdminKnowledgeReviewController] : []), ...(dependencies.adminKnowledgeCoverage ? [AdminKnowledgeCoverageController] : []), ...(dependencies.adminFacebookCaptures ? [AdminFacebookCapturesController] : []), ...(dependencies.adminYoutubeCaptures ? [AdminYoutubeCapturesController] : [])] : []), AdminWorkspaceController],
     providers: [
@@ -53,9 +52,6 @@ export function createApiModule(identities: ApiIdentityRepository, dependencies?
                 ...(dependencies.adminKnowledgeCoverage ? [{ provide: ADMIN_KNOWLEDGE_COVERAGE_PORT, useValue: dependencies.adminKnowledgeCoverage }] : []),
               ...(dependencies.adminFacebookCaptures ? [{ provide: ADMIN_FACEBOOK_CAPTURE_PORT, useValue: dependencies.adminFacebookCaptures }] : []),
               ...(dependencies.adminYoutubeCaptures ? [{ provide: ADMIN_YOUTUBE_CAPTURE_PORT, useValue: dependencies.adminYoutubeCaptures }] : []),
-        { provide: RELEASE_SCHEMA_VERSION_REPOSITORY, useValue: dependencies.schemaVersions },
-         { provide: API_CONFIGURATION_VALID, useValue: dependencies.configValid ?? true },
-         { provide: API_RELEASE_PHASE_POLICY, useValue: dependencies.releasePhasePolicy },
          { provide: OPERATIONAL_TELEMETRY_SINK, useValue: dependencies.telemetry ?? consoleOperationalTelemetrySink },
         ...(dependencies.aiAskExecution ? [{ provide: AI_ASK_STREAM_EXECUTION, useValue: dependencies.aiAskExecution }] : []),
       ] : []),

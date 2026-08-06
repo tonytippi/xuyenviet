@@ -32,7 +32,7 @@ Move operator knowledge and operational workflows to a separately deployed admin
 - `user_roles` is authoritative. Admin BFF navigation is not authorization; controllers and domain use cases apply the same protected-capability authorization matrix. Role changes remain audited domain commands and cannot revoke the last active admin.
 - Domain use cases own authorization, transactions, audit mapping, and mutations. Each mutable aggregate retains one owning command module; BFFs, controllers, server actions, and worker loops must not write domain state directly.
 - Admin-to-API traffic uses only private `api.railway.internal` connectivity. Database connections are internal workload credentials, not admin application credentials. Dev, staging, and production isolate databases, secrets, OAuth configuration, API audiences, and observability.
-- Railway workloads have distinct build/start commands, readiness, and least-privilege secrets. The migration job completes before a schema-dependent workload receives traffic; every admin release validates its declared schema compatibility before becoming ready.
+- Railway workloads have distinct build/start commands, readiness, and least-privilege secrets. The migration job completes before a schema-dependent workload receives traffic; readiness checks configuration and live dependencies, not a schema matrix or global schema-version policy.
 - Every cutover requires a documented API contract, authorization matrix, integration coverage, rollback switch, selected transport owner, and removal proof. Rollback changes routing or compatible code before a new owner accepts requests and never destructively rolls back schema.
 
 ## UX & Interaction Patterns

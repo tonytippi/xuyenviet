@@ -10,8 +10,6 @@ import type { RequestPrincipal } from "@xuyenviet/contracts";
 import { BROWSER_AUTH_CONFIG, cookieValue, csrfHash, csrfNonce, type BrowserAuthConfigProvider } from "./browser-auth";
 import { PublicRoute } from "./public-route.decorator";
 import { IdempotentBrowserLogout } from "./idempotent-browser-logout.decorator";
-import { API_CONFIGURATION_VALID, API_RELEASE_PHASE_POLICY, isApiReady, RELEASE_SCHEMA_VERSION_REPOSITORY } from "../release-schema";
-import type { ReleaseSchemaVersionRepository } from "@xuyenviet/database";
 
 const sessionLifetimeMs = 30 * 24 * 60 * 60_000;
 const browserOAuthTransactionPurgeLimit = 100;
@@ -24,16 +22,12 @@ export class BrowserIdentityController {
   constructor(
     @Inject(API_IDENTITY_REPOSITORY) private readonly identities: BrowserIdentityRepository,
     @Inject(BROWSER_AUTH_CONFIG) private readonly browserAuth: BrowserAuthConfigProvider,
-    @Inject(RELEASE_SCHEMA_VERSION_REPOSITORY) private readonly schemaVersions: ReleaseSchemaVersionRepository,
-    @Inject(API_CONFIGURATION_VALID) private readonly configValid: boolean,
-    @Inject(API_RELEASE_PHASE_POLICY) private readonly releasePhasePolicy: import("@xuyenviet/contracts").SchemaReleasePhasePolicy | null | undefined,
   ) {}
 
   @Get("google")
   @PublicRoute()
   async start(@Query("returnUrl") returnUrl: string | undefined, @Query("ref") ref: string | undefined, @Res() response: CookieResponse): Promise<void> {
     const config = this.requiredConfig();
-    await this.assertAdmitted();
     const allowedReturnUrl = validReturnUrl(returnUrl, config) ? returnUrl! : null;
     if (!allowedReturnUrl) throw this.denied();
     const id = randomUUID(); const state = randomBytes(32).toString("base64url"); const verifier = randomBytes(48).toString("base64url");
@@ -52,7 +46,6 @@ export class BrowserIdentityController {
   async callback(@Query("code") code: string | undefined, @Query("state") suppliedState: string | undefined, @Headers("cookie") cookie: string | undefined, @Res() response: CookieResponse): Promise<void> {
     const config = this.requiredConfig();
     clearTransactionCookie(response, config);
-    await this.assertAdmitted();
     const parsed = parseState(suppliedState);
     const transactionId = cookieValue(cookie, transactionCookieName(config));
     if (!code || !parsed || transactionId !== parsed.id) throw this.denied();
@@ -107,7 +100,6 @@ export class BrowserIdentityController {
   }
 
   private requiredConfig(): BrowserAuthConfig { if (!this.browserAuth.config) throw new ServiceUnavailableException({ code: "internal_error" }); return this.browserAuth.config; }
-  private async assertAdmitted() { if (!await isApiReady({ configValid: this.configValid, repository: this.schemaVersions, releasePhasePolicy: this.releasePhasePolicy })) throw new ServiceUnavailableException({ code: "internal_error" }); }
   private denied() { return new UnauthorizedException({ code: "unauthorized" }); }
 }
 

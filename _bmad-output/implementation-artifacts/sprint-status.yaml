@@ -1,5 +1,5 @@
 # generated: 2026-07-25
-# last_updated: 2026-08-05 (Story 16.1 implementation guide created and ready for development.)
+# last_updated: 2026-08-05 (Schema release matrix/policy retired; Drizzle forward migrations and migration ordering are the active deployment contract.)
 # project: xuyenviet
 # project_key: NOKEY
 # tracking_system: file-system
@@ -33,7 +33,7 @@
 #   - done: Completed
 
 generated: 2026-07-25
-last_updated: 2026-08-05 (Story 16.1 implementation guide created and ready for development.)
+last_updated: 2026-08-05 (Schema release matrix/policy retired; Drizzle forward migrations and migration ordering are the active deployment contract.)
 project: xuyenviet
 project_key: NOKEY
 tracking_system: file-system
@@ -265,7 +265,7 @@ development_status:
   # 2026-08-01 final Epic 12 closure review of a66bfa4..884fdd7: the release advisory lock moved from the target database to the maintenance database, losing interoperability with the established target-database lock namespace. No code was modified during review.
   # 2026-08-01 final closure repair: db:migrate holds advisory lock 918_040_004 in the application target database, restoring serialization with legacy runners. Disposable reset coordinates target then maintenance before target destruction and relies on its explicit no-runtime-overlap prerequisite after database recreation. Serial DATABASE_URL_TEST migration/lock regressions passed (2 files, 33 tests); typecheck and diff check passed; lint had 0 errors and 5 pre-existing warnings. Final synchronous review is clean. All Epic 12 stories are confirmed done.
   # 2026-08-01 scope correction approved by the product owner: db:reset is restricted to disposable local/test maintenance targets and is not an overlapping-runtime release protocol. Its existing explicit no-runtime-overlap preflight remains required; a durable cross-recreation runtime-admission fence is out of scope. Story 12.3 is closed on its implemented migration-gate, matrix, and rollback contract.
-  12-3-gate-schema-changes-for-overlapping-runtimes: done
+  12-3-gate-schema-changes-for-overlapping-runtimes: superseded-by-ad-3-forward-drizzle-migrations
   epic-12-retrospective: optional
 
   # Story 13.1 approved identity handoff: API Identity owns OAuth state/code exchange

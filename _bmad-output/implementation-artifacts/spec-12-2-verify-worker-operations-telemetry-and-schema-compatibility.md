@@ -12,6 +12,8 @@ context:
 warnings: [oversized]
 ---
 
+> **Superseded on 2026-08-05.** The schema compatibility admission, release ledger, and runtime policy described below were removed. See `ARCHITECTURE-SPINE.md` AD-3 for the active forward-migration and runtime-readiness contract.
+
 <intent-contract>
 
 ## Intent

@@ -44,6 +44,8 @@ _This file contains critical rules and patterns that AI agents must follow when 
 - Keep server-only code isolated. Files that read sessions, secrets, databases, AI/search providers, or protected state must import `server-only`.
 - Do not introduce domain tables, fake services, or placeholder persistence outside the current story scope. Story 1.1 intentionally left `src/db/schema.ts` empty.
 - Drizzle commands must fail closed when `DATABASE_URL` is missing. Do not restore localhost fallback behavior.
+- Run forward Drizzle migrations before deploying workloads that require the changed schema. Do not introduce schema release matrices, `SCHEMA_RELEASE_*` environment policy, global schema-version readiness gates, or a parallel schema-version ledger; Drizzle's applied-migration ledger and the migration advisory lock are authoritative.
+- Handle old durable representations in the owning migration/domain path with explicit tests. Do not block Worker readiness or job claiming on a global schema version.
 - Prefer explicit exported functions/types from feature/server modules. Do not export generic cross-module table upsert/delete helpers.
 - Throw safe operational errors from server helpers; do not expose secrets, provider payloads, OAuth internals, or raw source material in user-facing errors.
 
@@ -122,4 +124,4 @@ _This file contains critical rules and patterns that AI agents must follow when 
 - Review periodically for outdated rules.
 - Remove rules that become obvious or no longer prevent likely mistakes.
 
-Last Updated: 2026-07-06
+Last Updated: 2026-08-05

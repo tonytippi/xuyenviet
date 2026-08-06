@@ -14,6 +14,8 @@ context:
 warnings: [oversized, multiple-goals]
 ---
 
+> **Schema-admission portions superseded on 2026-08-05.** The admin deployment and identity record remains historical context, but release matrices, `SCHEMA_RELEASE_*` policy, and global schema-version readiness were removed. See `ARCHITECTURE-SPINE.md` AD-3 for the active contract.
+
 <intent-contract>
 
 ## Intent

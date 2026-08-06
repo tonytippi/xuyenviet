@@ -5,8 +5,7 @@ import { fileURLToPath } from "node:url";
 import type { Socket } from "node:net";
 
 import postgres from "postgres";
-import { readApprovedSchemaReleasePhasePolicy } from "@xuyenviet/config";
-import { admitsSchemaReleasePhasePolicy, consoleOperationalTelemetrySink, correlationId, emitOperationalTelemetry, evaluateSchemaAdmission, schemaCompatibilityDeclarations, type OperationalTelemetrySink, type SchemaReleasePhasePolicy } from "@xuyenviet/contracts";
+import { consoleOperationalTelemetrySink, correlationId, emitOperationalTelemetry, type OperationalTelemetrySink } from "@xuyenviet/contracts";
 
 const adapterNames = ["knowledge-extraction", "knowledge-ingestion", "knowledge-indexing", "knowledge-sampling", "ai-ask-outbox"] as const;
 type AdapterName = (typeof adapterNames)[number];
@@ -44,8 +43,6 @@ export class WorkerRuntime {
   private readonly sockets = new Set<Socket>();
   private draining = false;
   private databaseReady = false;
-  private schemaReady = false;
-  private schemaEpoch = 0;
   private drainPromise: Promise<void> | undefined;
   private running = new Set<Promise<void>>();
   private readonly activeAdapters = new Set<AdapterName>();
@@ -56,7 +53,6 @@ export class WorkerRuntime {
     private readonly adapters: WorkerAdapter[],
     private readonly probeDatabase: () => Promise<void> = () => config ? probePostgres(config.databaseUrl) : Promise.reject(new Error("invalid configuration")),
     private readonly healthPortFallback = 3002,
-    private readonly probeSchema: () => Promise<boolean> = () => config ? probeSchemaCompatibility(config.databaseUrl, readWorkerReleasePhasePolicy()) : Promise.resolve(false),
     private readonly telemetry: OperationalTelemetrySink = consoleOperationalTelemetrySink,
   ) {
     for (const adapter of adapters) this.states.set(adapter.name, "uninitialized");
@@ -105,7 +101,7 @@ export class WorkerRuntime {
   }
 
   get ready() {
-    return Boolean(this.config) && !this.draining && this.databaseReady && this.schemaReady && this.adapters.every((adapter) => this.states.get(adapter.name) === "ready");
+    return Boolean(this.config) && !this.draining && this.databaseReady && this.adapters.every((adapter) => this.states.get(adapter.name) === "ready");
   }
 
   get healthPort() {
@@ -114,14 +110,13 @@ export class WorkerRuntime {
   }
 
   private admit(adapter: WorkerAdapter) {
-    if (this.draining || !this.schemaReady || this.activeAdapters.has(adapter.name)) return;
+    if (this.draining || !this.databaseReady || this.activeAdapters.has(adapter.name)) return;
     this.activeAdapters.add(adapter.name);
     const restarted = this.states.get(adapter.name) === "failed";
     const startedAt = Date.now();
-    const epoch = this.schemaEpoch;
     const task = adapter.run(this.controller.signal)
-      .then(() => { if (this.schemaReady && epoch === this.schemaEpoch) this.states.set(adapter.name, "ready"); })
-      .catch(() => { if (epoch === this.schemaEpoch) this.states.set(adapter.name, "failed"); })
+      .then(() => { if (this.databaseReady) this.states.set(adapter.name, "ready"); })
+      .catch(() => { if (this.databaseReady) this.states.set(adapter.name, "failed"); })
       .finally(() => {
         this.running.delete(task);
         this.activeAdapters.delete(adapter.name);
@@ -132,7 +127,7 @@ export class WorkerRuntime {
   }
 
   private schedule(adapter: WorkerAdapter) {
-    if (this.draining || !this.schemaReady || this.activeAdapters.has(adapter.name) || this.scheduledAdapters.has(adapter.name)) return;
+    if (this.draining || !this.databaseReady || this.activeAdapters.has(adapter.name) || this.scheduledAdapters.has(adapter.name)) return;
     const timer = setTimeout(() => {
       this.scheduledAdapters.delete(adapter.name);
       this.admit(adapter);
@@ -150,7 +145,6 @@ export class WorkerRuntime {
     if (this.draining) return "draining";
     if (!this.config) return "configuration_invalid";
     if (!this.databaseReady) return "database_unavailable";
-    if (!this.schemaReady) return "schema_incompatible";
     if ([...this.states.values()].some((state) => state === "failed")) return "loop_failed";
     return "loop_uninitialized";
   }
@@ -161,24 +155,10 @@ export class WorkerRuntime {
         await this.probeDatabase();
         if (this.draining) return;
         this.databaseReady = true;
-        let schemaReady = false;
-        try { schemaReady = await this.probeSchema(); } catch { schemaReady = false; }
-        if (this.draining) return;
-        if (!schemaReady) {
-          this.emit("worker.schema", "schema_incompatible", Date.now());
-          if (this.schemaReady) {
-            this.schemaEpoch += 1;
-            for (const adapter of this.adapters) if (!this.activeAdapters.has(adapter.name)) this.states.set(adapter.name, "uninitialized");
-          }
-          this.schemaReady = false;
-        } else if (!this.schemaReady) {
-          this.schemaReady = true;
-          for (const adapter of this.adapters) this.states.set(adapter.name, "uninitialized");
-          for (const adapter of this.adapters) this.admit(adapter);
-        }
+        for (const adapter of this.adapters) if (this.states.get(adapter.name) === "uninitialized") this.admit(adapter);
       } catch {
         this.databaseReady = false;
-        this.schemaReady = false;
+        for (const adapter of this.adapters) if (!this.activeAdapters.has(adapter.name)) this.states.set(adapter.name, "uninitialized");
       }
       await sleep(this.config!.pollIntervalMs, this.controller.signal);
     }
@@ -230,20 +210,6 @@ function sleep(ms: number, signal: AbortSignal) {
 async function probePostgres(databaseUrl: string) {
   const sql = postgres(databaseUrl, { max: 1, connect_timeout: 5 });
   try { await sql`select 1`; } finally { await sql.end({ timeout: 5 }); }
-}
-
-async function probeSchemaCompatibility(databaseUrl: string, policy?: SchemaReleasePhasePolicy | null) {
-  const sql = postgres(databaseUrl, { max: 1, connect_timeout: 5 });
-  try {
-    const rows = await sql<{ version: string | null; identity: string }[]>`select release_schema_versions.version, target.identity from (select 'database=' || current_database() || ';host=' || coalesce(host(inet_server_addr()), 'local') || ';port=' || coalesce(inet_server_port()::text, '5432') as identity) target left join release_schema_versions on true`;
-    const target = rows[0]?.identity;
-    const versions = rows.flatMap((row) => typeof row.version === "string" ? [{ version: row.version }] : []);
-    return evaluateSchemaAdmission(schemaCompatibilityDeclarations.worker, versions).compatible && admitsSchemaReleasePhasePolicy(policy, "worker", versions, target);
-  } finally { await sql.end({ timeout: 5 }); }
-}
-
-export function readWorkerReleasePhasePolicy(value = process.env.SCHEMA_RELEASE_PHASE_POLICY): SchemaReleasePhasePolicy | null | undefined {
-  return readApprovedSchemaReleasePhasePolicy(value);
 }
 
 function boundedInteger(value: string | undefined, fallback: number, min: number, max: number) {

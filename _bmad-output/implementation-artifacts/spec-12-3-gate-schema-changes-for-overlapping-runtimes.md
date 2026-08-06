@@ -12,6 +12,8 @@ context:
 warnings: []
 ---
 
+> **Superseded on 2026-08-05.** Release matrices, `SCHEMA_RELEASE_*` policy, and global schema-version admission were removed. See `ARCHITECTURE-SPINE.md` AD-3 for the active contract.
+
 <intent-contract>
 
 ## Intent
@@ -43,9 +45,7 @@ warnings: []
 
 - `packages/contracts/src/index.ts` -- shared strict schema version grammar and neutral release-matrix validation boundary.
 - `scripts/db-env.ts` and `scripts/db-reset.ts` -- local destructive-action target resolution and reset sequencing.
-- `scripts/migrate-api-schema-runner.ts` and `scripts/migrate-api-schema.ts` -- migration lock, preflight, forward Drizzle, and sole release-record write.
-- `tests/schema-compatibility.test.ts` and release-gate tests -- contract, preflight, ordering, and no-mutation regressions.
-- `docs/runbooks/` -- reviewable operator matrix format and non-destructive release procedure.
+- Historical implementation references below are superseded. Active migration guidance is Architecture AD-3: forward Drizzle under the target advisory lock, plus explicit old-data handling in the owning migration/domain path.
 
 ## Tasks & Acceptance
 
@@ -53,7 +53,6 @@ warnings: []
 - [x] `packages/contracts/src/index.ts` -- add disposition/matrix types, strict parser and admission helpers using the existing tuple parser/comparator -- makes a validated shared policy seam available to all workloads.
 - [x] `scripts/db-env.ts`, `scripts/db-reset.ts` -- require explicit local disposable/no-overlap confirmation and resolved identity before destructive reset/seed sequencing -- blocks unsafe clean breaks before mutation.
 - [x] `scripts/migrate-api-schema-runner.ts`, `scripts/migrate-api-schema.ts` -- validate selected disposition/matrix and migration pre-admission under advisory lock before forward Drizzle; record only after success and emit safe failures -- enforces durable/overlap release order.
-- [x] `docs/runbooks/schema-release-matrix.md` and `docs/release-matrices/` -- document the versioned, reviewable machine-validatable matrix/runbook format -- provides explicit operator evidence without a second persisted ledger.
 - [x] `tests/schema-compatibility.test.ts` and focused release-gate tests -- cover rejected preflight/matrix paths, migration ordering, phase/rollback/contract constraints, and no mutation -- proves fail-closed behavior while retaining existing workload admission coverage.
 
 **Acceptance Criteria:**

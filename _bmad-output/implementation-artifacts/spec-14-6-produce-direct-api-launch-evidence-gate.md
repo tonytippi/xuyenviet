@@ -24,7 +24,7 @@ warnings: []
 
 **Always:** Preserve the direct Nest browser-session model, one writer per aggregate, forward-only migration policy, safe telemetry boundaries, and no-credential evidence handling. A gate item can be `passed` only with specific current-environment evidence; local/unit/integration evidence must be labeled repository-only. Record safe URLs, revisions, timestamps, command output locations, request IDs, and redacted results only.
 
-**Block If:** The selected public topology, accountable release operator, actual environment, approved release matrix, deployed revision, or safe retained evidence is unavailable for a required platform gate. Leave the gate blocked; do not infer, substitute, or fabricate a pass.
+**Block If:** The selected public topology, accountable release operator, actual environment, deployed revision, migration-before-traffic evidence, or safe retained evidence is unavailable for a required platform gate. Leave the gate blocked; do not infer, substitute, or fabricate a pass.
 
 **Never:** Do not add ingress infrastructure, secrets, production configuration, database reset/down migration, dual-write or legacy fallback. Do not record cookies, OAuth codes/tokens, CSRF proofs, credentials, database URLs, raw provider payloads, or unredacted request headers in the evidence artifact.
 
@@ -42,9 +42,7 @@ warnings: []
 ## Code Map
 
 - `docs/runbooks/direct-api-launch-evidence.md` -- canonical fail-closed launch-gate record and operator procedure for direct API deployment.
-- `docs/runbooks/schema-release-matrix.md` -- approved migration matrix and selected-writer constraints that launch evidence must reference.
 - `docs/runbooks/worker-operations.md` -- Worker readiness, drain, telemetry, and alert evidence requirements.
-- `docs/release-matrices/README.md` -- admissible release-matrix artifact and owner-inventory requirements.
 - `tests/direct-api-launch-evidence.test.ts` -- static contract coverage for mandatory gates, blocked default state, and secret-safe record rules.
 - `_bmad-output/implementation-artifacts/sprint-status.yaml` -- Story 14.6 lifecycle and launch-gate blocking outcome.
 
@@ -64,7 +62,7 @@ warnings: []
 
 ## Design Notes
 
-Use stable gate identifiers and a compact status table so an operator updates evidence without rewriting policy. The runbook is an execution record template, not infrastructure configuration or an approval substitute. Preserve the existing schema-release matrix and Worker runbooks as detailed sources rather than duplicating their technical controls.
+Use stable gate identifiers and a compact status table so an operator updates evidence without rewriting policy. The runbook is an execution record template, not infrastructure configuration or an approval substitute. Use the forward Drizzle migration procedure and the Worker runbook as detailed sources rather than duplicating their technical controls.
 
 ## Review Triage Log
 

@@ -1,5 +1,7 @@
 # Story 12.2: Verify Worker Operations, Telemetry, and Schema Compatibility
 
+> **Superseded on 2026-08-05.** The schema compatibility admission, release ledger, and runtime policy described below were removed. Active guidance is `ARCHITECTURE-SPINE.md` AD-3: run forward Drizzle migrations under the migration advisory lock before dependent workloads start; readiness checks configuration, database reachability, and assigned dependency/loop health only.
+
 Status: done
 
 ## Story

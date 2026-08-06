@@ -2,11 +2,9 @@ import { spawn } from "node:child_process";
 import postgres from "postgres";
 import { drizzle } from "drizzle-orm/postgres-js";
 import { migrate } from "drizzle-orm/postgres-js/migrator";
-import { schemaCompatibilityDeclarations } from "@xuyenviet/contracts";
 
 import { assertDisposableLocalDatabaseUrl, databaseNameFromResolvedIdentity, getDatabaseUrl, isProtectedDatabaseName, isResolvedDatabaseTargetIdentity, maintenanceIdentityFromTargetIdentity, resolveDatabaseTargetIdentity, type DestructiveResetEnvironment } from "./db-env";
 import { runDisposableDatabaseSeed } from "./db-seed";
-import { runApiSchemaMigration } from "./migrate-api-schema-runner";
 
 export function runQuietly(command: string, args: string[], environment: Record<string, string | undefined> = process.env as Record<string, string | undefined>) {
   return new Promise<void>((resolve, reject) => {
@@ -70,7 +68,6 @@ export async function runDisposableDatabaseReset(databaseUrl: string, environmen
   run(command: string, args: string[], environment: Record<string, string | undefined>): Promise<void>;
   resolveTargetIdentity?(databaseUrl: string): Promise<string>;
   seedDatabase?(databaseUrl: string): Promise<void>;
-  recordSchemaVersion?(databaseUrl: string, version: string): Promise<void>;
   withReleaseLock?(databaseUrl: string, expectedIdentity: string, action: () => Promise<void>): Promise<void>;
 } = { recreateDatabase, run: runQuietly }) {
   assertDisposableLocalDatabaseUrl(databaseUrl, environment);
@@ -85,21 +82,9 @@ export async function runDisposableDatabaseReset(databaseUrl: string, environmen
   const execute = async () => {
     const childEnvironment = { ...environment, DATABASE_URL: databaseUrl };
     await dependencies.recreateDatabase(databaseUrl, resolvedIdentity);
-    // A clean break does not use a release matrix, but it still records its known
-    // target only after forward Drizzle succeeds and before any seed writes.
-    await runApiSchemaMigration({
-      acquireMigrationLock: async () => undefined,
-      releaseMigrationLock: async () => undefined,
-      preflight: async () => assertLiveTargetIdentity(databaseUrl, resolvedIdentity, dependencies.resolveTargetIdentity),
-      runDrizzleMigration: async () => dependencies.run === runQuietly
-        ? migrateDisposableTarget(databaseUrl, resolvedIdentity)
-        : dependencies.run("pnpm", ["exec", "drizzle-kit", "migrate"], childEnvironment),
-      releaseSchemaVersions: { recordSchemaVersion: async (version) => {
-        await assertLiveTargetIdentity(databaseUrl, resolvedIdentity, dependencies.resolveTargetIdentity);
-        await (dependencies.recordSchemaVersion?.(databaseUrl, version) ?? recordSchemaVersion(databaseUrl, version));
-      } },
-      migrationVersion: schemaCompatibilityDeclarations.migration.maximumVersion,
-    });
+    await assertLiveTargetIdentity(databaseUrl, resolvedIdentity, dependencies.resolveTargetIdentity);
+    if (dependencies.run === runQuietly) await migrateDisposableTarget(databaseUrl, resolvedIdentity);
+    else await dependencies.run("pnpm", ["exec", "drizzle-kit", "migrate"], childEnvironment);
     // Custom seed seams are test-only. Production reconnects and checks target
     // identity on the exact session that performs the first insert.
     if (dependencies.seedDatabase) {
@@ -166,18 +151,6 @@ async function resolveTargetIdentity(databaseUrl: string): Promise<string> {
   const sql = postgres(databaseUrl, { max: 1 });
   try {
     return await resolveDatabaseTargetIdentity(sql);
-  } finally {
-    await sql.end();
-  }
-}
-
-async function recordSchemaVersion(databaseUrl: string, version: string): Promise<void> {
-  const sql = postgres(databaseUrl, { max: 1 });
-  try {
-    await sql.begin(async (transaction) => {
-      await transaction`delete from release_schema_versions`;
-      await transaction`insert into release_schema_versions (version) values (${version})`;
-    });
   } finally {
     await sql.end();
   }

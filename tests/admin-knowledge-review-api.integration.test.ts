@@ -33,7 +33,7 @@ beforeEach(async () => {
     listCards: vi.fn(), getCard: vi.fn(), listRecommendations: vi.fn(), getRecommendation: vi.fn(), resolveRecommendation: (...args) => resolveRecommendation(...args),
   };
   const identities = createPostgresApiIdentityRepository(getTestDatabaseUrl(), browserAuth.sessionLookupKey, browserAuth.oauthTransactionProtectionKey);
-  const ApiModule = createApiModule(identities, { conversationSummaries: { async listOwnedConversationSummaryRows() { return []; } }, schemaVersions: { async hasCompatibleSchemaVersion() { return true; }, async recordSchemaVersion() {} }, browserAuth, adminKnowledgeReview: review });
+  const ApiModule = createApiModule(identities, { conversationSummaries: { async listOwnedConversationSummaryRows() { return []; } }, browserAuth, adminKnowledgeReview: review });
   @Module({ imports: [ApiModule] }) class TestModule {}
   app = await NestFactory.create(TestModule, { logger: false });
   await app.init();

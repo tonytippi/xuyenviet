@@ -281,11 +281,6 @@ export const browserOAuthTransactions = pgTable("browser_oauth_transactions", {
   expires: timestamp("expires", { mode: "date" }).notNull(),
 }, (transaction) => [index("browser_oauth_transactions_expires_idx").on(transaction.expires)]);
 
-export const releaseSchemaVersions = pgTable("release_schema_versions", {
-  version: text("version").primaryKey(),
-  recordedAt: timestamp("recorded_at", { mode: "date" }).defaultNow().notNull(),
-});
-
 export const verificationTokens = pgTable(
   "verification_tokens",
   {

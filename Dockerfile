@@ -49,14 +49,12 @@ FROM base AS runner
 ENV NODE_ENV=production
 ENV PORT=3000
 ENV HOSTNAME=0.0.0.0
-ENV SCHEMA_RELEASE_MATRIX_DIRECTORY=/app/docs/release-matrices
 
 RUN groupadd --system nextjs && useradd --system --gid nextjs nextjs
 
 COPY --chown=nextjs:nextjs --from=production-deps /app/node_modules ./node_modules
 COPY --chown=nextjs:nextjs --from=build /app/apps/web/.next/standalone ./
 COPY --chown=nextjs:nextjs --from=build /app/apps/web/.next/static ./apps/web/.next/static
-COPY --chown=nextjs:nextjs --from=build /app/docs/release-matrices ./docs/release-matrices
 
 EXPOSE 3000
 
@@ -70,13 +68,11 @@ FROM base AS api-runner
 
 ENV NODE_ENV=production
 ENV PORT=3001
-ENV SCHEMA_RELEASE_MATRIX_DIRECTORY=/app/docs/release-matrices
 
 RUN groupadd --system api && useradd --system --gid api api
 
 COPY --chown=api:api --from=production-deps /app/node_modules ./node_modules
 COPY --chown=api:api --from=build /app/apps/api/dist ./apps/api/dist
-COPY --chown=api:api --from=build /app/docs/release-matrices ./docs/release-matrices
 
 EXPOSE 3001
 
@@ -91,14 +87,12 @@ FROM base AS admin-runner
 ENV NODE_ENV=production
 ENV PORT=3003
 ENV HOSTNAME=0.0.0.0
-ENV SCHEMA_RELEASE_MATRIX_DIRECTORY=/app/docs/release-matrices
 
 RUN groupadd --system admin && useradd --system --gid admin admin
 
 COPY --chown=admin:admin --from=production-deps /app/node_modules ./node_modules
 COPY --chown=admin:admin --from=build /app/apps/admin/.next/standalone ./
 COPY --chown=admin:admin --from=build /app/apps/admin/.next/static ./apps/admin/.next/static
-COPY --chown=admin:admin --from=build /app/docs/release-matrices ./docs/release-matrices
 
 EXPOSE 3003
 USER admin
@@ -114,7 +108,6 @@ FROM build AS worker
 
 ENV NODE_ENV=production
 ENV WORKER_PORT=3002
-ENV SCHEMA_RELEASE_MATRIX_DIRECTORY=/app/docs/release-matrices
 
 RUN groupadd --system nextjs && useradd --system --gid nextjs nextjs
 
