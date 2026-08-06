@@ -50,8 +50,8 @@ export function ConversationList({ sessions, activeConversationId, isDisabled = 
                   aria-current={isActive ? "page" : undefined}
                   className={
                     isActive
-                      ? "min-w-0 flex-1 truncate rounded-lg px-3 py-2.5 pr-10 text-left text-sm font-medium text-[#285c49] focus:outline-none focus:ring-2 focus:ring-[#167c5a] disabled:cursor-not-allowed disabled:opacity-70"
-                      : "min-w-0 flex-1 truncate rounded-lg px-3 py-2.5 pr-10 text-left text-sm font-medium text-[#303030] focus:outline-none focus:ring-2 focus:ring-[#167c5a] disabled:cursor-not-allowed disabled:opacity-70"
+                        ? "min-w-0 flex-1 truncate rounded-lg px-3 py-2.5 pr-12 text-left text-sm font-medium text-[#285c49] focus:outline-none focus:ring-2 focus:ring-[#167c5a] disabled:cursor-not-allowed disabled:opacity-70"
+                        : "min-w-0 flex-1 truncate rounded-lg px-3 py-2.5 pr-12 text-left text-sm font-medium text-[#303030] focus:outline-none focus:ring-2 focus:ring-[#167c5a] disabled:cursor-not-allowed disabled:opacity-70"
                   }
                 >
                   {session.preview}

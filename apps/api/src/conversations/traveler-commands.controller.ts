@@ -1,6 +1,6 @@
 import { BadRequestException, Body, Controller, Delete, Headers, HttpCode, Inject, Param, Post } from "@nestjs/common";
 
-import { parseAiAskIdempotencyKey, parseAnnotationProposalActionCommand, parseContinueInTripCommand, parseCreateTripProjectCommand, parseRecommendationDecisionCommand, parseSaveAnswerUsefulnessFeedbackCommand, parseTripChangeProposalCommand, type AcceptTripCreationRecommendationResult, type AnnotationProposalActionCommand, type AnnotationProposalActionResult, type ApplyTripChangeProposalResult, type ContinueInTripResult, type CreateTripProjectCommand, type CreateTripProjectResult, type DeleteOwnedResourceResult, type DismissTripChangeProposalResult, type RecommendationActionResult, type RequestPrincipal, type SaveAnswerUsefulnessFeedbackCommand, type SaveAnswerUsefulnessFeedbackResult, type TripChangeProposalCommand } from "@xuyenviet/contracts";
+import { parseAiAskIdempotencyKey, parseAnnotationProposalActionCommand, parseContinueInTripCommand, parseCreateTripProjectCommand, parseRecommendationDecisionCommand, parseSaveAnswerUsefulnessFeedbackCommand, parseTripChangeProposalCommand, type AcceptTripCreationRecommendationResult, type AnnotationProposalActionCommand, type AnnotationProposalActionResult, type ApplyTripChangeProposalResult, type ContinueInTripResult, type CreateTripProjectCommand, type CreateTripProjectResult, type DeleteOwnedResourceResult, type DismissTripChangeProposalResult, type RecommendationActionResult, type RequestPrincipal, type SaveAnswerUsefulnessFeedbackResult, type TripChangeProposalCommand } from "@xuyenviet/contracts";
 import type { TravelerCommandPort } from "@xuyenviet/domain";
 
 import { Principal } from "../auth/principal.decorator";
@@ -12,6 +12,9 @@ class CreateTripProjectDto {
   static parse(value: unknown) { const parsed = parseCreateTripProjectCommand(value); return parsed ? { ok: true as const, value: parsed } : { ok: false as const }; }
 }
 class SaveAnswerUsefulnessFeedbackDto {
+  declare assistantMessageId: string;
+  declare rating: "useful" | "not_useful";
+  declare comment?: string | null;
   static parse(value: unknown) { const parsed = parseSaveAnswerUsefulnessFeedbackCommand(value); return parsed ? { ok: true as const, value: parsed } : { ok: false as const }; }
 }
 class TripChangeProposalDto { static parse(value: unknown) { const parsed = parseTripChangeProposalCommand(value); return parsed ? { ok: true as const, value: parsed } : { ok: false as const }; } }
@@ -41,7 +44,7 @@ export class TravelerCommandsController {
   }
 
   @Post("answer-usefulness-feedback")
-  async saveFeedback(@Principal() principal: RequestPrincipal, @Body(new SafeValidationPipe(SaveAnswerUsefulnessFeedbackDto)) input: SaveAnswerUsefulnessFeedbackCommand): Promise<SaveAnswerUsefulnessFeedbackResult> {
+  async saveFeedback(@Principal() principal: RequestPrincipal, @Body(new SafeValidationPipe(SaveAnswerUsefulnessFeedbackDto)) input: SaveAnswerUsefulnessFeedbackDto): Promise<SaveAnswerUsefulnessFeedbackResult> {
     return this.commands.saveAnswerUsefulnessFeedback(principal.userId, input);
   }
 

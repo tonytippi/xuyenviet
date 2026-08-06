@@ -4,7 +4,7 @@ baseline_commit: cbf9efc
 
 # Story 16.4: Prove Chat-First Scope, Trust, and Accessibility Boundaries
 
-Status: review
+Status: in-progress
 
 ## Story
 
@@ -81,7 +81,15 @@ so that convenience improvements cannot silently weaken traveler control, owner 
   - [x] Run `pnpm test:unit -- tests/trip-recommendations.test.ts tests/ai-ask-direct-api.test.ts tests/direct-shell-proposal-actions.test.ts tests/traveler-ui-foundation.test.ts tests/answer-annotations.test.ts`.
   - [x] Run `pnpm test:integration -- tests/trip-recommendations.integration.test.ts tests/trip-recommendations-api.integration.test.ts tests/private-turn-answer-context.integration.test.ts tests/answer-usefulness-feedback.integration.test.ts tests/knowledge-source-removal.test.ts`. Integration suites remain serial and each suite requiring clean data calls `resetTestDatabase()` locally.
   - [x] Run the recorded manual accessibility evidence matrix, then `pnpm lint`, `pnpm typecheck`, `pnpm build`, and `git diff --check`.
-  - [x] Record exact commands, counts, pre-existing warnings, and any unavailable infrastructure in Completion Notes. Do not claim a UI interaction proof that the existing runner cannot execute.
+   - [x] Record exact commands, counts, pre-existing warnings, and any unavailable infrastructure in Completion Notes. Do not claim a UI interaction proof that the existing runner cannot execute.
+
+### Review Findings
+
+- [x] [Review][Patch] Existing-project private-answer path lacks production-path isolation coverage [tests/private-turn-answer-context.integration.test.ts:20] — added a `tripContextRecommendation` single-project decision to the production next-turn test and asserted it leaves the turn unscoped.
+- [x] [Review][Patch] Private-turn suite does not inspect the source-bundle boundary [tests/private-turn-answer-context.integration.test.ts:39] — instrumented the existing AI Ask source-bundle dependency seam and asserted no project scope, ID, facts, anchors, plan items, or constraints are present.
+- [x] [Review][Patch] Global fetch stub leaks from serial integration test [tests/private-turn-answer-context.integration.test.ts:12] — `afterEach` now restores AI Ask dependencies and globals with `vi.unstubAllGlobals()`.
+- [x] [Review][Patch] Feedback API admission matrix omits required parser, principal, and safe-result cases [tests/trip-recommendations-api.integration.test.ts:111] — added forged-field, invalid comment, foreign/missing safe-result, and authenticated-principal forwarding coverage; repaired the controller's runtime DTO metadata so valid feedback reaches the command port.
+- [ ] [Review][Patch] Accessibility evidence matrix is incomplete and not durably attached [16-4-prove-chat-first-scope-trust-and-accessibility-boundaries.md:175] — AC 4 and task 4 require keyboard sequence and observed focus for selected-answer detail, private/continue actions, feedback save/failure, stale-scope recovery, and `Hỏi XuyenViet`; the recorded note covers only a subset and points to transient `/tmp` screenshots. Record each required flow with browser, viewport, interaction/focus/Escape/live-region result, and durable screenshot attachment or an explicit blocker.
 
 ## Dev Notes
 
@@ -175,12 +183,15 @@ gpt-5.6-terra
 - 2026-08-05: Ran an isolated Chromium 149.0.7827.55 Playwright browser matrix against a local Next shell with route-level typed API fixtures at `390x844` and `1440x900`. It verified navigation-sheet `Escape` focus restoration, `aria-current="page"` for unscoped `Hỏi XuyenViet`, feedback negative-to-useful editor removal, polite rendering, reduced-motion emulation, and a 44px product-control floor. Screenshots: `/tmp/opencode/story-16-4-mobile.png` and `/tmp/opencode/story-16-4-desktop.png`.
 - 2026-08-05: Browser geometry inspection found and fixed three product controls below the 44px floor: optional image attachment, mobile-sheet new chat, and conversation delete. The Next development-tools overlay remains 32px but is framework-owned and excluded from product-control evidence.
 - 2026-08-05: Final verification passed: focused unit command (24 files, 237 tests); focused serial integration command (48 files, 439 tests); `pnpm lint` (0 errors, 45 pre-existing warnings); `pnpm typecheck`; `pnpm build`; and `git diff --check`. PostgreSQL migration notices and test worker telemetry were expected integration setup output.
+- 2026-08-06: Accessibility evidence recovery blocker: no Playwright/browser-harness configuration exists in the repository, and the previous Chromium screenshots were only stored under ephemeral `/tmp/opencode/` paths and are no longer available to attach. Do not treat static source tests as interaction proof. A reproducible browser run must record Chromium version and desktop/mobile viewports, then preserve screenshots under a versioned story artifact path for: navigation-sheet Escape/focus, selected-answer detail Escape/focus, private and continue actions, feedback save/failure with polite updates, stale-scope recovery, and `Hỏi XuyenViet`; it must also inspect active-row `aria-current`, 44px targets, and reduced motion. This blocker does not alter the existing source-level accessibility contracts.
+- 2026-08-06: Review repairs verified: private turns from both creation and existing-project recommendations reach the source-bundle seam with no project scope; global fetch stubs are restored after the serial suite; feedback admission covers strict body parsing, safe command results, and principal-only forwarding. The review also found and fixed runtime Nest DTO metadata that had blocked every otherwise-valid feedback request before the command port. Focused unit verification passed (24 files, 237 tests); focused integration verification passed (48 files, 440 tests); `pnpm typecheck` and `git diff --check` passed. Browser interaction evidence remains blocked as recorded above.
 
 ### File List
 
 - `_bmad-output/implementation-artifacts/16-4-prove-chat-first-scope-trust-and-accessibility-boundaries.md`
 - `_bmad-output/implementation-artifacts/sprint-status.yaml`
 - `apps/web/src/app/ai-ask/page.tsx`
+- `apps/api/src/conversations/traveler-commands.controller.ts`
 - `apps/web/src/features/ai/ai-ask-composer.tsx`
 - `apps/web/src/features/chat-trips/conversation-list.tsx`
 - `apps/web/src/features/chat-trips/ai-ask-url.ts`

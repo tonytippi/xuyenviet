@@ -107,4 +107,27 @@ describe("trip recommendation direct API", () => {
     await request(app.getHttpServer()).post(endpoint).set({ Cookie: freshTraveler.cookie, Origin: "https://web.xuyenviet.vn", "x-xuyenviet-csrf": freshTraveler.csrf }).send({ assistantMessageId: "message-1", rating: "bad", userId: "forged" }).expect(400);
     expect(saveAnswerUsefulnessFeedback).not.toHaveBeenCalled();
   });
+
+  test("strictly admits feedback with the authenticated principal and returns safe command results", async () => {
+    const traveler = await travelerSession();
+    const endpoint = "/v1/answer-usefulness-feedback";
+    const headers = { Cookie: traveler.cookie, Origin: "https://web.xuyenviet.vn", "x-xuyenviet-csrf": traveler.csrf };
+
+    for (const input of [
+      { assistantMessageId: "message-1", rating: "useful", conversationId: "forged" },
+      { assistantMessageId: "message-1", rating: "useful", unexpected: true },
+      { assistantMessageId: "message-1", rating: "not_useful", comment: 42 },
+    ]) await request(app.getHttpServer()).post(endpoint).set(headers).send(input).expect(400);
+    expect(saveAnswerUsefulnessFeedback).not.toHaveBeenCalled();
+
+    saveAnswerUsefulnessFeedback.mockResolvedValueOnce({ success: false, reason: "not_found" });
+    await request(app.getHttpServer()).post(endpoint).set(headers).send({ assistantMessageId: "message-1", rating: "useful" }).expect(201).expect({ success: false, reason: "not_found" });
+    expect(saveAnswerUsefulnessFeedback).toHaveBeenLastCalledWith("traveler", { assistantMessageId: "message-1", rating: "useful" });
+
+    saveAnswerUsefulnessFeedback.mockResolvedValueOnce({ success: false, reason: "not_found" });
+    await request(app.getHttpServer()).post(endpoint).set(headers).send({ assistantMessageId: "message-2", rating: "useful" }).expect(201).expect({ success: false, reason: "not_found" });
+
+    await request(app.getHttpServer()).post(endpoint).set(headers).send({ assistantMessageId: "message-1", rating: "not_useful", comment: "Cần rõ hơn" }).expect(201);
+    expect(saveAnswerUsefulnessFeedback).toHaveBeenLastCalledWith("traveler", { assistantMessageId: "message-1", rating: "not_useful", comment: "Cần rõ hơn" });
+  });
 });
