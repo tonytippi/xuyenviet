@@ -38,5 +38,8 @@ function loadLocalEnvironment() {
 }
 
 if (process.argv[1]?.endsWith("main.ts") || process.argv[1]?.endsWith("main.mjs")) {
-  main().catch(() => process.exit(1));
+  main().catch((error: unknown) => {
+    console.error(error instanceof Error ? error.message : "Worker failed to start.");
+    process.exit(1);
+  });
 }
