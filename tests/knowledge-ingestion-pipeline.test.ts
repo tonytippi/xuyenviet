@@ -21,8 +21,8 @@ describe("target knowledge ingestion pipeline", () => {
     expect(resolveEvidenceSpan(capture, "Hội An có chỗ đậu xe.")).toEqual([3, Array.from(capture).length]);
   });
 
-  test("rejects normalized evidence that maps to more than one capture passage", () => {
-    expect(resolveEvidenceSpan("✨ Hội An. Hội An.", "Hội An.")).toBeNull();
+  test("uses the first exact match when an evidence quote appears more than once", () => {
+    expect(resolveEvidenceSpan("✨ Hội An. Hội An.", "Hội An.")).toEqual([2, 9]);
   });
 
   test("records the target discovery checkpoint and completes a no-candidate job", async () => {
@@ -111,13 +111,22 @@ describe("target knowledge ingestion pipeline", () => {
     await expect(testDb.select().from(knowledgeIngestionJobs).where(eq(knowledgeIngestionJobs.id, claim.jobId))).resolves.toMatchObject([{ status: "running", fencingToken: claim.fencingToken, lastErrorCode: null, captureVersionId: capture.id }]);
   });
 
-  test("records malformed discovery output as a current technical failure", async () => {
+  test("completes discovery without persisting malformed candidates", async () => {
     await appendSourceCaptureVersion(testDb, { sourceId: "source", captureKind: "pasted_text", rawText: "Đèo Hải Vân có điểm dừng ngắm cảnh.", metadata: { kind: "submitted" } });
     const claim = await claimNextKnowledgeIngestionJob({ workerId: "discovery-worker", now: new Date(Date.now() + 1_000) }, testDb);
     if (!claim) throw new Error("expected job claim");
 
-    await expect(runKnowledgeIngestionPipeline(claim, testDb, async () => [{ fingerprint: "bad", type: "place" as const, title: "Điểm dừng", summary: "Có điểm dừng phù hợp.", spanStart: 1, spanEnd: 0 }])).resolves.toMatchObject({ outcome: "failed" });
-    await expect(testDb.select().from(knowledgeIngestionJobs).where(eq(knowledgeIngestionJobs.id, claim.jobId))).resolves.toMatchObject([{ status: "failed", lastErrorCode: "discovery_invalid_output", claimedBy: null, fencingToken: null }]);
+    await expect(runKnowledgeIngestionPipeline(claim, testDb, async () => [{ fingerprint: "bad", type: "place" as const, title: "Điểm dừng", summary: "Có điểm dừng phù hợp.", spanStart: 1, spanEnd: 0 }])).resolves.toMatchObject({ outcome: "completed", candidateCount: 0 });
+    await expect(testDb.select().from(knowledgeIngestionJobs).where(eq(knowledgeIngestionJobs.id, claim.jobId))).resolves.toMatchObject([{ status: "completed", candidateCount: 0, lastErrorCode: null, claimedBy: null, fencingToken: null }]);
+  });
+
+  test("records an ungrounded evidence quote with a safe diagnostic code", async () => {
+    await appendSourceCaptureVersion(testDb, { sourceId: "source", captureKind: "pasted_text", rawText: "Đèo Hải Vân có điểm dừng ngắm cảnh.", metadata: { kind: "submitted" } });
+    const claim = await claimNextKnowledgeIngestionJob({ workerId: "discovery-worker", now: new Date(Date.now() + 1_000) }, testDb);
+    if (!claim) throw new Error("expected job claim");
+
+    await expect(runKnowledgeIngestionPipeline(claim, testDb, async () => { throw new DiscoveryFailure("discovery_ungrounded_evidence"); })).resolves.toMatchObject({ outcome: "failed" });
+    await expect(testDb.select().from(knowledgeIngestionJobs).where(eq(knowledgeIngestionJobs.id, claim.jobId))).resolves.toMatchObject([{ status: "failed", lastErrorCode: "discovery_ungrounded_evidence" }]);
   });
 
   test("persists scoped multi-fact discovery candidates with their travel metadata", async () => {
@@ -127,6 +136,18 @@ describe("target knowledge ingestion pipeline", () => {
 
     await expect(runKnowledgeIngestionPipeline(claim, testDb, async () => [{ fingerprint: "food-with-parking", type: "food" as const, title: "Quán ăn có chỗ đậu xe", summary: "Phù hợp dừng ăn khi đi ô tô.", locationName: "Hải Vân", conditions: ["Nên kiểm tra chỗ trống trước khi đến."], freshnessSensitive: true, practicalDetails: { parking_notes: ["Có chỗ đậu xe."] }, tags: ["ăn uống", "đậu xe"], spanStart: 0, spanEnd: 1 }])).resolves.toMatchObject({ outcome: "completed", candidateCount: 1 });
     await expect(testDb.select().from(knowledgeIngestionCandidates).where(eq(knowledgeIngestionCandidates.captureVersionId, capture.id))).resolves.toMatchObject([{ type: "food", locationName: "Hải Vân", conditions: ["Nên kiểm tra chỗ trống trước khi đến."], freshnessSensitive: true, practicalDetails: { parking_notes: ["Có chỗ đậu xe."] }, tags: ["ăn uống", "đậu xe"], extractionPromptVersion: "knowledge_pipeline_multi_fact_extraction_v2" }]);
+  });
+
+  test("persists valid candidates when the same discovery response includes an invalid candidate", async () => {
+    const capture = await appendSourceCaptureVersion(testDb, { sourceId: "source", captureKind: "pasted_text", rawText: "Quán có chỗ đậu xe.", metadata: { kind: "submitted" } });
+    const claim = await claimNextKnowledgeIngestionJob({ workerId: "discovery-worker", now: new Date(Date.now() + 1_000) }, testDb);
+    if (!claim) throw new Error("expected job claim");
+
+    await expect(runKnowledgeIngestionPipeline(claim, testDb, async () => [
+      { fingerprint: "valid", type: "food" as const, title: "Quán ăn có chỗ đậu xe", summary: "Phù hợp dừng ăn khi đi ô tô.", locationName: "Hải Vân", spanStart: 0, spanEnd: 1 },
+      { fingerprint: "invalid", type: "food" as const, title: "Thiếu phạm vi", summary: "Không có địa điểm hoặc cung đường.", spanStart: 0, spanEnd: 1 },
+    ])).resolves.toMatchObject({ outcome: "completed", candidateCount: 1 });
+    await expect(testDb.select().from(knowledgeIngestionCandidates).where(eq(knowledgeIngestionCandidates.captureVersionId, capture.id))).resolves.toMatchObject([{ fingerprint: "valid" }]);
   });
 
   test("records an unexpected discovery exception with the generic safe code", async () => {

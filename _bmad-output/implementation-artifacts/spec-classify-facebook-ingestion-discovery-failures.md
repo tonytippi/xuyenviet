@@ -84,3 +84,17 @@ The existing `last_error_code` field is constrained to short safe-code character
 - `pnpm typecheck` passed across the root workspace and all applications/packages.
 - `pnpm test:integration` is blocked before tests execute because `drizzle-kit migrate` fails against the configured `DATABASE_URL_TEST`; no test failure was reported.
 - Two independent diff reviews found no issues.
+
+## Change Log
+
+- 2026-08-06: Aligned the multi-fact extraction example with the required `evidence.quote_text` contract. The prompt no longer presents optional `evidence_hint` output.
+- 2026-08-06: Added safe, allowlisted diagnostics for invalid candidates and missing, malformed, or ungrounded evidence. No provider response, prompt, raw model output, or exception message is persisted or projected.
+- 2026-08-06: Preserved exact-source grounding while allowing repeated exact evidence passages. The resolver records the first matching passage rather than rejecting a quote solely because it occurs more than once.
+- 2026-08-06: Made multi-fact discovery resilient to individual invalid candidates. Invalid candidates are discarded before persistence; valid evidence-grounded candidates in the same response continue through the existing lifecycle.
+- 2026-08-06: Requeued the two affected failed ingestion jobs after deploying the recovery changes. Review `8f0340a4-5bdb-4c47-b8c7-c55528c62383` completed with 8 candidates, all processed successfully.
+
+## Recovery Verification
+
+- `pnpm test:unit -- tests/admin-facebook-capture-contract.test.ts tests/knowledge-ingestion-prompt.test.ts` passed: 25 files, 240 tests.
+- `pnpm typecheck` passed across the root workspace and all applications/packages.
+- `pnpm --filter @xuyenviet/worker build` passed, and the rebuilt ingestion adapter processed the requeued review successfully.

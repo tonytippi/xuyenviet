@@ -13,7 +13,7 @@ export type KnowledgeIngestionPipelineResult = { jobId: string; sourceId: string
 export type DiscoveredCandidate = Readonly<{ fingerprint: string; type: KnowledgeCardType; title: string; summary: string; spanStart: number; spanEnd: number; locationName?: string | null; routeSegment?: string | null; conditions?: string[]; freshnessSensitive?: boolean; practicalDetails?: Record<string, unknown>; tags?: string[] }>;
 export type CandidateDiscoverer = (input: { captureText: string }) => Promise<DiscoveredCandidate[]>;
 
-type DiscoveryFailureCode = "discovery_model_unavailable" | "discovery_gateway_http_error" | "discovery_gateway_network_error" | "discovery_invalid_gateway_response" | "discovery_client_stream_aborted" | "discovery_invalid_output" | "discovery_failed";
+type DiscoveryFailureCode = "discovery_model_unavailable" | "discovery_gateway_http_error" | "discovery_gateway_network_error" | "discovery_invalid_gateway_response" | "discovery_client_stream_aborted" | "discovery_invalid_output" | "discovery_invalid_candidate" | "discovery_missing_evidence" | "discovery_invalid_evidence" | "discovery_ungrounded_evidence" | "discovery_failed";
 const discoveryRetryBackoffMs = [30_000, 120_000, 300_000] as const;
 
 export class DiscoveryFailure extends Error {
@@ -27,10 +27,9 @@ export async function runKnowledgeIngestionPipeline(claim: KnowledgeIngestionCla
   let discovered: DiscoveredCandidate[];
   try {
     const [capture] = await db.select({ rawText: sourceCaptureVersions.rawText }).from(knowledgeIngestionJobs).innerJoin(sourceCaptureVersions, eq(sourceCaptureVersions.id, knowledgeIngestionJobs.captureVersionId)).innerJoin(sources, eq(sources.id, knowledgeIngestionJobs.sourceId)).where(and(eq(knowledgeIngestionJobs.id, claim.jobId), eq(knowledgeIngestionJobs.status, "running"), eq(knowledgeIngestionJobs.discoveryTerminal, false), eq(knowledgeIngestionJobs.fencingToken, claim.fencingToken), gt(knowledgeIngestionJobs.leaseExpiresAt, new Date()), eq(sources.currentCaptureVersionId, claim.captureVersionId), eq(sources.eligibility, "eligible"), isNull(sourceCaptureVersions.payloadDeletedAt))).limit(1);
-    if (!capture?.rawText?.trim()) return null;
-    discovered = await discover({ captureText: capture.rawText });
-    const captureLength = Array.from(capture.rawText).length;
-    if (!discovered.every((candidate) => validDiscoveredCandidate(candidate, captureLength))) throw new DiscoveryFailure("discovery_invalid_output");
+    const captureText = capture?.rawText;
+    if (!captureText?.trim()) return null;
+    discovered = (await discover({ captureText })).filter((candidate) => validDiscoveredCandidate(candidate, Array.from(captureText).length));
   } catch (error) {
     const errorCode: DiscoveryFailureCode = error instanceof DiscoveryFailure ? error.code : "discovery_failed";
     const retryable = isRetryableDiscoveryFailure(errorCode) && claim.attemptCount < claim.maxAttempts;
@@ -128,11 +127,30 @@ async function discoverCandidates(input: { captureText: string }): Promise<Disco
     const parsed = JSON.parse(result.content) as { candidates?: unknown };
     if (!Array.isArray(parsed.candidates)) throw new Error("missing_candidates");
     if (parsed.candidates.length > 100) throw new Error("too_many_candidates");
-    return parsed.candidates.map((value) => normalizeDiscoveredCandidate(value, input.captureText));
+    const captureLength = Array.from(input.captureText).length;
+    return parsed.candidates.flatMap((value) => {
+      try {
+        const candidate = normalizeDiscoveredCandidate(value, input.captureText);
+        if (!validDiscoveredCandidate(candidate, captureLength)) throw new Error("invalid_discovery_candidate");
+        return [candidate];
+      } catch (error) {
+        logInvalidDiscoveryOutput(error);
+        return [];
+      }
+    });
   } catch (error) {
     logInvalidDiscoveryOutput(error);
-    throw new DiscoveryFailure("discovery_invalid_output");
+    throw new DiscoveryFailure(discoveryOutputFailureCode(error));
   }
+}
+
+function discoveryOutputFailureCode(error: unknown): "discovery_invalid_output" | "discovery_invalid_candidate" | "discovery_missing_evidence" | "discovery_invalid_evidence" | "discovery_ungrounded_evidence" {
+  const reason = safeDiscoveryOutputReason(error);
+  if (reason === "invalid_discovery_candidate") return "discovery_invalid_candidate";
+  if (reason === "missing_discovery_evidence") return "discovery_missing_evidence";
+  if (reason === "invalid_discovery_evidence") return "discovery_invalid_evidence";
+  if (reason === "ungrounded_discovery_evidence") return "discovery_ungrounded_evidence";
+  return "discovery_invalid_output";
 }
 
 function discoveryGatewayFailureCode(errorCode: string): Exclude<DiscoveryFailureCode, "discovery_model_unavailable" | "discovery_invalid_output" | "discovery_failed"> {
@@ -178,11 +196,10 @@ export function resolveEvidenceSpan(captureText: string, modelQuote: string): [n
   const capture = normalizedEvidenceCharacters(captureText, true);
   const quote = normalizedEvidenceCharacters(modelQuote, false);
   if (quote.length === 0 || capture.length < quote.length) return null;
-  const matches: Array<[number, number]> = [];
   for (let start = 0; start <= capture.length - quote.length; start += 1) {
-    if (quote.every((character, offset) => capture[start + offset]!.value === character.value)) matches.push([capture[start]!.start, capture[start + quote.length - 1]!.end]);
+    if (quote.every((character, offset) => capture[start + offset]!.value === character.value)) return [capture[start]!.start, capture[start + quote.length - 1]!.end];
   }
-  return matches.length === 1 ? matches[0]! : null;
+  return null;
 }
 
 function normalizedEvidenceCharacters(value: string, retainOffsets: boolean) {

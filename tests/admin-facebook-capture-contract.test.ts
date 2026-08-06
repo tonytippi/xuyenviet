@@ -32,4 +32,10 @@ describe("admin Facebook capture direct contract", () => {
     expect(parseAdminFacebookCaptureQueue({ ...queue, items: [{ ...failedCapture, ingestionJob: { ...failedCapture.ingestionJob, lastErrorCode: "unknown_error" } }] })).toBeNull();
     expect(parseAdminFacebookCaptureQueue({ ...queue, items: [{ ...failedCapture, ingestionJob: { ...failedCapture.ingestionJob, lastErrorCode: "Provider returned raw payload" } }] })).toBeNull();
   });
+  it("accepts safe evidence-validation diagnostics", () => {
+    const failedCapture = { ...capture, ingestionJob: { status: "failed" as const, updatedAt: "2026-08-03T00:00:00.000Z", lastErrorCode: "discovery_ungrounded_evidence", candidateCount: 0, completedCandidateCount: 0, needsOperatorCandidateCount: 0, failedCandidateCount: 0 } };
+    const queue = { status: "failed" as const, page: 1, pageSize: 25, totalCount: 1, counts: { queued: 0, running: 0, completed: 0, failed: 1, not_started: 0 }, items: [failedCapture] };
+
+    expect(parseAdminFacebookCaptureQueue(queue)).toEqual(queue);
+  });
 });
