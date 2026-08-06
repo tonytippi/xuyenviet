@@ -7,6 +7,7 @@ import type { TripRecommendationResponse } from "@xuyenviet/contracts";
 
 import { ConversationList, type ChatSessionSummary } from "@/features/chat-trips/conversation-list";
 import { formatTripProjectLabel } from "@/features/chat-trips/labels";
+import { buildCanonicalAiAskUrl } from "@/features/chat-trips/ai-ask-url";
 import { answerUsefulnessCommentMaxLength, countAnswerUsefulnessCommentCharacters, type AnswerAnnotation, type AnswerAnnotationActionCapability, type AnswerUsefulnessFeedbackSummary, type AnswerUsefulnessRating, type AssistantMessageProvenanceItem, type AvailableAssistantMessageProvenanceItem, type TripWorkspaceReadModel } from "@/features/chat-trips/types";
 import { tripChangeProposalLabels } from "@/features/chat-trips/trip-home-labels";
 import { TripWorkspacePanel } from "@/features/ai/trip-workspace-panel";
@@ -115,17 +116,6 @@ const emptyMessages: DisplayMessage[] = [];
 const emptySessions: ChatSessionSummary[] = [];
 const emptyTripProjects: TripProjectSummary[] = [];
 
-function buildCanonicalAiAskUrl(conversationId?: string, tripProjectId?: string, historyConversationId?: string) {
-  const searchParams = new URLSearchParams();
-
-  if (conversationId) searchParams.set("conversationId", conversationId);
-  if (tripProjectId) searchParams.set("tripProjectId", tripProjectId);
-  if (historyConversationId) searchParams.set("historyConversationId", historyConversationId);
-
-  const query = searchParams.toString();
-  return query ? `/ai-ask?${query}` : "/ai-ask";
-}
-
 const starterCards = [
   {
     title: "Lên route",
@@ -201,7 +191,7 @@ export function AnswerUsefulnessFeedbackControl({
             aria-pressed={selectedRating === "useful"}
             className="min-h-11 rounded-xl border border-[#8fb59f] bg-[#edf7f0] px-3 py-2 text-sm font-semibold text-[#17342c] transition hover:bg-white motion-reduce:transition-none focus:outline-none focus:ring-4 focus:ring-[#8fb59f]/45 disabled:cursor-not-allowed disabled:opacity-60 aria-pressed:bg-[#1f5f46] aria-pressed:text-white"
             disabled={pending}
-            onClick={() => onSubmit(messageId, "useful", comment)}
+            onClick={() => onSubmit(messageId, "useful", null)}
             type="button"
           >
             Hữu ích
@@ -2055,7 +2045,7 @@ export function AiAskComposer({
             {supportsImageInput ? (
               <label
                 aria-label="Đính kèm ảnh tham khảo"
-                className={`absolute bottom-5 left-5 grid h-10 w-10 cursor-pointer place-items-center rounded-xl text-[#4f5a55] transition hover:bg-[#edf7f2] hover:text-[#167c5a] focus-within:outline-none focus-within:ring-2 focus-within:ring-[#167c5a] ${askFormDisabled ? "cursor-not-allowed opacity-50" : ""}`}
+                className={`absolute bottom-5 left-5 grid min-h-11 min-w-11 cursor-pointer place-items-center rounded-xl text-[#4f5a55] transition hover:bg-[#edf7f2] hover:text-[#167c5a] focus-within:outline-none focus-within:ring-2 focus-within:ring-[#167c5a] ${askFormDisabled ? "cursor-not-allowed opacity-50" : ""}`}
                 htmlFor="ai-ask-image"
                 title="Đính kèm ảnh"
               >

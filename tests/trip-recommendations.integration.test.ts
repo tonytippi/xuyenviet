@@ -177,4 +177,18 @@ describe("trip recommendation aggregate", () => {
     await expect(acceptTripCreationRecommendation("other", { decisionId: recommendation.tripCreationRecommendation.decisionId, idempotencyKey: "foreign-creation-key-1" })).resolves.toEqual({ success: false, reason: "refresh_required" });
     await expect(testDb.select().from(tripProjects)).resolves.toEqual([]);
   });
+
+  test("rejects foreign, mismatched, and creation decisions for continue without attaching anything", async () => {
+    const conversation = await readyConversation();
+    const repository = createPostgresTripRecommendationReadRepository();
+    const [project] = await testDb.insert(tripProjects).values({ userId: "owner", title: "Đà Lạt" }).returning();
+    const recommendation = await repository.loadOwnedTripRecommendations("owner", conversation.id);
+    if (recommendation.tripContextRecommendation.kind !== "single") throw new Error("Expected a single project");
+    await testDb.insert(users).values({ id: "other", email: "other@example.com" });
+    await expect(continueInTrip("owner", { decisionId: recommendation.tripContextRecommendation.decisionId, tripProjectId: "other-project" })).resolves.toEqual({ success: false, reason: "refresh_required" });
+    await expect(continueInTrip("other", { decisionId: recommendation.tripContextRecommendation.decisionId, tripProjectId: project!.id })).resolves.toEqual({ success: false, reason: "refresh_required" });
+    if (recommendation.tripCreationRecommendation.kind !== "offer") throw new Error("Expected creation offer");
+    await expect(continueInTrip("owner", { decisionId: recommendation.tripCreationRecommendation.decisionId, tripProjectId: project!.id })).resolves.toEqual({ success: false, reason: "refresh_required" });
+    await expect(testDb.select({ tripProjectId: conversations.tripProjectId }).from(conversations).where(eq(conversations.id, conversation.id))).resolves.toEqual([{ tripProjectId: null }]);
+  });
 });

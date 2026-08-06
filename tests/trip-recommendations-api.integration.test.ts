@@ -15,14 +15,22 @@ const browserAuth = { googleClientId: "client", googleClientSecret: "secret", ca
 let app: INestApplication;
 const loadRecommendations = vi.fn();
 const acceptTripCreationRecommendation = vi.fn();
+const declineTripCreationRecommendation = vi.fn();
+const choosePrivateTripRecommendation = vi.fn();
+const continueInTrip = vi.fn();
+const saveAnswerUsefulnessFeedback = vi.fn();
 const listTripProjects = vi.fn();
 
 beforeEach(async () => {
   await resetTestDatabase();
   loadRecommendations.mockReset().mockResolvedValue({ tripCreationRecommendation: { kind: "none" }, tripContextRecommendation: { kind: "none" } });
   acceptTripCreationRecommendation.mockReset().mockResolvedValue({ success: true, destination: { tripProjectId: "project-1", conversationId: "conversation-1" } });
+  declineTripCreationRecommendation.mockReset().mockResolvedValue({ success: true });
+  choosePrivateTripRecommendation.mockReset().mockResolvedValue({ success: true });
+  continueInTrip.mockReset().mockResolvedValue({ success: true, destination: { tripProjectId: "project-1", conversationId: "conversation-1" } });
+  saveAnswerUsefulnessFeedback.mockReset().mockResolvedValue({ success: true, feedback: { rating: "useful", comment: null, updatedAt: "2026-08-05T00:00:00.000Z" } });
   listTripProjects.mockReset().mockResolvedValue([]);
-  const commands: Pick<TravelerCommandPort, "acceptTripCreationRecommendation"> = { acceptTripCreationRecommendation };
+  const commands: Pick<TravelerCommandPort, "acceptTripCreationRecommendation" | "declineTripCreationRecommendation" | "choosePrivateTripRecommendation" | "continueInTrip" | "saveAnswerUsefulnessFeedback"> = { acceptTripCreationRecommendation, declineTripCreationRecommendation, choosePrivateTripRecommendation, continueInTrip, saveAnswerUsefulnessFeedback };
   const identities = createPostgresApiIdentityRepository(getTestDatabaseUrl(), browserAuth.sessionLookupKey, browserAuth.oauthTransactionProtectionKey);
   const ApiModule = createApiModule(identities, {
     conversationSummaries: { async listOwnedConversationSummaryRows() { return []; } },
@@ -74,5 +82,29 @@ describe("trip recommendation direct API", () => {
     expect(accepted.status).toBe(201);
     expect(accepted.body).toEqual({ success: true, destination: { tripProjectId: "project-1", conversationId: "conversation-1" } });
     expect(acceptTripCreationRecommendation).toHaveBeenCalledWith("traveler", { decisionId: "decision-1", idempotencyKey: "a".repeat(16) });
+  });
+
+  test("strictly admits decline, private, and continue decisions using only the authenticated principal", async () => {
+    const traveler = await travelerSession();
+    const headers = { Cookie: traveler.cookie, Origin: "https://web.xuyenviet.vn", "x-xuyenviet-csrf": traveler.csrf };
+    for (const endpoint of ["/v1/trip-recommendations/decline-creation", "/v1/trip-recommendations/private"]) {
+      await request(app.getHttpServer()).post(endpoint).set(headers).send({ decisionId: "decision-1", userId: "forged" }).expect(400);
+      await request(app.getHttpServer()).post(endpoint).set(headers).send({ decisionId: "decision-1" }).expect(201).expect({ success: true });
+    }
+    await request(app.getHttpServer()).post("/v1/trip-recommendations/continue").set(headers).send({ decisionId: "decision-1", tripProjectId: "project-1", title: "Injected" }).expect(400);
+    await request(app.getHttpServer()).post("/v1/trip-recommendations/continue").set(headers).send({ decisionId: "decision-1", tripProjectId: "project-1" }).expect(201).expect({ success: true, destination: { tripProjectId: "project-1", conversationId: "conversation-1" } });
+    expect(declineTripCreationRecommendation).toHaveBeenCalledWith("traveler", { decisionId: "decision-1" });
+    expect(choosePrivateTripRecommendation).toHaveBeenCalledWith("traveler", { decisionId: "decision-1" });
+    expect(continueInTrip).toHaveBeenCalledWith("traveler", { decisionId: "decision-1", tripProjectId: "project-1" });
+  });
+
+  test("rejects unauthenticated, CSRF-invalid, and forged feedback before the command port", async () => {
+    const endpoint = "/v1/answer-usefulness-feedback";
+    await request(app.getHttpServer()).post(endpoint).send({ assistantMessageId: "message-1", rating: "useful" }).expect(401);
+    const traveler = await travelerSession();
+    await request(app.getHttpServer()).post(endpoint).set({ Cookie: traveler.cookie, Origin: "https://web.xuyenviet.vn" }).send({ assistantMessageId: "message-1", rating: "useful" }).expect(403);
+    const freshTraveler = await travelerSession("traveler-invalid");
+    await request(app.getHttpServer()).post(endpoint).set({ Cookie: freshTraveler.cookie, Origin: "https://web.xuyenviet.vn", "x-xuyenviet-csrf": freshTraveler.csrf }).send({ assistantMessageId: "message-1", rating: "bad", userId: "forged" }).expect(400);
+    expect(saveAnswerUsefulnessFeedback).not.toHaveBeenCalled();
   });
 });

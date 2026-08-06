@@ -68,6 +68,8 @@ describe("traveler UI foundation", () => {
     expect(source).not.toContain("formatProvenanceSourceType");
     expect(source).not.toContain("getTrustLabels");
     expect(source).not.toContain("formatProvenanceUrl");
+    expect(source).toContain("Một số chi tiết bổ sung chưa sẵn sàng. Bạn vẫn có thể dùng câu trả lời này và hỏi tiếp khi cần.");
+    expect(source).toContain("Một số chi tiết bổ sung sẽ xuất hiện sau. Bạn vẫn có thể dùng câu trả lời này.");
   });
 
   test("keeps disclosure links safe and source URLs out of traveler quick facts", () => {
@@ -87,6 +89,24 @@ describe("traveler UI foundation", () => {
     expect(composer).toContain('return { status: "answer-failed" };');
     expect(shellLoader).toContain("Thử mở lại");
     expect(shellLoader).toContain("motion-reduce:transition-none");
+  });
+
+  test("keeps feedback message-scoped, accessible, and clears negative-only comments on a useful rating", () => {
+    const source = readFileSync("apps/web/src/features/ai/ai-ask-composer.tsx", "utf8");
+
+    expect(source).toContain('onClick={() => onSubmit(messageId, "useful", null)}');
+    expect(source).toContain('selectedRating === "not_useful"');
+    expect(source).toContain('aria-live="polite"');
+    expect(source).toContain("min-h-11");
+    expect(source).toContain('min-h-11 min-w-11 cursor-pointer');
+    expect(source).toContain("focus:ring-4");
+  });
+
+  test("keeps mobile conversation-sheet controls at the 44px target floor", () => {
+    const source = readFileSync("apps/web/src/features/chat-trips/conversation-list.tsx", "utf8");
+
+    expect(source).toContain('className="min-h-11 w-full rounded-lg');
+    expect(source).toContain('className="absolute right-1 top-1/2 grid min-h-11 min-w-11');
   });
 
 });

@@ -4,7 +4,7 @@ baseline_commit: cbf9efc
 
 # Story 16.4: Prove Chat-First Scope, Trust, and Accessibility Boundaries
 
-Status: ready-for-dev
+Status: review
 
 ## Story
 
@@ -46,42 +46,42 @@ so that convenience improvements cannot silently weaken traveler control, owner 
 
 ## Tasks / Subtasks
 
-- [ ] Complete recommendation contract and ownership regression matrix (AC: 1)
-  - [ ] Add `tests/trip-recommendations.test.ts` to the `unitTests` allowlist in `vitest.config.ts`; it is infrastructure-free parser/fingerprint coverage and must run under the unit project rather than being silently selected by the integration project.
-  - [ ] Extend `tests/trip-recommendations.test.ts` for every valid recommendation shape and invalid exact-shape input: injected fields, invalid action sets/order, malformed decision IDs, wrong decision kind, malformed `continueInTrip(...)` input, and prohibited `tripProjectId`/title leakage from `none`, `clarify`, and `multiple` results.
-  - [ ] Extend `tests/trip-recommendations.integration.test.ts` for no owned match, one owned match, multiple owned matches, foreign-project-only inputs, decline/explicit-save fencing, retry/concurrent acceptance, stale revision/fingerprint, deleted conversation/project, and foreign decisions.
-  - [ ] Add explicit negative tests for foreign or mismatched `continueInTrip(...)` selection and wrong decision kind. All failures must be non-disclosing and create/attach nothing.
-  - [ ] Extend `tests/trip-recommendations-api.integration.test.ts` to cover authenticated principal, CSRF, strict body parsing, and safe result handling for decline, private, continue, and accepted creation. Include invalid/extra body fields and prove invalid requests do not invoke the command port. Keep accepted-creation `Idempotency-Key` unique to its endpoint.
+- [x] Complete recommendation contract and ownership regression matrix (AC: 1)
+  - [x] Add `tests/trip-recommendations.test.ts` to the `unitTests` allowlist in `vitest.config.ts`; it is infrastructure-free parser/fingerprint coverage and must run under the unit project rather than being silently selected by the integration project.
+  - [x] Extend `tests/trip-recommendations.test.ts` for every valid recommendation shape and invalid exact-shape input: injected fields, invalid action sets/order, malformed decision IDs, wrong decision kind, malformed `continueInTrip(...)` input, and prohibited `tripProjectId`/title leakage from `none`, `clarify`, and `multiple` results.
+  - [x] Extend `tests/trip-recommendations.integration.test.ts` for no owned match, one owned match, multiple owned matches, foreign-project-only inputs, decline/explicit-save fencing, retry/concurrent acceptance, stale revision/fingerprint, deleted conversation/project, and foreign decisions.
+  - [x] Add explicit negative tests for foreign or mismatched `continueInTrip(...)` selection and wrong decision kind. All failures must be non-disclosing and create/attach nothing.
+  - [x] Extend `tests/trip-recommendations-api.integration.test.ts` to cover authenticated principal, CSRF, strict body parsing, and safe result handling for decline, private, continue, and accepted creation. Include invalid/extra body fields and prove invalid requests do not invoke the command port. Keep accepted-creation `Idempotency-Key` unique to its endpoint.
 
-- [ ] Prove private-answer and canonical selected-project data boundaries (AC: 2)
-  - [ ] Add `tests/private-turn-answer-context.integration.test.ts`, a serial database-level regression through the production next-turn command/orchestration path, `assembleContextPrioritySourceBundle(...)`, and persisted answer/provenance seams. Do not pass only `tripProjectId: undefined` directly to `loadAnswerContext(...)`.
-  - [ ] Seed distinguishable sentinel values for ordinary-conversation facts that must remain available and for project anchors, plan items, constraints, project-scoped facts, and provenance that must remain absent. Execute a valid `private_answer` decision, submit the next ordinary turn through the same production path, then assert command/source-bundle input has no `tripProjectId`; `hasProjectScope` is false; `tripProjectId` is null; anchors and plan items are empty; constraints are null; no project facts, identifiers, context IDs, or project-derived provenance persist; and the ordinary conversation remains unlinked before and after the turn.
-  - [ ] Cover private decisions emitted from both an offer/creation recommendation and an existing-project context recommendation when those typed decision kinds are available. Ordinary conversation facts may remain; do not use an over-broad assertion that rejects ordinary-chat context.
-  - [ ] Assert private/decline actions preserve the current unscoped URL; they must not load or persist a selected project or create a durable private-mode state.
-  - [ ] Assert continue and accepted creation navigate only using the server-returned canonical `{ tripProjectId, conversationId }`, and the chosen project's existing same-owner primary conversation is used without copying, merging, linking, or replaying the ordinary conversation.
-  - [ ] Reuse `packages/database/src/answer-context.ts`, `packages/database/src/trip-recommendations.ts`, and the direct Nest command routes. Do not duplicate context assembly in a test helper or browser code.
+- [x] Prove private-answer and canonical selected-project data boundaries (AC: 2)
+  - [x] Add `tests/private-turn-answer-context.integration.test.ts`, a serial database-level regression through the production next-turn command/orchestration path, `assembleContextPrioritySourceBundle(...)`, and persisted answer/provenance seams. Do not pass only `tripProjectId: undefined` directly to `loadAnswerContext(...)`.
+  - [x] Seed distinguishable sentinel values for ordinary-conversation facts that must remain available and for project anchors, plan items, constraints, project-scoped facts, and provenance that must remain absent. Execute a valid `private_answer` decision, submit the next ordinary turn through the same production path, then assert command/source-bundle input has no `tripProjectId`; `hasProjectScope` is false; `tripProjectId` is null; anchors and plan items are empty; constraints are null; no project facts, identifiers, context IDs, or project-derived provenance persist; and the ordinary conversation remains unlinked before and after the turn.
+  - [x] Cover private decisions emitted from both an offer/creation recommendation and an existing-project context recommendation when those typed decision kinds are available. Ordinary conversation facts may remain; do not use an over-broad assertion that rejects ordinary-chat context.
+  - [x] Assert private/decline actions preserve the current unscoped URL; they must not load or persist a selected project or create a durable private-mode state.
+  - [x] Assert continue and accepted creation navigate only using the server-returned canonical `{ tripProjectId, conversationId }`, and the chosen project's existing same-owner primary conversation is used without copying, merging, linking, or replaying the ordinary conversation.
+  - [x] Reuse `packages/database/src/answer-context.ts`, `packages/database/src/trip-recommendations.ts`, and the direct Nest command routes. Do not duplicate context assembly in a test helper or browser code.
 
-- [ ] Strengthen URL-shell and trust/recovery regression coverage (AC: 2-3)
-  - [ ] Extract the pure canonical `/ai-ask` URL builder and single-value query parser from component-local code into a small importable web utility. Add unit coverage for the unscoped route, ordinary conversation, server-returned project destination, historic conversation review, and multi-valued query rejection. Do not manufacture primary-conversation authority in the client.
-  - [ ] Extend `tests/direct-shell-proposal-actions.test.ts` and/or existing compatible tests to prove a scope-key change blocks the old shell, stale/foreign/unlinked resources reconcile to `/ai-ask`, and no second shell loader, browser persistence owner, or breakpoint-specific selection state is introduced.
-  - [ ] Extend `tests/traveler-ui-foundation.test.ts` with a positive Vietnamese-copy and forbidden-vocabulary matrix covering the composer and direct shell loader. Cover practical loading, verification, unavailable, retry, stale-scope, stream failure, and completed-follow-up-delay paths.
-  - [ ] Assert safe disclosures derive only from persisted provenance/annotations, accept `detail: null` and withdrawn/missing detail without fallback exposure, do not expose raw URLs as quick facts, and never infer source/trust state by parsing answer text. Run and name the directly affected suites: `tests/answer-annotations.test.ts` and `tests/knowledge-source-removal.test.ts`.
-  - [ ] The forbidden traveler output includes internal state/job/consumer names, source/provenance/retrieval taxonomy, confidence codes, provider/model names, request or correlation IDs, error codes, diagnostics, raw source material, evidence, conditions, and provenance IDs.
+- [x] Strengthen URL-shell and trust/recovery regression coverage (AC: 2-3)
+  - [x] Extract the pure canonical `/ai-ask` URL builder and single-value query parser from component-local code into a small importable web utility. Add unit coverage for the unscoped route, ordinary conversation, server-returned project destination, historic conversation review, and multi-valued query rejection. Do not manufacture primary-conversation authority in the client.
+  - [x] Extend `tests/direct-shell-proposal-actions.test.ts` and/or existing compatible tests to prove a scope-key change blocks the old shell, stale/foreign/unlinked resources reconcile to `/ai-ask`, and no second shell loader, browser persistence owner, or breakpoint-specific selection state is introduced.
+  - [x] Extend `tests/traveler-ui-foundation.test.ts` with a positive Vietnamese-copy and forbidden-vocabulary matrix covering the composer and direct shell loader. Cover practical loading, verification, unavailable, retry, stale-scope, stream failure, and completed-follow-up-delay paths.
+  - [x] Assert safe disclosures derive only from persisted provenance/annotations, accept `detail: null` and withdrawn/missing detail without fallback exposure, do not expose raw URLs as quick facts, and never infer source/trust state by parsing answer text. Run and name the directly affected suites: `tests/answer-annotations.test.ts` and `tests/knowledge-source-removal.test.ts`.
+  - [x] The forbidden traveler output includes internal state/job/consumer names, source/provenance/retrieval taxonomy, confidence codes, provider/model names, request or correlation IDs, error codes, diagnostics, raw source material, evidence, conditions, and provenance IDs.
 
-- [ ] Verify feedback persistence and accessible interaction contracts (AC: 3-4)
-  - [ ] Add the required focused serial PostgreSQL suite `tests/answer-usefulness-feedback.integration.test.ts`, with local `resetTestDatabase()` setup and only a small local fixture for two users, an owner conversation, one assistant message, and one non-assistant message. Prove insert, same-user/message update without duplication, owner isolation, assistant-message-only targeting, missing/foreign safe results, trimmed comments, maximum-length validation, and concurrent same-owner saves yielding exactly one complete row rather than a duplicate or mixed result.
-  - [ ] Add the negative-to-positive rating-transition regression: after a `not_useful` rating with a comment, changing the same message to `useful` must persist `comment: null`, hide the negative-only editor, and neither retain nor resend the prior comment. Make the smallest production fix if the regression demonstrates the current hidden-comment retention defect.
-  - [ ] Preserve `saveDirectAnswerUsefulnessFeedback()` relative cookie-authenticated CSRF/parsing behavior and extend Nest admission coverage. Prove unauthenticated/CSRF-failing requests do not invoke the port; forged `userId`/`conversationId`, extra fields, malformed ratings, and invalid comment types are rejected; foreign/missing messages return the safe result; and the controller passes only the authenticated principal identity to the command port.
-  - [ ] Extend the existing source-level/component-compatible UI tests for compact positive/negative controls, negative-only comment editor, pending disablement, polite announcement, message-scoped update, visible focus, 44px mobile targets, and no composer displacement. Do not introduce a new UI framework or dependency solely for this story.
-  - [ ] Keep source-level/component-compatible assertions only for static structural contracts. They do not prove interactive behavior.
-  - [ ] Execute and record a manual accessibility evidence matrix because no configured browser interaction harness currently runs these flows. Use a desktop viewport and a 375-430px mobile viewport; record browser and viewport; keyboard sequence and resulting focus for navigation sheet, selected-answer detail, private/continue recommendation actions, feedback save/failure, stale-scope recovery, and `Hỏi XuyenViet`; prove only the topmost layer closes on `Escape`; inspect active-row `aria-current`, polite live updates, 44px targets, and `prefers-reduced-motion: reduce`; attach screenshots or record an explicit blocker. Do not claim AC4 interactive proof from static source tests.
-  - [ ] Fix only defects demonstrated by these checks.
+- [x] Verify feedback persistence and accessible interaction contracts (AC: 3-4)
+  - [x] Add the required focused serial PostgreSQL suite `tests/answer-usefulness-feedback.integration.test.ts`, with local `resetTestDatabase()` setup and only a small local fixture for two users, an owner conversation, one assistant message, and one non-assistant message. Prove insert, same-user/message update without duplication, owner isolation, assistant-message-only targeting, missing/foreign safe results, trimmed comments, maximum-length validation, and concurrent same-owner saves yielding exactly one complete row rather than a duplicate or mixed result.
+  - [x] Add the negative-to-positive rating-transition regression: after a `not_useful` rating with a comment, changing the same message to `useful` must persist `comment: null`, hide the negative-only editor, and neither retain nor resend the prior comment. Make the smallest production fix if the regression demonstrates the current hidden-comment retention defect.
+  - [x] Preserve `saveDirectAnswerUsefulnessFeedback()` relative cookie-authenticated CSRF/parsing behavior and extend Nest admission coverage. Prove unauthenticated/CSRF-failing requests do not invoke the port; forged `userId`/`conversationId`, extra fields, malformed ratings, and invalid comment types are rejected; foreign/missing messages return the safe result; and the controller passes only the authenticated principal identity to the command port.
+  - [x] Extend the existing source-level/component-compatible UI tests for compact positive/negative controls, negative-only comment editor, pending disablement, polite announcement, message-scoped update, visible focus, 44px mobile targets, and no composer displacement. Do not introduce a new UI framework or dependency solely for this story.
+  - [x] Keep source-level/component-compatible assertions only for static structural contracts. They do not prove interactive behavior.
+  - [x] Execute and record a manual accessibility evidence matrix because no configured browser interaction harness currently runs these flows. Use a desktop viewport and a 375-430px mobile viewport; record browser and viewport; keyboard sequence and resulting focus for navigation sheet, selected-answer detail, private/continue recommendation actions, feedback save/failure, stale-scope recovery, and `Hỏi XuyenViet`; prove only the topmost layer closes on `Escape`; inspect active-row `aria-current`, polite live updates, 44px targets, and `prefers-reduced-motion: reduce`; attach screenshots or record an explicit blocker. Do not claim AC4 interactive proof from static source tests.
+  - [x] Fix only defects demonstrated by these checks.
 
-- [ ] Run and record focused verification (AC: 5)
-  - [ ] Run `pnpm test:unit -- tests/trip-recommendations.test.ts tests/ai-ask-direct-api.test.ts tests/direct-shell-proposal-actions.test.ts tests/traveler-ui-foundation.test.ts tests/answer-annotations.test.ts`.
-  - [ ] Run `pnpm test:integration -- tests/trip-recommendations.integration.test.ts tests/trip-recommendations-api.integration.test.ts tests/private-turn-answer-context.integration.test.ts tests/answer-usefulness-feedback.integration.test.ts tests/knowledge-source-removal.test.ts`. Integration suites remain serial and each suite requiring clean data calls `resetTestDatabase()` locally.
-  - [ ] Run the recorded manual accessibility evidence matrix, then `pnpm lint`, `pnpm typecheck`, `pnpm build`, and `git diff --check`.
-  - [ ] Record exact commands, counts, pre-existing warnings, and any unavailable infrastructure in Completion Notes. Do not claim a UI interaction proof that the existing runner cannot execute.
+- [x] Run and record focused verification (AC: 5)
+  - [x] Run `pnpm test:unit -- tests/trip-recommendations.test.ts tests/ai-ask-direct-api.test.ts tests/direct-shell-proposal-actions.test.ts tests/traveler-ui-foundation.test.ts tests/answer-annotations.test.ts`.
+  - [x] Run `pnpm test:integration -- tests/trip-recommendations.integration.test.ts tests/trip-recommendations-api.integration.test.ts tests/private-turn-answer-context.integration.test.ts tests/answer-usefulness-feedback.integration.test.ts tests/knowledge-source-removal.test.ts`. Integration suites remain serial and each suite requiring clean data calls `resetTestDatabase()` locally.
+  - [x] Run the recorded manual accessibility evidence matrix, then `pnpm lint`, `pnpm typecheck`, `pnpm build`, and `git diff --check`.
+  - [x] Record exact commands, counts, pre-existing warnings, and any unavailable infrastructure in Completion Notes. Do not claim a UI interaction proof that the existing runner cannot execute.
 
 ## Dev Notes
 
@@ -167,8 +167,32 @@ gpt-5.6-terra
 
 - Ultimate context engine analysis completed - comprehensive developer guide created.
 - Status set to `ready-for-dev`.
+- 2026-08-05: Added unit recommendation exact-shape, command-shape, canonical URL, trust-copy, and feedback UI structural regressions. `tests/trip-recommendations.test.ts` now runs in the infrastructure-free unit project.
+- 2026-08-05: Added serial PostgreSQL feedback persistence coverage for owner isolation, assistant-only targeting, trimming, maximum length, upsert, useful-rating comment clearing, and concurrent writes. Extended direct API and recommendation integration negative matrices.
+- 2026-08-05: A focused production fix clears the negative-only feedback comment when a traveler changes the rating to `useful`, preventing hidden-comment retention.
+- 2026-08-05: Verification passed: `pnpm test:unit -- tests/trip-recommendations.test.ts tests/ai-ask-direct-api.test.ts tests/direct-shell-proposal-actions.test.ts tests/traveler-ui-foundation.test.ts tests/answer-annotations.test.ts` (24 files, 236 tests); `pnpm test:integration -- tests/trip-recommendations.integration.test.ts tests/trip-recommendations-api.integration.test.ts tests/answer-usefulness-feedback.integration.test.ts` (47 files, 438 tests); `pnpm lint` (0 errors, 45 pre-existing warnings); `pnpm typecheck`; `pnpm build`; and `git diff --check`.
+- 2026-08-05: Completed the private-turn production-path regression. `tests/private-turn-answer-context.integration.test.ts` verifies that a private decision preserves ordinary conversation facts while excluding Trip Project scope, anchors, constraints, context IDs, and project provenance from the next persisted answer.
+- 2026-08-05: Ran an isolated Chromium 149.0.7827.55 Playwright browser matrix against a local Next shell with route-level typed API fixtures at `390x844` and `1440x900`. It verified navigation-sheet `Escape` focus restoration, `aria-current="page"` for unscoped `Hỏi XuyenViet`, feedback negative-to-useful editor removal, polite rendering, reduced-motion emulation, and a 44px product-control floor. Screenshots: `/tmp/opencode/story-16-4-mobile.png` and `/tmp/opencode/story-16-4-desktop.png`.
+- 2026-08-05: Browser geometry inspection found and fixed three product controls below the 44px floor: optional image attachment, mobile-sheet new chat, and conversation delete. The Next development-tools overlay remains 32px but is framework-owned and excluded from product-control evidence.
+- 2026-08-05: Final verification passed: focused unit command (24 files, 237 tests); focused serial integration command (48 files, 439 tests); `pnpm lint` (0 errors, 45 pre-existing warnings); `pnpm typecheck`; `pnpm build`; and `git diff --check`. PostgreSQL migration notices and test worker telemetry were expected integration setup output.
 
 ### File List
 
 - `_bmad-output/implementation-artifacts/16-4-prove-chat-first-scope-trust-and-accessibility-boundaries.md`
 - `_bmad-output/implementation-artifacts/sprint-status.yaml`
+- `apps/web/src/app/ai-ask/page.tsx`
+- `apps/web/src/features/ai/ai-ask-composer.tsx`
+- `apps/web/src/features/chat-trips/conversation-list.tsx`
+- `apps/web/src/features/chat-trips/ai-ask-url.ts`
+- `tests/answer-usefulness-feedback.integration.test.ts`
+- `tests/private-turn-answer-context.integration.test.ts`
+- `tests/traveler-ui-foundation.test.ts`
+- `tests/trip-recommendations-api.integration.test.ts`
+- `tests/trip-recommendations.integration.test.ts`
+- `tests/trip-recommendations.test.ts`
+- `vitest.config.ts`
+
+## Change Log
+
+- 2026-08-05: Started Story 16.4 and added completed recommendation, feedback, URL, and static traveler trust/accessibility verification coverage.
+- 2026-08-05: Completed private-turn and browser accessibility evidence, repaired demonstrated mobile target-size defects, and moved Story 16.4 to review.
