@@ -2129,6 +2129,40 @@ So that the clean-break migration remains safe as the pipeline evolves.
 **Then** focused tests, `pnpm test:unit`, `pnpm test:integration`, `pnpm lint`, `pnpm typecheck`, `pnpm build`, and `pnpm exec drizzle-kit check` are run
 **And** any environmental blocker is recorded exactly in the implementation artifact.
 
+## Epic 17: Current Operator Runbook
+
+### Story 17.1: Align Admin Guides With the Current Knowledge Flow
+
+As a knowledge operator,
+I want the in-product operating guides to describe the current source-to-retrieval flow and each operational surface,
+So that I can take safe actions without confusing technical processing with knowledge publication.
+
+**Acceptance Criteria:**
+
+**Given** an operator opens the Guide landing page, data-flow guide, data-state guide, or daily routine
+**When** the page describes source intake and processing
+**Then** it identifies Intake as URL registration with source-kind and current-capture visibility
+**And** it explains that Intake's processed indicator means a current capture exists, not that ingestion completed, a card is active, or AI retrieval uses the source.
+
+**Given** a guide describes Facebook or YouTube processing
+**When** it references capture, ingestion, candidates, or a failed job
+**Then** it distinguishes immutable capture/evidence from the canonical ingestion job and its technical `queued`, `running`, `completed`, or `failed` status
+**And** it states that a completed job may contain mixed candidate outcomes and that rerun/recapture is used only when the corresponding UI allows it.
+
+**Given** a guide describes cards, retrieval, coverage, or operational work
+**When** it explains a decision or next step
+**Then** it states that only an `active` card with verification requirement `none` and eligible evidence/source can enter retrieval
+**And** it distinguishes card lifecycle, domain classification, verification requirement, indexing projection, and version-fenced recommendation status without restoring approval-queue semantics.
+
+**Given** an operator cannot find an allowed UI action
+**When** the guide gives recovery advice
+**Then** it directs the operator to record the relevant source/capture/job/card/recommendation and transfer the issue
+**And** it never instructs the operator to edit the database, bypass version fences, re-submit a duplicate URL, expose raw material, or infer publication from a technical status.
+
+**Given** the guide changes are complete
+**When** focused admin typecheck and guide/link boundary verification run
+**Then** they pass without adding a database, domain, worker, BFF, or server-action dependency to `apps/admin`.
+
 ## Epic 16: Chat-First Trip Companion Simplification
 
 Travelers begin with one natural-language question, receive calm practical guidance without technical product language, and explicitly choose when a durable Trip Project should save or supply context. Trust and recovery information remains safe and available, but appears as plain-language, decision-oriented disclosure rather than system/provenance/status UI.

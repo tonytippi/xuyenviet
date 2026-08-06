@@ -1,12 +1,12 @@
 import Link from "next/link";
 
 const steps = [
-  { number: "01", title: "Nạp nguồn", body: "Operator thêm URL. Hệ thống lưu nguồn để đọc, thu thập hoặc trích xuất theo luồng phù hợp; URL trùng hoặc đã gỡ không nên được nhập lại như một nguồn mới.", href: "/knowledge/intake", action: "Mở nạp nguồn" },
-  { number: "02", title: "Thu thập và xử lý nguồn Facebook", body: "Nguồn Facebook được thu thập thành bằng chứng có giới hạn. Pipeline có thể sàng lọc, trích xuất, đánh giá bằng chứng và đối chiếu thẻ liên quan.", href: "/knowledge/facebook-captures", action: "Mở hàng đợi Facebook" },
-  { number: "03", title: "Duyệt bằng chứng YouTube", body: "Video đã thu thập cần được kiểm tra nội dung, mốc thời gian, độ tin cậy và độ mới trước khi tạo bản nháp. Bằng chứng YouTube mặc định không phải thông tin đã xác minh.", href: "/knowledge/youtube-captures", action: "Mở hàng đợi YouTube" },
-  { number: "04", title: "Theo dõi vòng đời thẻ", body: "AI có thể tạo thẻ và quyết định candidate bất biến; vòng đời thẻ, phân loại và yêu cầu xác minh được theo dõi riêng, không phải một hàng đợi phê duyệt chung.", href: "/knowledge/cards", action: "Mở thẻ tri thức" },
-  { number: "05", title: "Giải quyết khuyến nghị", body: "Các tín hiệu như rủi ro, bằng chứng yếu, mâu thuẫn, độ mới, xác minh và lấy mẫu nằm trong hàng đợi riêng. Chỉ xử lý khi khuyến nghị còn hiệu lực với phiên bản thẻ và bằng chứng hiện hành.", href: "/knowledge/recommendations", action: "Mở khuyến nghị" },
-  { number: "06", title: "Thẻ hoạt động, chỉ mục và theo dõi", body: "Thẻ chỉ là tri thức hiện hành khi vòng đời active và bằng chứng còn đủ điều kiện. Chỉ mục AI là trạng thái kỹ thuật riêng; coverage chỉ đếm thẻ hoạt động có bằng chứng truy xuất được.", href: "/knowledge/cards", action: "Mở thẻ tri thức" },
+  { number: "01", title: "Đăng ký URL tại Nạp nguồn", body: "Người vận hành nhập URL sạch và xem loại nguồn cùng việc đã có nội dung thu thập hiện hành hay chưa. “Đã xử lý” ở đây chỉ nghĩa là đã có phiên bản nội dung thu thập, không phải đã được xuất bản hoặc AI đang dùng.", href: "/knowledge/intake", action: "Mở nạp nguồn" },
+  { number: "02", title: "Kiểm tra bằng chứng YouTube", body: "YouTube hiển thị bằng chứng có cấu trúc từ lần thu thập, gồm mốc thời gian, độ tin cậy và điều kiện. Bằng chứng này không tự trở thành tri thức đã xác minh hoặc thẻ đang hoạt động.", href: "/knowledge/youtube-captures", action: "Mở hàng đợi YouTube" },
+  { number: "03", title: "Theo dõi xử lý kỹ thuật", body: "Mỗi lần thu thập có một tác vụ xử lý kỹ thuật: chờ, đang chạy, hoàn thành hoặc lỗi. Số ứng viên đã xử lý cho biết tiến độ; một tác vụ hoàn thành vẫn có thể có các kết quả khác nhau.", href: "/knowledge/facebook-captures", action: "Mở tác vụ Facebook" },
+  { number: "04", title: "Xem ứng viên và thẻ độc lập", body: "Ứng viên giữ trạng thái xử lý và quyết định AI riêng. Thẻ tri thức có vòng đời, phân loại cộng đồng và yêu cầu xác minh riêng; không suy ra trạng thái thẻ chỉ từ trạng thái tác vụ hoặc ứng viên.", href: "/knowledge/cards", action: "Mở thẻ tri thức" },
+  { number: "05", title: "Giải quyết yêu cầu hiện hành", body: "Hàng đợi chỉ chứa công việc rủi ro, xác minh, quan hệ, thiếu ngữ cảnh hoặc lấy mẫu. Chỉ thao tác với yêu cầu đang mở; yêu cầu đã hoàn tất hoặc không còn hiệu lực không được dùng để đổi thẻ hiện tại.", href: "/knowledge/recommendations", action: "Mở yêu cầu" },
+  { number: "06", title: "Truy xuất và mức độ bao phủ", body: "Chỉ thẻ đang hoạt động, không cần xác minh và còn bằng chứng/nguồn hợp lệ mới được dùng để trả lời. Chỉ mục tìm kiếm là phần kỹ thuật; mức độ bao phủ chỉ đếm thẻ đang hoạt động có bằng chứng hợp lệ và đủ thông tin truy xuất.", href: "/knowledge/progress", action: "Mở mức độ bao phủ" },
 ];
 
 export default function DataFlowGuidePage() {
@@ -19,15 +19,15 @@ export default function DataFlowGuidePage() {
       <p className="text-sm font-semibold uppercase tracking-[0.18em] text-[#8c4f13]">Cách Trợ lý AI dùng tri thức</p>
       <h2 className="mt-3 text-3xl font-semibold tracking-[-0.04em] text-[#17342c]">Từ dữ liệu nguồn đến phần ngữ cảnh trong prompt</h2>
       <div className="mt-6 grid gap-3 lg:grid-cols-5">
-        <SystemStep number="01" title="Nguồn" detail="Facebook, YouTube, trang web hoặc URL do operator nhập." />
-        <SystemStep number="02" title="Fact và evidence" detail="Hệ thống trích xuất fact có thể kiểm tra cùng bằng chứng và ngữ cảnh nguồn." />
-        <SystemStep number="03" title="Đánh giá" detail="Pipeline hoặc operator đánh giá độ tin cậy, điều kiện, mâu thuẫn, độ mới và khả năng dùng." />
-        <SystemStep number="04" title="Thẻ tri thức" detail="Fact được lưu thành thẻ với metadata như loại, địa điểm, tuyến đường, tag, trạng thái và evidence." />
-        <SystemStep number="05" title="Truy xuất vào prompt" detail="Khi có câu hỏi, hệ thống chỉ chọn thẻ hiện hành đủ điều kiện, đưa một tập dữ liệu có giới hạn vào prompt rồi mới tạo câu trả lời." />
+        <SystemStep number="01" title="Nguồn và lần thu thập" detail="URL được đăng ký; phiên bản thu thập giữ nội dung chỉ dành cho vận hành hoặc bằng chứng có cấu trúc." />
+        <SystemStep number="02" title="Xử lý và ứng viên" detail="Tiến trình nền phát hiện ứng viên, kiểm tra bằng chứng và ghi kết quả kỹ thuật/AI cho từng ứng viên." />
+        <SystemStep number="03" title="Thẻ và bằng chứng" detail="Một ứng viên hợp lệ tạo hoặc cập nhật thẻ cùng bằng chứng có đoạn trích được kiểm chứng." />
+        <SystemStep number="04" title="Vòng đời và yêu cầu" detail="Vòng đời, phân loại, xác minh và yêu cầu vận hành là các phần độc lập, được kiểm tra trước khi thay đổi." />
+        <SystemStep number="05" title="Dữ liệu dùng để trả lời" detail="Chỉ thẻ đang hoạt động với bằng chứng/nguồn còn hợp lệ được chọn trước khi tạo câu trả lời." />
       </div>
-      <div className="mt-5 rounded-2xl border border-[#e2d3ba] bg-[#fbf7ed] p-4 text-sm leading-6 text-[#4f625a]"><p><strong className="text-[#17342c]">Về chỉ mục và vector:</strong> hiện tại thẻ được lập chỉ mục tìm kiếm cùng metadata và evidence để phục vụ truy xuất có kiểm soát. Hệ thống có cấu hình model cho embeddings, nhưng kho dữ liệu hiện chưa lưu vector embedding như một phần của thẻ; vì vậy operator không nên hiểu “đã index” là đã có vector.</p></div>
+      <div className="mt-5 rounded-2xl border border-[#e2d3ba] bg-[#fbf7ed] p-4 text-sm leading-6 text-[#4f625a]"><p><strong className="text-[#17342c]">Về chỉ mục tìm kiếm:</strong> thẻ được lập chỉ mục cùng thông tin mô tả và bằng chứng để phục vụ việc tìm kiếm có kiểm soát. Vì vậy, “đã lập chỉ mục” chỉ cho biết thẻ đã sẵn sàng cho bước tìm kiếm, không thay thế các điều kiện an toàn khác.</p></div>
     </section>
-    <section className="mt-8 rounded-[1.5rem] border border-[#e5bd82]/60 bg-[#f4ead7] p-5 sm:p-6"><h2 className="text-2xl font-semibold tracking-[-0.03em] text-[#17342c]">Điểm kiểm soát quan trọng</h2><p className="mt-3 leading-7 text-[#4f625a]">Không bỏ qua hàng đợi duyệt hoặc khuyến nghị bằng cách coi dữ liệu nguồn là tri thức đã tin cậy. Nguồn cộng đồng và bằng chứng YouTube/Facebook mặc định cần được xem xét theo ngữ cảnh, không phải sự thật đã xác minh.</p></section>
+    <section className="mt-8 rounded-[1.5rem] border border-[#e5bd82]/60 bg-[#f4ead7] p-5 sm:p-6"><h2 className="text-2xl font-semibold tracking-[-0.03em] text-[#17342c]">Điểm kiểm soát quan trọng</h2><p className="mt-3 leading-7 text-[#4f625a]">Không suy diễn kết quả xuất bản từ trạng thái nguồn, lần thu thập hay tác vụ xử lý. Nguồn cộng đồng và bằng chứng YouTube/Facebook cần được dùng theo vòng đời, bằng chứng và yêu cầu xác minh của thẻ hiện hành.</p></section>
   </div>;
 }
 

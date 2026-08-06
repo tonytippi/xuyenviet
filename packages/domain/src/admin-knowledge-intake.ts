@@ -1,7 +1,7 @@
-import type { AdminKnowledgeIntake, AdminKnowledgeSeedBatchRequest, AdminKnowledgeSeedBatchResponse, AdminKnowledgeSourceRemovalRequest, AdminKnowledgeSourceRemovalResponse, RequestPrincipal } from "@xuyenviet/contracts";
+import type { AdminKnowledgeIntake, AdminKnowledgeIntakeQuery, AdminKnowledgeSeedBatchRequest, AdminKnowledgeSeedBatchResponse, AdminKnowledgeSourceRemovalRequest, AdminKnowledgeSourceRemovalResponse, RequestPrincipal } from "@xuyenviet/contracts";
 
 export type AdminKnowledgeIntakePort = {
-  list(): Promise<AdminKnowledgeIntake>;
+  list(input: AdminKnowledgeIntakeQuery): Promise<AdminKnowledgeIntake>;
   submitBatch(actor: RequestPrincipal, input: AdminKnowledgeSeedBatchRequest): Promise<AdminKnowledgeSeedBatchResponse>;
   removeSource(actor: RequestPrincipal, sourceId: string, input: AdminKnowledgeSourceRemovalRequest): Promise<AdminKnowledgeSourceRemovalResponse>;
 };

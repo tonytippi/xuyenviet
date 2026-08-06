@@ -5,19 +5,19 @@ const guideTopics = [
     href: "/guides/data-flow",
     number: "01",
     title: "Dữ liệu đi qua hệ thống thế nào?",
-    detail: "Từ nguồn, fact và evidence đến thẻ tri thức, truy xuất và phần ngữ cảnh đưa vào prompt.",
+    detail: "Từ URL đã đăng ký, lần thu thập và xử lý nền đến thẻ tri thức có thể truy xuất.",
   },
   {
     href: "/guides/data-states",
     number: "02",
     title: "Tra cứu trạng thái và việc cần làm",
-    detail: "Ý nghĩa của từng trạng thái thường gặp, thao tác an toàn và nơi xử lý.",
+    detail: "Phân biệt trạng thái nguồn, tác vụ kỹ thuật, ứng viên, thẻ và yêu cầu vận hành.",
   },
   {
     href: "/guides/operating-routine",
     number: "03",
     title: "Quy trình vận hành hằng ngày",
-    detail: "Cách ưu tiên hàng đợi, theo dõi coverage và nhận biết việc cần chuyển tuyến.",
+    detail: "Cách ưu tiên mức độ bao phủ, yêu cầu đang mở và các lỗi kỹ thuật cần chuyển tuyến.",
   },
 ];
 
@@ -28,18 +28,18 @@ export default function AdminGuidesPage() {
         <div className="absolute -right-20 -top-24 size-72 rounded-full bg-[#e5bd82]/25 blur-3xl" />
         <div className="absolute -bottom-24 left-10 size-80 rounded-full bg-[#1f5f46]/45 blur-3xl" />
         <div className="relative max-w-3xl">
-          <p className="w-fit rounded-full border border-[#e5bd82]/30 bg-[#e5bd82]/10 px-4 py-2 text-sm font-semibold uppercase tracking-[0.22em] text-[#e5bd82]">Sổ tay operator</p>
+          <p className="w-fit rounded-full border border-[#e5bd82]/30 bg-[#e5bd82]/10 px-4 py-2 text-sm font-semibold uppercase tracking-[0.22em] text-[#e5bd82]">Sổ tay vận hành</p>
           <h1 className="mt-5 text-4xl font-semibold tracking-[-0.05em] sm:text-6xl">Vận hành tri thức đúng trạng thái.</h1>
-          <p className="mt-5 text-lg leading-8 text-[#c9d7d1]">Khu vực này giải thích hệ thống đang làm gì với dữ liệu, khi nào operator cần can thiệp và khi nào nên chờ quy trình nền hoàn tất.</p>
+          <p className="mt-5 text-lg leading-8 text-[#c9d7d1]">Khu vực này giải thích hệ thống đang làm gì với dữ liệu, khi nào người vận hành cần can thiệp và khi nào nên chờ quy trình nền hoàn tất.</p>
         </div>
       </section>
 
       <section className="rounded-[1.75rem] border border-[#d8c9ad] bg-white/75 p-5 sm:p-6">
-        <p className="text-sm font-semibold uppercase tracking-[0.18em] text-[#8c4f13]">Ba nguyên tắc an toàn</p>
+        <p className="text-sm font-semibold uppercase tracking-[0.18em] text-[#8c4f13]">Ba lưu ý khi vận hành</p>
         <div className="mt-5 grid gap-4 lg:grid-cols-3">
-          <Principle title="Phê duyệt không phải xác minh" detail="Bản nháp đã phê duyệt vẫn có thể mang mức độ tin cậy cộng đồng hoặc cần theo dõi độ mới." />
-          <Principle title="Xuất bản không chắc đã được AI dùng" detail="Thẻ cần bằng chứng đủ điều kiện và chỉ mục AI ở trạng thái phù hợp trước khi có thể được truy xuất." />
-          <Principle title="Giữ lại không phải xóa" detail="Nội dung bị giữ lại không được xuất bản cho du khách, nhưng vẫn có thể tồn tại để kiểm tra và đối chiếu." />
+          <Principle title="Nguồn đã xử lý chưa chắc đã dùng được" detail="Trạng thái này chỉ cho biết hệ thống đã đọc được nguồn. Hãy xem thẻ tri thức hoặc yêu cầu vận hành để biết có cần làm gì thêm không." />
+          <Principle title="Chỉ thẻ đang hoạt động mới hỗ trợ câu trả lời" detail="Một thẻ cần đủ điều kiện trước khi Trợ lý AI dùng. Nếu thẻ đang chờ xử lý, hãy làm theo yêu cầu vận hành liên quan." />
+          <Principle title="Chỉ xử lý yêu cầu đang mở" detail="Yêu cầu đã hoàn tất hoặc không còn hiệu lực không cần thao tác thêm. Hãy quay lại danh sách để tìm yêu cầu hiện hành." />
         </div>
       </section>
 

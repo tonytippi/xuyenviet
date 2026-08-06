@@ -1,15 +1,15 @@
-import { desc, eq, inArray, sql } from "drizzle-orm";
-import type { AdminKnowledgeIntake, AdminKnowledgeSeedBatchRequest, AdminKnowledgeSeedBatchResponse, AdminKnowledgeSourceRemovalRequest, AdminKnowledgeSourceRemovalResponse, RequestPrincipal } from "@xuyenviet/contracts";
+import { and, desc, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
+import type { AdminKnowledgeIntake, AdminKnowledgeIntakeQuery, AdminKnowledgeSeedBatchRequest, AdminKnowledgeSeedBatchResponse, AdminKnowledgeSourceRemovalRequest, AdminKnowledgeSourceRemovalResponse, RequestPrincipal } from "@xuyenviet/contracts";
 import type { AdminKnowledgeIntakePort } from "@xuyenviet/domain";
 import { getDb } from "./client";
 import { knowledgeSeedBatchItems, knowledgeSeedBatches, sources } from "./schema";
 import { safeAdminDisplayUrl } from "./admin-youtube-capture";
 
 export function createPostgresAdminKnowledgeIntakePort(): AdminKnowledgeIntakePort { return { list, submitBatch: submit, removeSource }; }
-async function list(): Promise<AdminKnowledgeIntake> {
+async function list(input: AdminKnowledgeIntakeQuery): Promise<AdminKnowledgeIntake> {
   const db = getDb();
-  const sourceRows = await db.select({ id: sources.id, url: sources.url, canonicalUrl: sources.canonicalUrl, label: sources.label, kind: sources.kind, eligibility: sources.eligibility, removalReason: sources.removalReason, createdAt: sources.createdAt }).from(sources).where(inArray(sources.kind, ["url", "facebook", "youtube"])).orderBy(desc(sources.createdAt)).limit(100);
-  return { sources: sourceRows.map((source) => ({ id: source.id, displayUrl: source.eligibility === "eligible" ? safeAdminDisplayUrl(source.canonicalUrl ?? source.url) : null, displayTitle: source.label, kind: source.kind as "url" | "facebook" | "youtube", eligibility: source.eligibility, removalReason: source.removalReason, createdAt: source.createdAt.toISOString() })) };
+  const sourceRows = await db.select({ id: sources.id, url: sources.url, canonicalUrl: sources.canonicalUrl, label: sources.label, kind: sources.kind, currentCaptureVersionId: sources.currentCaptureVersionId, eligibility: sources.eligibility, removalReason: sources.removalReason, createdAt: sources.createdAt }).from(sources).where(and(inArray(sources.kind, ["url", "facebook", "youtube"]), input.kind ? eq(sources.kind, input.kind) : undefined, input.processed === undefined ? undefined : input.processed ? isNotNull(sources.currentCaptureVersionId) : isNull(sources.currentCaptureVersionId))).orderBy(desc(sources.createdAt)).limit(100);
+  return { sources: sourceRows.map((source) => ({ id: source.id, displayUrl: source.eligibility === "eligible" ? safeAdminDisplayUrl(source.canonicalUrl ?? source.url) : null, displayTitle: source.label, kind: source.kind as "url" | "facebook" | "youtube", processed: source.currentCaptureVersionId !== null, eligibility: source.eligibility, removalReason: source.removalReason, createdAt: source.createdAt.toISOString() })) };
 }
 async function submit(actor: RequestPrincipal, input: AdminKnowledgeSeedBatchRequest): Promise<AdminKnowledgeSeedBatchResponse> {
   const db = getDb();

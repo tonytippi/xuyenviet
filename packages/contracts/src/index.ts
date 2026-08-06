@@ -190,8 +190,9 @@ function safeDisplayUrl(value: string) {
   } catch { return false; }
 }
 export const adminKnowledgeSeedBatchUrlLimit = 50;
-export type AdminKnowledgeIntakeSource = { id: string; displayUrl: string | null; displayTitle: string; kind: "url" | "facebook" | "youtube"; eligibility: "eligible" | "withdrawn"; removalReason: "withdrawn" | "inaccessible" | "removed" | null; createdAt: string };
+export type AdminKnowledgeIntakeSource = { id: string; displayUrl: string | null; displayTitle: string; kind: "url" | "facebook" | "youtube"; processed: boolean; eligibility: "eligible" | "withdrawn"; removalReason: "withdrawn" | "inaccessible" | "removed" | null; createdAt: string };
 export type AdminKnowledgeIntake = { sources: AdminKnowledgeIntakeSource[] };
+export type AdminKnowledgeIntakeQuery = { kind?: AdminKnowledgeIntakeSource["kind"]; processed?: boolean };
 export type AdminKnowledgeSeedBatchRequest = { urls: string[]; label?: string | null; publisher?: string | null; collectedDate?: string | null };
 export type AdminKnowledgeSeedBatchResponse = { batchId: string; totalItems: number; submittedCount: number; failedCount: number; duplicateCount: number };
 export type AdminKnowledgeSourceRemovalRequest = { reason: "withdrawn" | "inaccessible" | "removed" };
@@ -206,9 +207,15 @@ export function parseAdminKnowledgeSeedBatchRequest(value: unknown): AdminKnowle
 export function parseAdminKnowledgeSourceRemovalRequest(value: unknown): AdminKnowledgeSourceRemovalRequest | null { return isRecord(value) && hasExactKeys(value, ["reason"]) && ["withdrawn", "inaccessible", "removed"].includes(value.reason as string) ? value as AdminKnowledgeSourceRemovalRequest : null; }
 export function parseAdminKnowledgeSeedBatchResponse(value: unknown): AdminKnowledgeSeedBatchResponse | null { return isRecord(value) && hasExactKeys(value, ["batchId", "totalItems", "submittedCount", "failedCount", "duplicateCount"]) && typeof value.batchId === "string" && value.batchId.length > 0 && [value.totalItems, value.submittedCount, value.failedCount, value.duplicateCount].every((count) => Number.isInteger(count) && (count as number) >= 0) ? value as AdminKnowledgeSeedBatchResponse : null; }
 export function parseAdminKnowledgeSourceRemovalResponse(value: unknown): AdminKnowledgeSourceRemovalResponse | null { return isRecord(value) && hasExactKeys(value, ["status", "sourceId", "changedCardCount"]) && (value.status === "completed" || value.status === "already_completed") && typeof value.sourceId === "string" && value.sourceId.length > 0 && Number.isInteger(value.changedCardCount) && (value.changedCardCount as number) >= 0 ? value as AdminKnowledgeSourceRemovalResponse : null; }
+export function parseAdminKnowledgeIntakeQuery(value: unknown): AdminKnowledgeIntakeQuery | null {
+  if (!isRecord(value) || Object.keys(value).some((key) => key !== "kind" && key !== "processed")) return null;
+  if (value.kind !== undefined && !["url", "facebook", "youtube"].includes(value.kind as string)) return null;
+  if (value.processed !== undefined && value.processed !== "true" && value.processed !== "false") return null;
+  return { ...(value.kind === undefined ? {} : { kind: value.kind as AdminKnowledgeIntakeSource["kind"] }), ...(value.processed === undefined ? {} : { processed: value.processed === "true" }) };
+}
 export function parseAdminKnowledgeIntake(value: unknown): AdminKnowledgeIntake | null {
   if (!isRecord(value) || !hasExactKeys(value, ["sources"]) || !Array.isArray(value.sources) || value.sources.length > adminKnowledgeIntakeSourceLimit) return null;
-  const validSource = (source: unknown) => isRecord(source) && hasExactKeys(source, ["id", "displayUrl", "displayTitle", "kind", "eligibility", "removalReason", "createdAt"]) && typeof source.id === "string" && (source.displayUrl === null || typeof source.displayUrl === "string" && safeDisplayUrl(source.displayUrl)) && typeof source.displayTitle === "string" && ["url", "facebook", "youtube"].includes(source.kind as string) && ["eligible", "withdrawn"].includes(source.eligibility as string) && (source.removalReason === null || ["withdrawn", "inaccessible", "removed"].includes(source.removalReason as string)) && typeof source.createdAt === "string";
+  const validSource = (source: unknown) => isRecord(source) && hasExactKeys(source, ["id", "displayUrl", "displayTitle", "kind", "processed", "eligibility", "removalReason", "createdAt"]) && typeof source.id === "string" && (source.displayUrl === null || typeof source.displayUrl === "string" && safeDisplayUrl(source.displayUrl)) && typeof source.displayTitle === "string" && ["url", "facebook", "youtube"].includes(source.kind as string) && typeof source.processed === "boolean" && ["eligible", "withdrawn"].includes(source.eligibility as string) && (source.removalReason === null || ["withdrawn", "inaccessible", "removed"].includes(source.removalReason as string)) && typeof source.createdAt === "string";
   return value.sources.every(validSource) ? value as AdminKnowledgeIntake : null;
 }
 

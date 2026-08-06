@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { glob } from "node:fs/promises";
 import { describe, expect, test } from "vitest";
-import { parseAdminKnowledgeIntake } from "@xuyenviet/contracts";
+import { parseAdminKnowledgeIntake, parseAdminKnowledgeIntakeQuery } from "@xuyenviet/contracts";
 
 describe("admin knowledge view boundary", () => {
   test("uses direct API and contracts without data or worker ownership", async () => {
@@ -19,10 +19,18 @@ describe("admin knowledge view boundary", () => {
   });
 
   test("rejects legacy batch state disclosure from the intake response", () => {
-    const source = { id: "source-1", displayUrl: "https://example.com", displayTitle: "Nguồn", kind: "url", eligibility: "eligible", removalReason: null, createdAt: "2026-08-04T00:00:00.000Z" };
+    const source = { id: "source-1", displayUrl: "https://example.com", displayTitle: "Nguồn", kind: "url", processed: false, eligibility: "eligible", removalReason: null, createdAt: "2026-08-04T00:00:00.000Z" };
     expect(parseAdminKnowledgeIntake({ sources: [source] })).toEqual({ sources: [source] });
     expect(parseAdminKnowledgeIntake({ sources: [source], recentBatches: [] })).toBeNull();
     expect(parseAdminKnowledgeIntake({ sources: [{ ...source, rawText: "secret" }] })).toBeNull();
     expect(parseAdminKnowledgeIntake({ sources: [{ ...source, displayUrl: "https://user:password@example.com" }] })).toBeNull();
+    expect(parseAdminKnowledgeIntake({ sources: [{ ...source, processed: "false" }] })).toBeNull();
+  });
+
+  test("accepts only supported intake filters", () => {
+    expect(parseAdminKnowledgeIntakeQuery({ kind: "youtube", processed: "true" })).toEqual({ kind: "youtube", processed: true });
+    expect(parseAdminKnowledgeIntakeQuery({ processed: "false" })).toEqual({ processed: false });
+    expect(parseAdminKnowledgeIntakeQuery({ kind: "copied_post" })).toBeNull();
+    expect(parseAdminKnowledgeIntakeQuery({ processed: "pending" })).toBeNull();
   });
 });

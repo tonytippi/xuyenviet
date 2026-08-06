@@ -10,7 +10,7 @@ describe("admin operator guide", () => {
 
     expect(existsSync("src/app/admin/layout.tsx")).toBe(false);
     expect(guide).toContain('href: "/guides/data-flow"');
-    expect(guide).toContain("truy xuất và phần ngữ cảnh đưa vào prompt");
+    expect(guide).toContain("lần thu thập và xử lý nền đến thẻ tri thức có thể truy xuất");
     expect(guide).toContain('href: "/guides/data-states"');
     expect(guide).toContain('href: "/guides/operating-routine"');
   });
@@ -19,10 +19,10 @@ describe("admin operator guide", () => {
     const guide = readSource("apps/admin/app/guides/page.tsx");
     const states = readSource("apps/admin/app/guides/data-states/page.tsx");
 
-    expect(guide).toContain("Phê duyệt không phải xác minh");
-    expect(guide).toContain("Xuất bản không chắc đã được AI dùng");
-    expect(states).toContain("Vòng đời thẻ và chỉ mục AI");
-    expect(states).toContain("Chưa index / Index cần refresh");
+    expect(guide).toContain("Nguồn đã xử lý chưa chắc đã dùng được");
+    expect(guide).toContain("Chỉ thẻ đang hoạt động mới hỗ trợ câu trả lời");
+    expect(states).toContain("Vòng đời thẻ và chỉ mục");
+    expect(states).toContain("Chỉ mục cũ hoặc chưa có");
   });
 
   test("points operators to existing queues without promising unsupported manual actions", () => {
@@ -33,9 +33,9 @@ describe("admin operator guide", () => {
     expect(states).toContain('href: "/knowledge/cards"');
     expect(states).toContain('href: "/knowledge/youtube-captures"');
     expect(states).toContain('href: "/knowledge/recommendations"');
-    expect(routine).toContain('href: "/knowledge/facebook-captures?status=failed"');
+    expect(routine).toContain('href: "/knowledge/facebook-captures"');
     expect(routine).toContain('href: "/"');
-    expect(routine).toContain("Không tự sửa dữ liệu, bỏ qua xác minh");
+    expect(routine).toContain("Không tự sửa dữ liệu, bỏ qua quy trình an toàn");
   });
 
   test("keeps lifecycle separate from active retrieval and links the distinct YouTube workflow", () => {
@@ -43,17 +43,17 @@ describe("admin operator guide", () => {
     const states = readSource("apps/admin/app/guides/data-states/page.tsx");
 
     expect(flow).toContain('href: "/knowledge/youtube-captures"');
-    expect(states).toContain("Thẻ có thể được dùng khi bằng chứng còn đủ điều kiện");
-    expect(states).toContain("Có thể được Trợ lý AI truy xuất");
+    expect(states).toContain("Thẻ chỉ được AI truy xuất khi bằng chứng/nguồn còn hợp lệ");
+    expect(states).toContain("không cần xác minh thêm");
   });
 
   test("explains fact extraction, metadata, and the current bounded prompt retrieval behavior accurately", () => {
     const flow = readSource("apps/admin/app/guides/data-flow/page.tsx");
 
-    expect(flow).toContain("Fact và evidence");
-    expect(flow).toContain("Thẻ tri thức");
-    expect(flow).toContain("Truy xuất vào prompt");
-    expect(flow).toContain("kho dữ liệu hiện chưa lưu vector embedding như một phần của thẻ");
+    expect(flow).toContain("Xử lý và ứng viên");
+    expect(flow).toContain("Thẻ và bằng chứng");
+    expect(flow).toContain("Dữ liệu dùng để trả lời");
+    expect(flow).toContain("đã lập chỉ mục");
   });
 
   test("keeps the guide route inventory in apps/admin without root guide presentation routes", () => {

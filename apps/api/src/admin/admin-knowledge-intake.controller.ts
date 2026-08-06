@@ -1,5 +1,5 @@
-import { BadRequestException, Body, Controller, Get, HttpCode, HttpStatus, Inject, Param, Post, Req, ServiceUnavailableException } from "@nestjs/common";
-import { parseAdminKnowledgeIntake, parseAdminKnowledgeSeedBatchRequest, parseAdminKnowledgeSeedBatchResponse, parseAdminKnowledgeSourceRemovalRequest, parseAdminKnowledgeSourceRemovalResponse, type RequestPrincipal } from "@xuyenviet/contracts";
+import { BadRequestException, Body, Controller, Get, HttpCode, HttpStatus, Inject, Param, Post, Query, Req, ServiceUnavailableException } from "@nestjs/common";
+import { parseAdminKnowledgeIntake, parseAdminKnowledgeIntakeQuery, parseAdminKnowledgeSeedBatchRequest, parseAdminKnowledgeSeedBatchResponse, parseAdminKnowledgeSourceRemovalRequest, parseAdminKnowledgeSourceRemovalResponse, type RequestPrincipal } from "@xuyenviet/contracts";
 import { AdminKnowledgeIntakePolicyError, removeAdminKnowledgeSource, submitAdminKnowledgeSeedBatch, type AdminKnowledgeIntakePort } from "@xuyenviet/domain";
 import { AllowsAdminBrowserSession, RequiresAdminCapability } from "../auth/admin-capability.decorator";
 
@@ -12,7 +12,7 @@ export class AdminKnowledgeIntakeController {
   constructor(@Inject(ADMIN_KNOWLEDGE_INTAKE_PORT) private readonly intake: AdminKnowledgeIntakePort) {}
 
   @Get("intake")
-  async list() { try { const result = parseAdminKnowledgeIntake(await this.intake.list()); if (!result) throw new Error("unsafe projection"); return result; } catch { throw unavailable(); } }
+  async list(@Query() query: Record<string, unknown>) { const input = parseAdminKnowledgeIntakeQuery(query); if (!input) throw invalid(); try { const result = parseAdminKnowledgeIntake(await this.intake.list(input)); if (!result) throw new Error("unsafe projection"); return result; } catch { throw unavailable(); } }
 
   @Post("seed-batches")
   @HttpCode(HttpStatus.CREATED)

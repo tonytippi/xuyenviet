@@ -393,6 +393,14 @@ development_status:
   16-4-prove-chat-first-scope-trust-and-accessibility-boundaries: in-progress
   epic-16-retrospective: optional
 
+  # 2026-08-06: Documentation-only follow-up after the Intake filter/status and
+  # target lifecycle guide audit. The direct-admin Knowledge flow is documented
+  # without reopening Epic 15 lifecycle implementation. Focused guide boundary
+  # tests, admin typecheck, and diff validation passed.
+  epic-17: done
+  17-1-align-admin-guides-with-the-current-knowledge-flow: done
+  epic-17-retrospective: optional
+
 action_items:
   - epic: 5
     action: Replace zero placeholder AI Gateway pricing with verified provider pricing before cost reporting is trusted.
