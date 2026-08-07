@@ -33,6 +33,7 @@ const unitTests = [
     "tests/youtube-seed-urls.test.ts",
     "tests/youtube-discovery-policy.test.ts",
     "tests/youtube-discovery-ownership.test.ts",
+    "tests/youtube-discovery-worker.test.ts",
 ];
 
 export default defineConfig({

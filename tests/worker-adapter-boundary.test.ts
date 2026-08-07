@@ -17,7 +17,7 @@ import { resetTestDatabase, seedTestOperator, testDb } from "./helpers/db";
 import { getTestDatabaseUrl } from "./helpers/env-file";
 
 const root = resolve(import.meta.dirname, "..");
-const adapters = ["extraction", "ingestion", "indexing", "outbox"];
+const adapters = ["extraction", "ingestion", "indexing", "outbox", "discovery"] as const;
 const forbiddenWorkerBoundaryReferences = /@\/|@worker\/|(?:from\s+["']|import\s*\()["'](?:next(?:\/|["'])|next-auth(?:\/|["'])|server-only["'])|\bAuth\b|src\/app\/|["']use server["']|unavailableWebEntrypoint|Web-only trip/;
 let workerBuilt = false;
 
@@ -36,7 +36,7 @@ function buildWorker() {
   workerBuilt = true;
 }
 
-async function runCompiledAdapter(adapter: "extraction" | "ingestion" | "indexing" | "outbox", workerId: string, environment: Record<string, string | undefined> = {}): Promise<OperationalTelemetryEvent[]> {
+async function runCompiledAdapter(adapter: (typeof adapters)[number], workerId: string, environment: Record<string, string | undefined> = {}): Promise<OperationalTelemetryEvent[]> {
   const directory = mkdtempSync(join(root, ".worker-telemetry-"));
   const outputPath = join(directory, "events.jsonl");
   try {
@@ -154,19 +154,12 @@ describe("compiled worker adapters", () => {
     }
   });
 
-  test.runIf(Boolean(process.env.DATABASE_URL_TEST))("runs every compiled --once adapter against an empty test database", () => {
+  test.runIf(Boolean(process.env.DATABASE_URL_TEST))("runs every compiled --once adapter against an empty test database", async () => {
+    await resetTestDatabase();
+    buildWorker();
     for (const adapter of adapters) {
-      execFileSync("node", [
-        `apps/worker/dist/adapters/${adapter}.mjs`,
-        adapter,
-        "--once",
-        `--worker-id=boundary-${adapter}`,
-      ], {
-        cwd: root,
-        env: { ...process.env, DATABASE_URL: getTestDatabaseUrl() },
-        stdio: "inherit",
-        timeout: 30_000,
-      });
+      const events = await runCompiledAdapter(adapter, `boundary-${adapter}`);
+      expectCompiledWorkerEvent(events, { capability: adapter === "discovery" ? "youtube.discovery" : expect.any(String), resultCode: "no_work" });
     }
   });
 

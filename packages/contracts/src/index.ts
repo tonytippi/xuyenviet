@@ -449,7 +449,7 @@ export type OperationalTelemetryEvent = {
 export type OperationalTelemetrySink = { emit(event: OperationalTelemetryEvent): void | Promise<void> };
 
 export type WorkerPollObservation = {
-  capability: "knowledge.extraction" | "knowledge.ingestion" | "knowledge.indexing" | "knowledge.sampling" | "ai_ask.outbox";
+  capability: "knowledge.extraction" | "knowledge.ingestion" | "knowledge.indexing" | "knowledge.sampling" | "ai_ask.outbox" | "youtube.discovery";
   resultCode: "success" | "no_work" | "retry" | "failure" | "contended";
   durableId?: string;
   jobLagMs?: number;
@@ -458,7 +458,7 @@ export type WorkerPollObservation = {
   leaseRecoveryCount?: number;
 };
 
-const telemetryCapabilities = new Set(["ai_ask.stream", "ai_ask.provider", "knowledge.extraction", "knowledge.ingestion", "knowledge.indexing", "knowledge.sampling", "ai_ask.outbox", "worker.startup", "worker.schema", "worker.drain", "worker.restart"]);
+const telemetryCapabilities = new Set(["ai_ask.stream", "ai_ask.provider", "knowledge.extraction", "knowledge.ingestion", "knowledge.indexing", "knowledge.sampling", "ai_ask.outbox", "youtube.discovery", "worker.startup", "worker.schema", "worker.drain", "worker.restart"]);
 const telemetryResultCodes = new Set(["success", "failure", "no_work", "retry", "draining", "restarted", "recovered", "contended"]);
 
 export function emitOperationalTelemetry(sink: OperationalTelemetrySink | undefined, event: OperationalTelemetryEvent): void {

@@ -37,6 +37,12 @@ export type YoutubeDiscoveryQueryProposalReason = (typeof youtubeDiscoveryQueryP
 export const youtubeDiscoveryRunStateValues = ["queued", "running", "retrying", "completed", "failed", "cancelled"] as const;
 export type YoutubeDiscoveryRunState = (typeof youtubeDiscoveryRunStateValues)[number];
 
+export const youtubeDiscoveryRunSafeErrorCodeValues = ["stage_transient", "retry_exhausted", "lease_retry_exhausted", "policy_revoked"] as const;
+export type YoutubeDiscoveryRunSafeErrorCode = (typeof youtubeDiscoveryRunSafeErrorCodeValues)[number];
+
+export const youtubeDiscoveryRunTerminalOutcomeValues = ["completed", "failed", "cancelled"] as const;
+export type YoutubeDiscoveryRunTerminalOutcome = (typeof youtubeDiscoveryRunTerminalOutcomeValues)[number];
+
 export const aiAskCommandStatusValues = ["pending", "completed", "failed", "aborted", "discarded"] as const;
 export type AiAskCommandStatus = (typeof aiAskCommandStatusValues)[number];
 
@@ -413,12 +419,30 @@ export const youtubeDiscoveryRuns = pgTable(
     policyVersionId: text("policy_version_id").notNull().references(() => youtubeDiscoveryPolicyVersions.id, { onDelete: "restrict" }),
     queryProposalId: text("query_proposal_id").references(() => youtubeDiscoveryQueryProposals.id, { onDelete: "restrict" }),
     state: text("state").$type<YoutubeDiscoveryRunState>().default("queued").notNull(),
+    nextRunAt: timestamp("next_run_at", { mode: "date" }).defaultNow().notNull(),
+    claimedBy: text("claimed_by"),
+    claimedAt: timestamp("claimed_at", { mode: "date" }),
+    leaseExpiresAt: timestamp("lease_expires_at", { mode: "date" }),
+    fencingToken: text("fencing_token"),
+    attemptCount: integer("attempt_count").default(0).notNull(),
+    maxRetryAttempts: integer("max_retry_attempts").notNull(),
+    retryDelayMinutes: integer("retry_delay_minutes").notNull(),
+    maxConcurrentRuns: integer("max_concurrent_runs").notNull(),
+    terminalAt: timestamp("terminal_at", { mode: "date" }),
+    terminalOutcome: text("terminal_outcome").$type<YoutubeDiscoveryRunTerminalOutcome>(),
+    safeErrorCode: text("safe_error_code").$type<YoutubeDiscoveryRunSafeErrorCode>(),
     createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
   },
   (run) => [
     index("youtube_discovery_runs_state_created_at_idx").on(run.state, run.createdAt),
+    index("youtube_discovery_runs_claim_queue_idx").on(run.state, run.nextRunAt, run.createdAt),
+    index("youtube_discovery_runs_lease_expiry_idx").on(run.leaseExpiresAt).where(sql`${run.leaseExpiresAt} is not null`),
     index("youtube_discovery_runs_policy_version_idx").on(run.policyVersionId),
     check("youtube_discovery_runs_state_check", sql`${run.state} in ('queued', 'running', 'retrying', 'completed', 'failed', 'cancelled')`),
+    check("youtube_discovery_runs_snapshots_check", sql`${run.maxRetryAttempts} between 0 and 10 and ${run.retryDelayMinutes} between 1 and 1440 and ${run.maxConcurrentRuns} between 1 and 20 and ${run.attemptCount} between 0 and ${run.maxRetryAttempts} + 1`),
+    check("youtube_discovery_runs_error_code_check", sql`${run.safeErrorCode} is null or ${run.safeErrorCode} in ('stage_transient', 'retry_exhausted', 'lease_retry_exhausted', 'policy_revoked')`),
+    check("youtube_discovery_runs_claim_shape_check", sql`(${run.claimedBy} is null and ${run.claimedAt} is null and ${run.leaseExpiresAt} is null and ${run.fencingToken} is null) or (${run.claimedBy} is not null and length(btrim(${run.claimedBy})) between 1 and 160 and ${run.claimedAt} is not null and ${run.leaseExpiresAt} > ${run.claimedAt} and ${run.fencingToken} ~ '^[a-f0-9]{64}$')`),
+    check("youtube_discovery_runs_state_shape_check", sql`(${run.state} = 'queued' and ${run.claimedBy} is null and ${run.terminalAt} is null and ${run.terminalOutcome} is null and ${run.safeErrorCode} is null) or (${run.state} = 'running' and ${run.claimedBy} is not null and ${run.terminalAt} is null and ${run.terminalOutcome} is null and ${run.safeErrorCode} is null) or (${run.state} = 'retrying' and ${run.claimedBy} is null and ${run.nextRunAt} > ${run.createdAt} and ${run.terminalAt} is null and ${run.terminalOutcome} is null and ${run.safeErrorCode} = 'stage_transient') or (${run.state} in ('completed', 'failed', 'cancelled') and ${run.claimedBy} is null and ${run.terminalAt} is not null and ${run.terminalOutcome} = ${run.state} and (${run.state} <> 'failed' or ${run.safeErrorCode} in ('retry_exhausted', 'lease_retry_exhausted')) and (${run.state} <> 'cancelled' or ${run.safeErrorCode} = 'policy_revoked') and (${run.state} <> 'completed' or ${run.safeErrorCode} is null))`),
   ],
 );
 

@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "esbuild src/main.ts --bundle --platform=node --format=esm --target=node20 --external:postgres --outfile=dist/main.mjs && esbuild src/adapters.ts --bundle --platform=node --format=esm --target=node20 --external:postgres --outfile=dist/adapters/adapter.mjs && cp dist/adapters/adapter.mjs dist/adapters/extraction.mjs && cp dist/adapters/adapter.mjs dist/adapters/ingestion.mjs && cp dist/adapters/adapter.mjs dist/adapters/indexing.mjs && cp dist/adapters/adapter.mjs dist/adapters/sampling.mjs && cp dist/adapters/adapter.mjs dist/adapters/outbox.mjs",
+    "build": "esbuild src/main.ts --bundle --platform=node --format=esm --target=node20 --external:postgres --outfile=dist/main.mjs && esbuild src/adapters.ts --bundle --platform=node --format=esm --target=node20 --external:postgres --outfile=dist/adapters/adapter.mjs && cp dist/adapters/adapter.mjs dist/adapters/extraction.mjs && cp dist/adapters/adapter.mjs dist/adapters/ingestion.mjs && cp dist/adapters/adapter.mjs dist/adapters/indexing.mjs && cp dist/adapters/adapter.mjs dist/adapters/sampling.mjs && cp dist/adapters/adapter.mjs dist/adapters/outbox.mjs && cp dist/adapters/adapter.mjs dist/adapters/discovery.mjs",
     "start": "node dist/main.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },

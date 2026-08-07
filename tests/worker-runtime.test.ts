@@ -31,6 +31,7 @@ describe("WorkerRuntime", () => {
       adapter("knowledge-ingestion", async () => undefined),
       adapter("knowledge-indexing", async () => undefined),
       adapter("ai-ask-outbox", async () => undefined),
+      adapter("youtube-discovery", async () => undefined),
     ], async () => undefined, 3002);
     await runtime.start();
     await new Promise((resolve) => setTimeout(resolve, 0));
