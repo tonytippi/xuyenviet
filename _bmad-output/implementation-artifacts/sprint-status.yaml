@@ -1,5 +1,5 @@
 # generated: 2026-07-25
-# last_updated: 2026-08-07 (YouTube Discovery Epics 18-20 added from final readiness-approved plan.)
+# last_updated: 2026-08-07 (Story 18.1 created and Epic 18 started.)
 # project: xuyenviet
 # project_key: NOKEY
 # tracking_system: file-system
@@ -33,7 +33,7 @@
 #   - done: Completed
 
 generated: 2026-07-25
-last_updated: 2026-08-07 (YouTube Discovery Epics 18-20 added from final readiness-approved plan.)
+last_updated: 2026-08-07 (Story 18.1 created and Epic 18 started.)
 project: xuyenviet
 project_key: NOKEY
 tracking_system: file-system
@@ -404,8 +404,8 @@ development_status:
   # 2026-08-07: YouTube Discovery implementation plan passed final readiness.
   # Discovery remains URL-only: it delegates accepted URLs to Knowledge intake
   # and never schedules, invokes, or retries manual youtube:capture.
-  epic-18: backlog
-  18-1-establish-discovery-ownership-policy-and-audit-foundation: backlog
+  epic-18: in-progress
+  18-1-establish-discovery-ownership-policy-and-audit-foundation: ready-for-dev
   18-2-execute-fenced-scheduled-discovery-runs: backlog
   18-3-manage-system-and-operator-query-proposals: backlog
   18-4-discover-canonical-youtube-candidates-safely: backlog
