@@ -45,7 +45,7 @@ describe.sequential("YouTube Discovery run execution", () => {
     expect(terminalAudits).toHaveLength(1);
   });
 
-  test("uses a fenced capped exponential retry and does not reopen exhausted work", async () => {
+  test("exhausts one run without affecting a later eligible run under the same policy", async () => {
     const policy = await createYoutubeDiscoveryPolicyVersion({ version: 1, isCurrent: true, policy: { maxRetryAttempts: 1, retryDelayMinutes: 15 }, actor: createSystemAuditActor("system-youtube-discovery") }, testDb);
     const run = await createYoutubeDiscoveryRun({ policyVersionId: policy.id }, testDb);
     const claim = (await claimNextYoutubeDiscoveryRun({ workerId: "discovery-a" }, testDb)).claim;
@@ -56,6 +56,14 @@ describe.sequential("YouTube Discovery run execution", () => {
     await expect(testDb.select().from(youtubeDiscoveryRuns).where(eq(youtubeDiscoveryRuns.id, run.id))).resolves.toMatchObject([{ state: "failed", terminalOutcome: "failed", safeErrorCode: "retry_exhausted" }]);
     await expect(testDb.update(youtubeDiscoveryRuns).set({ nextRunAt: new Date(0) }).where(eq(youtubeDiscoveryRuns.id, run.id))).rejects.toThrow();
     expect((await claimNextYoutubeDiscoveryRun({ workerId: "discovery-c" }, testDb)).claim).toBeNull();
+
+    const laterRun = await createYoutubeDiscoveryRun({ policyVersionId: policy.id }, testDb);
+    const laterClaim = (await claimNextYoutubeDiscoveryRun({ workerId: "discovery-d" }, testDb)).claim;
+    expect(laterClaim).toMatchObject({ id: laterRun.id, attemptCount: 1 });
+    expect(await finishYoutubeDiscoveryRun(laterClaim!, testDb)).toBe("completed");
+
+    await expect(testDb.select().from(youtubeDiscoveryRuns).where(eq(youtubeDiscoveryRuns.id, run.id))).resolves.toMatchObject([{ state: "failed", terminalOutcome: "failed", safeErrorCode: "retry_exhausted" }]);
+    await expect(testDb.select().from(auditEvents).where(and(eq(auditEvents.targetType, "youtube_discovery_run_terminal"), eq(auditEvents.targetId, run.id)))).resolves.toHaveLength(1);
   });
 
   test("allows a zero retry limit one attempt before terminal exhaustion", async () => {

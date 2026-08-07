@@ -1,6 +1,6 @@
 ---
 story_id: 18-2
-status: ready-for-dev
+status: done
 created: 2026-08-07
 epic: 18
 ---
@@ -150,6 +150,8 @@ gpu4ai/gpt-5.6-terra
 - Dismissed [Edge Case Hunter]: migration handling for pre-existing running/terminal Discovery runs is unreachable in the supported predecessor state. Before this range, `createYoutubeDiscoveryRun()` is the only constructor and always persists `queued`; no earlier lifecycle operation can create a running or terminal row.
 - Blind Hunter: clean. Acceptance Auditor: blocked only by the required test-coverage patch above. No code changed during review.
 - 2026-08-07 review repair completed: added stale-claim completion/cancel/retry fencing with terminal-audit cardinality, disable-before-stage/final-write/requeue cancellation with no continuation and one terminal audit, and DB-free capped exponential backoff/exhaustion coverage. Focused unit (2 tests) and serial integration (12 tests) verification plus `pnpm typecheck` passed. Story remains ready-for-dev pending follow-up review; it is not done.
+- 2026-08-07 second and final unattended independent review of `b45101d89e0f8a1b9ba6ed9c36e284f58a7b79ba..a7a31f6758c2e5a9f3c22107dffba7517d532e30` completed synchronously with Blind Hunter, Edge Case Hunter, and Acceptance Auditor. Blind Hunter and Edge Case Hunter were clean. Actionable [patch]: `tests/youtube-discovery-execution.integration.test.ts:48` exhausts only one run and does not prove AC 4's required later-run independence. Add serial PostgreSQL coverage that exhausts one run, then claims and completes a second eligible run under the same policy while asserting the first remains terminal with one terminal audit. No code changed during review; story remains in-progress.
+- 2026-08-07 final bounded repair completed: serial PostgreSQL coverage now exhausts one run, then claims and completes a later due run under the same policy while proving the exhausted run remains failed with exactly one terminal audit. Focused integration verification passed. Story status synchronized to done.
 
 ### File List
 
