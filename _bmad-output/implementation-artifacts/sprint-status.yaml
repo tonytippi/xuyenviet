@@ -1,5 +1,5 @@
 # generated: 2026-07-25
-# last_updated: 2026-08-07 (Story 18.2 created and validated; ready for development.)
+# last_updated: 2026-08-07 (Story 18.2 independent-review test-coverage repair complete; ready for development.)
 # project: xuyenviet
 # project_key: NOKEY
 # tracking_system: file-system
@@ -33,7 +33,7 @@
 #   - done: Completed
 
 generated: 2026-07-25
-last_updated: 2026-08-07 (Story 18.2 created and validated; ready for development.)
+last_updated: 2026-08-07 (Story 18.2 independent-review test-coverage repair complete; ready for development.)
 project: xuyenviet
 project_key: NOKEY
 tracking_system: file-system
@@ -406,6 +406,7 @@ development_status:
   # and never schedules, invokes, or retries manual youtube:capture.
   epic-18: in-progress
   18-1-establish-discovery-ownership-policy-and-audit-foundation: done
+  # 2026-08-07: Independent review of b45101d89e0f8a1b9ba6ed9c36e284f58a7b79ba..5e6d83bca956bddbd3e230bfeb069231db5b5652 ran Blind Hunter, Edge Case Hunter, and Acceptance Auditor synchronously. Required coverage repair adds stale cancel/retry fencing, disable-at-stage/write/requeue cancellation with one terminal audit and no continuation, and DB-free bounded backoff/cap/exhaustion verification. Focused unit (2 tests), serial integration (12 tests), and typecheck passed. Blind Hunter clean; Edge migration concern dismissed because Story 18.1 can create only queued runs. Status is ready-for-dev pending follow-up review; not done.
   18-2-execute-fenced-scheduled-discovery-runs: ready-for-dev
   18-3-manage-system-and-operator-query-proposals: backlog
   18-4-discover-canonical-youtube-candidates-safely: backlog

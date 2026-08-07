@@ -1,9 +1,9 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, test } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "vitest";
 import { and, eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 
-import { auditEvents, claimNextYoutubeDiscoveryRun, createSystemAuditActor, createYoutubeDiscoveryPolicyVersion, createYoutubeDiscoveryRun, finishYoutubeDiscoveryRun, retryYoutubeDiscoveryRun, schema, youtubeDiscoveryRuns } from "@xuyenviet/database";
+import { auditEvents, cancelYoutubeDiscoveryRunIfDisabled, claimNextYoutubeDiscoveryRun, createSystemAuditActor, createYoutubeDiscoveryPolicyVersion, createYoutubeDiscoveryRun, finishYoutubeDiscoveryRun, retryYoutubeDiscoveryRun, schema, youtubeDiscoveryRuns } from "@xuyenviet/database";
 import { resetTestDatabase, testDb } from "./helpers/db";
 import { runYoutubeDiscoveryPoll, setYoutubeDiscoveryExecutionStageForTest } from "../packages/worker-domain/src/features/youtube-discovery/execution";
 
@@ -29,7 +29,7 @@ describe.sequential("YouTube Discovery run execution", () => {
 
   beforeEach(async () => { await resetTestDatabase(); });
 
-  afterAll(() => { setYoutubeDiscoveryExecutionStageForTest(undefined); });
+  afterEach(() => { setYoutubeDiscoveryExecutionStageForTest(undefined); });
 
   test("claims one due run and persists an atomic fenced terminal audit", async () => {
     const policy = await createYoutubeDiscoveryPolicyVersion({ version: 1, isCurrent: true, actor: createSystemAuditActor("system-youtube-discovery") }, testDb);
@@ -89,6 +89,21 @@ describe.sequential("YouTube Discovery run execution", () => {
     expect(await finishYoutubeDiscoveryRun(fresh!, testDb)).toBe("completed");
   });
 
+  test("fences stale completion, cancellation, and retry after lease reclaim", async () => {
+    const policy = await createYoutubeDiscoveryPolicyVersion({ version: 1, isCurrent: true, actor: createSystemAuditActor("system-youtube-discovery") }, testDb);
+    const run = await createYoutubeDiscoveryRun({ policyVersionId: policy.id }, testDb);
+    const stale = (await claimNextYoutubeDiscoveryRun({ workerId: "discovery-a" }, testDb)).claim;
+    await testDb.update(youtubeDiscoveryRuns).set({ claimedAt: new Date(0), leaseExpiresAt: new Date(1) }).where(eq(youtubeDiscoveryRuns.id, run.id));
+    const fresh = (await claimNextYoutubeDiscoveryRun({ workerId: "discovery-b" }, testDb)).claim;
+    expect(await finishYoutubeDiscoveryRun(stale!, testDb)).toBe("contended");
+    expect(await cancelYoutubeDiscoveryRunIfDisabled(stale!, testDb)).toBe("contended");
+    expect(await retryYoutubeDiscoveryRun(stale!, testDb)).toBe("contended");
+    await expect(testDb.select().from(youtubeDiscoveryRuns).where(eq(youtubeDiscoveryRuns.id, run.id))).resolves.toMatchObject([{ state: "running", claimedBy: "discovery-b", fencingToken: fresh!.fencingToken }]);
+    await expect(testDb.select().from(auditEvents).where(and(eq(auditEvents.targetType, "youtube_discovery_run_terminal"), eq(auditEvents.targetId, run.id)))).resolves.toHaveLength(0);
+    expect(await finishYoutubeDiscoveryRun(fresh!, testDb)).toBe("completed");
+    await expect(testDb.select().from(auditEvents).where(and(eq(auditEvents.targetType, "youtube_discovery_run_terminal"), eq(auditEvents.targetId, run.id)))).resolves.toHaveLength(1);
+  });
+
   test("cancels a pinned run when current global enablement is revoked", async () => {
     const policy = await createYoutubeDiscoveryPolicyVersion({ version: 1, isCurrent: true, actor: createSystemAuditActor("system-youtube-discovery") }, testDb);
     const run = await createYoutubeDiscoveryRun({ policyVersionId: policy.id }, testDb);
@@ -96,6 +111,45 @@ describe.sequential("YouTube Discovery run execution", () => {
     await createYoutubeDiscoveryPolicyVersion({ version: 2, isCurrent: true, policy: { enabled: false }, actor: createSystemAuditActor("system-youtube-discovery") }, testDb);
     expect(await finishYoutubeDiscoveryRun(claim!, testDb)).toBe("cancelled");
     await expect(testDb.execute(sql`select state, safe_error_code from youtube_discovery_runs where id = ${run.id}`)).resolves.toMatchObject([{ state: "cancelled", safe_error_code: "policy_revoked" }]);
+  });
+
+  test("cancels before an injected stage without continuation", async () => {
+    const policy = await createYoutubeDiscoveryPolicyVersion({ version: 1, isCurrent: true, actor: createSystemAuditActor("system-youtube-discovery") }, testDb);
+    const run = await createYoutubeDiscoveryRun({ policyVersionId: policy.id }, testDb);
+    let stageCalls = 0;
+    setYoutubeDiscoveryExecutionStageForTest(async () => { stageCalls += 1; return "complete"; });
+    await createYoutubeDiscoveryPolicyVersion({ version: 2, isCurrent: true, policy: { enabled: false }, actor: createSystemAuditActor("system-youtube-discovery") }, testDb);
+    await expect(runYoutubeDiscoveryPoll("discovery-a")).resolves.toMatchObject({ resultCode: "success", durableId: run.id });
+    expect(stageCalls).toBe(0);
+    await expect(testDb.select().from(youtubeDiscoveryRuns).where(eq(youtubeDiscoveryRuns.id, run.id))).resolves.toMatchObject([{ state: "cancelled", safeErrorCode: "policy_revoked" }]);
+    await expect(testDb.select().from(auditEvents).where(and(eq(auditEvents.targetType, "youtube_discovery_run_terminal"), eq(auditEvents.targetId, run.id)))).resolves.toHaveLength(1);
+    await expect(runYoutubeDiscoveryPoll("discovery-b")).resolves.toMatchObject({ resultCode: "no_work" });
+  });
+
+  test("cancels before the final write when a stage revokes the policy", async () => {
+    const policy = await createYoutubeDiscoveryPolicyVersion({ version: 1, isCurrent: true, actor: createSystemAuditActor("system-youtube-discovery") }, testDb);
+    const run = await createYoutubeDiscoveryRun({ policyVersionId: policy.id }, testDb);
+    setYoutubeDiscoveryExecutionStageForTest(async () => {
+      await createYoutubeDiscoveryPolicyVersion({ version: 2, isCurrent: true, policy: { enabled: false }, actor: createSystemAuditActor("system-youtube-discovery") }, testDb);
+      return "complete";
+    });
+    await expect(runYoutubeDiscoveryPoll("discovery-a")).resolves.toMatchObject({ resultCode: "success", durableId: run.id });
+    await expect(testDb.select().from(youtubeDiscoveryRuns).where(eq(youtubeDiscoveryRuns.id, run.id))).resolves.toMatchObject([{ state: "cancelled", terminalOutcome: "cancelled", safeErrorCode: "policy_revoked" }]);
+    await expect(testDb.select().from(auditEvents).where(and(eq(auditEvents.targetType, "youtube_discovery_run_terminal"), eq(auditEvents.targetId, run.id)))).resolves.toHaveLength(1);
+    await expect(runYoutubeDiscoveryPoll("discovery-b")).resolves.toMatchObject({ resultCode: "no_work" });
+  });
+
+  test("cancels before retry requeue when a transient stage revokes the policy", async () => {
+    const policy = await createYoutubeDiscoveryPolicyVersion({ version: 1, isCurrent: true, policy: { maxRetryAttempts: 2 }, actor: createSystemAuditActor("system-youtube-discovery") }, testDb);
+    const run = await createYoutubeDiscoveryRun({ policyVersionId: policy.id }, testDb);
+    setYoutubeDiscoveryExecutionStageForTest(async () => {
+      await createYoutubeDiscoveryPolicyVersion({ version: 2, isCurrent: true, policy: { enabled: false }, actor: createSystemAuditActor("system-youtube-discovery") }, testDb);
+      return "stage_transient";
+    });
+    await expect(runYoutubeDiscoveryPoll("discovery-a")).resolves.toMatchObject({ resultCode: "success", durableId: run.id });
+    await expect(testDb.select().from(youtubeDiscoveryRuns).where(eq(youtubeDiscoveryRuns.id, run.id))).resolves.toMatchObject([{ state: "cancelled", terminalOutcome: "cancelled", safeErrorCode: "policy_revoked", claimedBy: null, fencingToken: null }]);
+    await expect(testDb.select().from(auditEvents).where(and(eq(auditEvents.targetType, "youtube_discovery_run_terminal"), eq(auditEvents.targetId, run.id)))).resolves.toHaveLength(1);
+    await expect(runYoutubeDiscoveryPoll("discovery-b")).resolves.toMatchObject({ resultCode: "no_work" });
   });
 
   test("converts a rejecting private stage seam into a fenced retry", async () => {

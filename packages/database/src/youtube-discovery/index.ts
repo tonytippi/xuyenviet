@@ -6,6 +6,7 @@ import type { YoutubeDiscoveryPolicyAuditSummary, YoutubeDiscoveryQueryProposalA
 import { parseYoutubeDiscoveryPolicy } from "@xuyenviet/domain";
 import { and, eq, sql } from "drizzle-orm";
 import { randomBytes } from "node:crypto";
+import { getYoutubeDiscoveryRetryDelayMinutes, isYoutubeDiscoveryRetryExhausted } from "./retry-policy";
 
 type DiscoveryWriter = Pick<ReturnType<typeof getDb>, "insert" | "select" | "update" | "transaction"> & AuditEventWriter;
 
@@ -140,12 +141,13 @@ export async function cancelYoutubeDiscoveryRunIfDisabled(claim: YoutubeDiscover
 
 export async function retryYoutubeDiscoveryRun(claim: YoutubeDiscoveryRunClaim, database: DiscoveryWriter = getDb()): Promise<YoutubeDiscoveryRunDisposition> {
   return database.transaction(async (transaction) => {
-    const [run] = await transaction.select({ id: youtubeDiscoveryRuns.id, attemptCount: youtubeDiscoveryRuns.attemptCount, maxRetryAttempts: youtubeDiscoveryRuns.maxRetryAttempts, policyVersionId: youtubeDiscoveryRuns.policyVersionId }).from(youtubeDiscoveryRuns).where(activeClaim(claim)).limit(1).for("update");
+    const [run] = await transaction.select({ id: youtubeDiscoveryRuns.id, attemptCount: youtubeDiscoveryRuns.attemptCount, maxRetryAttempts: youtubeDiscoveryRuns.maxRetryAttempts, retryDelayMinutes: youtubeDiscoveryRuns.retryDelayMinutes, policyVersionId: youtubeDiscoveryRuns.policyVersionId }).from(youtubeDiscoveryRuns).where(activeClaim(claim)).limit(1).for("update");
     if (!run) return "contended";
     const [currentPolicy] = await transaction.select({ enabled: youtubeDiscoveryPolicyVersions.enabled }).from(youtubeDiscoveryPolicyVersions).where(eq(youtubeDiscoveryPolicyVersions.isCurrent, true)).limit(1).for("update");
-    const outcome: YoutubeDiscoveryRunDisposition = !currentPolicy?.enabled ? "cancelled" : run.attemptCount > run.maxRetryAttempts ? "failed" : "retrying";
+    const outcome: YoutubeDiscoveryRunDisposition = !currentPolicy?.enabled ? "cancelled" : isYoutubeDiscoveryRetryExhausted(run.attemptCount, run.maxRetryAttempts) ? "failed" : "retrying";
     const safeErrorCode: YoutubeDiscoveryRunSafeErrorCode = outcome === "cancelled" ? "policy_revoked" : outcome === "failed" ? "retry_exhausted" : "stage_transient";
-    const [updated] = await transaction.update(youtubeDiscoveryRuns).set({ state: outcome, claimedBy: null, claimedAt: null, leaseExpiresAt: null, fencingToken: null, nextRunAt: outcome === "retrying" ? sql`clock_timestamp() + least(${youtubeDiscoveryRuns.retryDelayMinutes} * power(2, ${youtubeDiscoveryRuns.attemptCount} - 1), 1440) * interval '1 minute'` : sql`clock_timestamp()`, terminalAt: outcome === "retrying" ? null : sql`clock_timestamp()`, terminalOutcome: outcome === "retrying" ? null : outcome, safeErrorCode }).where(activeClaim(claim)).returning();
+    const retryDelayMinutes = getYoutubeDiscoveryRetryDelayMinutes(run.retryDelayMinutes, run.attemptCount);
+    const [updated] = await transaction.update(youtubeDiscoveryRuns).set({ state: outcome, claimedBy: null, claimedAt: null, leaseExpiresAt: null, fencingToken: null, nextRunAt: outcome === "retrying" ? sql`clock_timestamp() + ${retryDelayMinutes} * interval '1 minute'` : sql`clock_timestamp()`, terminalAt: outcome === "retrying" ? null : sql`clock_timestamp()`, terminalOutcome: outcome === "retrying" ? null : outcome, safeErrorCode }).where(activeClaim(claim)).returning();
     if (!updated) return "contended";
     if (outcome !== "retrying") await recordTerminalAudit(transaction, updated.id, outcome, updated.attemptCount, safeErrorCode, run.policyVersionId);
     return outcome;
