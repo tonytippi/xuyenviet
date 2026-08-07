@@ -83,7 +83,7 @@ export class BrowserIdentityController {
 
   @Get("session")
   session(@Principal() principal: RequestPrincipal) {
-    return { account: { name: principal.name ?? null, email: principal.email ?? null } };
+    return { account: { name: principal.name ?? null, email: principal.email ?? null, image: principal.image ?? null } };
   }
 
   @Post("logout")

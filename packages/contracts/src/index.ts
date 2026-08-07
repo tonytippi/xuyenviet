@@ -8,6 +8,7 @@ export type RequestPrincipal = {
   authorizationVersion: number;
   name?: string | null;
   email?: string | null;
+  image?: string | null;
 };
 
 export const adminCapabilities = ["admin.workspace.read", "admin.role.governance", "admin.ai-model-catalog.write", "admin.knowledge.write"] as const;

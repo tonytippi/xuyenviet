@@ -28,6 +28,29 @@ export function loadTravelerShell(conversationId?: string, tripProjectId?: strin
   return directRead(`/v1/conversations/shell${query.size ? `?${query}` : ""}`, parseTravelerShellResponse);
 }
 
+export async function loadDirectAccount(): Promise<{ name: string | null; email: string | null; image: string | null }> {
+  const response = await fetch("/auth/session", { credentials: "include" });
+  const body = await readJson(response);
+  const account = body && typeof body === "object" ? (body as { account?: unknown }).account : null;
+  if (!response.ok || !account || typeof account !== "object") throw new DirectApiError();
+  const { name, email, image } = account as { name?: unknown; email?: unknown; image?: unknown };
+  return {
+    name: typeof name === "string" ? name : null,
+    email: typeof email === "string" ? email : null,
+    image: googleAvatarUrl(image),
+  };
+}
+
+function googleAvatarUrl(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" && url.hostname.endsWith(".googleusercontent.com") ? url.toString() : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function loadConversationSummaries() {
   return (await directRead("/v1/conversations/summaries", parseConversationSummaryListResponse)).summaries;
 }

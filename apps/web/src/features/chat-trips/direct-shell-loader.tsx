@@ -4,23 +4,24 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { AiAskComposer, type DisplayMessage } from "@/features/ai/ai-ask-composer";
-import { DirectApiError, applyDirectTripChangeProposal, createDirectTripProject, deleteDirectConversation, deleteDirectTripProject, directLogout, dismissDirectTripChangeProposal, executeDirectAnnotationProposalAction, loadAnswerDetail, loadConversationSummaries, loadPlanningContext, loadTravelerShell, loadTripProjectSidebarSummaries, saveDirectAnswerUsefulnessFeedback } from "@/features/ai/direct-api-client";
+import { DirectApiError, applyDirectTripChangeProposal, createDirectTripProject, deleteDirectConversation, deleteDirectTripProject, directLogout, dismissDirectTripChangeProposal, executeDirectAnnotationProposalAction, loadAnswerDetail, loadConversationSummaries, loadDirectAccount, loadPlanningContext, loadTravelerShell, loadTripProjectSidebarSummaries, saveDirectAnswerUsefulnessFeedback } from "@/features/ai/direct-api-client";
 import type { TripWorkspaceReadModel } from "@/features/chat-trips/types";
 
 export function DirectShellLoader({ initialQuestion, conversationId, historyConversationId, tripProjectId }: { initialQuestion?: string; conversationId?: string; historyConversationId?: string; tripProjectId?: string }) {
   const router = useRouter();
   const scopeKey = `${conversationId ?? ""}\u0000${tripProjectId ?? ""}\u0000${historyConversationId ?? ""}`;
-  const [state, setState] = useState<{ scopeKey?: string; loading: boolean; expired: boolean; recoveryNotice?: string; shell?: Awaited<ReturnType<typeof loadTravelerShell>>; messages?: DisplayMessage[]; historyConversation?: { id: string; messages: DisplayMessage[] } | null; planningContext?: Awaited<ReturnType<typeof loadPlanningContext>>["context"]; summaries: Awaited<ReturnType<typeof loadConversationSummaries>>; projects: Awaited<ReturnType<typeof loadTripProjectSidebarSummaries>> }>({ loading: true, expired: false, summaries: [], projects: [] });
+  const [state, setState] = useState<{ scopeKey?: string; loading: boolean; expired: boolean; recoveryNotice?: string; shell?: Awaited<ReturnType<typeof loadTravelerShell>>; messages?: DisplayMessage[]; historyConversation?: { id: string; messages: DisplayMessage[] } | null; planningContext?: Awaited<ReturnType<typeof loadPlanningContext>>["context"]; summaries: Awaited<ReturnType<typeof loadConversationSummaries>>; projects: Awaited<ReturnType<typeof loadTripProjectSidebarSummaries>>; account?: Awaited<ReturnType<typeof loadDirectAccount>> | null }>({ loading: true, expired: false, summaries: [], projects: [] });
   const [refreshGeneration, setRefreshGeneration] = useState(0);
   useEffect(() => {
     let active = true;
     setState((current) => ({ ...current, loading: true, recoveryNotice: undefined }));
     void loadTravelerShell(conversationId, tripProjectId).then(async (shell) => {
-       const [summaries, projects, historyShell] = await Promise.all([
+       const [summaries, projects, historyShell, account] = await Promise.all([
          loadConversationSummaries().catch(() => []),
          loadTripProjectSidebarSummaries().catch(() => []),
-        historyConversationId ? loadTravelerShell(historyConversationId).catch(() => undefined) : Promise.resolve(undefined),
-      ]);
+          historyConversationId ? loadTravelerShell(historyConversationId).catch(() => undefined) : Promise.resolve(undefined),
+          loadDirectAccount().catch(() => null),
+       ]);
       const enrich = async (candidate: typeof shell.shell.conversation) => {
         if (!candidate) return null;
         const details = await Promise.all(candidate.messages.map(async (message) => message.role === "assistant" ? loadAnswerDetail(candidate.id, message.id).catch(() => ({ detail: null })) : { detail: null }));
@@ -41,7 +42,7 @@ export function DirectShellLoader({ initialQuestion, conversationId, historyConv
          }
          return;
        }
-       if (active) setState({ scopeKey, loading: false, expired: false, shell, messages: conversation?.messages, historyConversation, planningContext, summaries, projects });
+       if (active) setState({ scopeKey, loading: false, expired: false, shell, messages: conversation?.messages, historyConversation, planningContext, summaries, projects, account });
     }).catch((error: DirectApiError) => { if (active) setState({ scopeKey, loading: false, expired: error.code === "unauthorized" || error.code === "forbidden", summaries: [], projects: [] }); });
     return () => { active = false; };
   }, [conversationId, historyConversationId, refreshGeneration, router, scopeKey, tripProjectId]);
@@ -56,7 +57,7 @@ export function DirectShellLoader({ initialQuestion, conversationId, historyConv
       window.location.replace("/sign-in");
     }
   }
-  return <main className="min-h-screen bg-white text-[#17342c]"><h1 className="sr-only">Hỏi trợ lý chuyến đi Việt Nam</h1><AiAskComposer initialQuestion={initialQuestion} initialConversationId={conversation?.id} initialMessages={state.messages ?? conversation?.messages ?? []} initialSessions={state.summaries} initialTripProjects={state.projects.map((project) => ({ ...project, origin: null, destination: null }))} selectedTripProject={state.shell.shell.tripProject} historyConversation={state.historyConversation} recoveryNotice={state.recoveryNotice} createTripProjectAction={async (title) => {
+  return <main className="min-h-screen bg-white text-[#17342c]"><h1 className="sr-only">Hỏi trợ lý chuyến đi Việt Nam</h1><AiAskComposer initialQuestion={initialQuestion} initialConversationId={conversation?.id} initialMessages={state.messages ?? conversation?.messages ?? []} initialSessions={state.summaries} initialTripProjects={state.projects.map((project) => ({ ...project, origin: null, destination: null }))} selectedTripProject={state.shell.shell.tripProject} historyConversation={state.historyConversation} recoveryNotice={state.recoveryNotice} userName={state.account?.name} userEmail={state.account?.email ?? undefined} userImage={state.account?.image} createTripProjectAction={async (title) => {
     const result = await createDirectTripProject({ title });
     return result.success ? { success: true, destination: { tripProjectId: result.project!.id } } : { success: false };
   }} deleteTripProjectAction={async (id) => {

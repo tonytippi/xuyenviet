@@ -52,7 +52,7 @@ export class ResourceServerGuard implements CanActivate {
         const csrf = request.headers["x-xuyenviet-csrf"];
         if (!csrf || !timingSafeEqual(identity.csrfHash, createHmac("sha256", config.csrfKey).update(`${sessionId}.${csrf}`).digest("base64url"))) throw forbidden(request, "csrf_invalid");
       }
-      request.principal = { userId: identity.userId, sessionId, roles: identity.roles, authorizationVersion: identity.authorizationVersion, name: identity.name, email: identity.email };
+      request.principal = { userId: identity.userId, sessionId, roles: identity.roles, authorizationVersion: identity.authorizationVersion, name: identity.name, email: identity.email, image: identity.image };
       request.browserSessionId = sessionId; request.browserConfig = config;
       if (identity.expires.getTime() - Date.now() < 7 * 24 * 60 * 60_000) {
         const expires = new Date(Date.now() + 30 * 24 * 60 * 60_000);

@@ -1,5 +1,7 @@
 "use client";
 
+import { useEffect, useRef, useState } from "react";
+
 import { TrashIcon } from "@/components/ui/icons";
 
 export type ChatSessionSummary = {
@@ -13,11 +15,30 @@ type ConversationListProps = {
   activeConversationId?: string;
   isDisabled?: boolean;
   onSelect: (id: string) => void;
-  onDelete?: (id: string) => void;
+  onDelete?: (id: string) => Promise<boolean>;
   onNewChat: () => void;
 };
 
 export function ConversationList({ sessions, activeConversationId, isDisabled = false, onSelect, onDelete, onNewChat }: ConversationListProps) {
+  const [conversationPendingDeletion, setConversationPendingDeletion] = useState<ChatSessionSummary | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [isDeleting, setDeleting] = useState(false);
+  const cancelDeleteRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (!conversationPendingDeletion) {
+      setDeleteError(null);
+      return;
+    }
+
+    cancelDeleteRef.current?.focus();
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") setConversationPendingDeletion(null);
+    }
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [conversationPendingDeletion]);
+
   return (
     <section className="flex h-full flex-col gap-3" aria-labelledby="conversation-list-heading">
       <button
@@ -36,7 +57,7 @@ export function ConversationList({ sessions, activeConversationId, isDisabled = 
           Chưa có cuộc trò chuyện.
         </p>
       ) : (
-        <ul className="flex flex-col gap-1 overflow-y-auto">
+        <ul className="scrollbar-hidden flex flex-col gap-1 overflow-y-auto">
           {sessions.map((session) => {
             const isActive = session.id === activeConversationId;
 
@@ -59,14 +80,15 @@ export function ConversationList({ sessions, activeConversationId, isDisabled = 
                 {onDelete ? (
                   <button
                     type="button"
-                    onClick={() => {
-                      if (window.confirm(`Xoá cuộc trò chuyện “${session.preview}”? Tin nhắn, ảnh đính kèm và các chi tiết chuyến đi đã ghi nhớ từ cuộc trò chuyện này sẽ bị xoá khỏi giao diện thông thường và không còn được dùng để gợi ý trong tương lai.`)) {
-                        onDelete(session.id);
-                      }
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      setDeleteError(null);
+                      setConversationPendingDeletion(session);
                     }}
                     disabled={isDisabled}
                     aria-label={`Xoá cuộc trò chuyện: ${session.preview}`}
-                    className="absolute right-1 top-1/2 grid min-h-11 min-w-11 -translate-y-1/2 place-items-center rounded-md bg-[#fafafa] text-[#777] opacity-0 transition hover:bg-[#f1e6e4] hover:text-[#a33a32] focus:opacity-100 focus:outline-none focus:ring-2 focus:ring-[#a33a32] group-hover:opacity-100 disabled:cursor-not-allowed disabled:opacity-40"
+                    className="absolute right-1 top-1/2 z-10 grid min-h-11 min-w-11 -translate-y-1/2 place-items-center rounded-md text-[#777] transition hover:bg-[#f1e6e4] hover:text-[#a33a32] focus:outline-none focus:ring-2 focus:ring-[#a33a32] disabled:cursor-not-allowed disabled:opacity-40"
+                    title="Xoá cuộc trò chuyện"
                   >
                     <TrashIcon className="size-4" />
                     <span className="sr-only">Xoá</span>
@@ -78,6 +100,31 @@ export function ConversationList({ sessions, activeConversationId, isDisabled = 
           })}
         </ul>
       )}
+      {conversationPendingDeletion ? (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-[#17342c]/35 p-4" onMouseDown={(event) => { if (!isDeleting && event.target === event.currentTarget) setConversationPendingDeletion(null); }} role="dialog" aria-modal="true" aria-labelledby="delete-conversation-title" aria-describedby="delete-conversation-description">
+          <div className="w-full max-w-md rounded-2xl border border-[#d8c9ad] bg-[#fffdf8] p-5 shadow-[0_20px_60px_rgba(23,52,44,0.22)]">
+            <div className="grid size-11 place-items-center rounded-full bg-[#f1e6e4] text-[#a33a32]">
+              <TrashIcon className="size-5" />
+            </div>
+            <h2 className="mt-4 text-xl font-semibold tracking-[-0.03em] text-[#17342c]" id="delete-conversation-title">Xóa cuộc trò chuyện?</h2>
+            <p className="mt-2 text-sm leading-6 text-[#4f625a]" id="delete-conversation-description">Tin nhắn, ảnh đính kèm và các chi tiết đã ghi nhớ từ cuộc trò chuyện này sẽ không còn được dùng để gợi ý.</p>
+            <p className="mt-4 truncate rounded-xl border border-[#e6e6e6] bg-white px-3 py-2 text-sm font-medium text-[#17342c]" title={conversationPendingDeletion.preview}>{conversationPendingDeletion.preview}</p>
+            {deleteError ? <p className="mt-3 rounded-xl bg-[#f1e6e4] px-3 py-2 text-sm leading-5 text-[#8a3831]" role="alert">{deleteError}</p> : null}
+            <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+              <button className="min-h-11 rounded-xl border border-[#d8c9ad] bg-white px-4 py-2 text-sm font-semibold text-[#17342c] transition hover:bg-[#fff8ec] focus:outline-none focus:ring-4 focus:ring-[#e5bd82] disabled:cursor-not-allowed disabled:opacity-60" disabled={isDeleting} onClick={() => setConversationPendingDeletion(null)} ref={cancelDeleteRef} type="button">Hủy</button>
+              <button className="min-h-11 rounded-xl bg-[#a33a32] px-4 py-2 text-sm font-semibold text-white transition hover:bg-[#8d302a] focus:outline-none focus:ring-4 focus:ring-[#f0c8a0] disabled:cursor-not-allowed disabled:opacity-60" disabled={isDeleting} onClick={async () => {
+                if (!onDelete) return;
+                setDeleting(true);
+                setDeleteError(null);
+                const deleted = await onDelete(conversationPendingDeletion.id);
+                setDeleting(false);
+                if (deleted) setConversationPendingDeletion(null);
+                else setDeleteError("Không thể xóa cuộc trò chuyện lúc này. Vui lòng thử lại.");
+              }} type="button">{isDeleting ? "Đang xóa..." : "Xóa trò chuyện"}</button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </section>
   );
 }

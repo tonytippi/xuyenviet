@@ -65,7 +65,7 @@ export type ApiIdentityRecord = {
 export interface ApiIdentityRepository {
   getSession(sessionId: string): Promise<ApiIdentityRecord | null>;
 }
-export type BrowserIdentity = ApiIdentityRecord & { roles: RequestRole[]; csrfHash: string; sessionId: string; name: string | null; email: string | null };
+export type BrowserIdentity = ApiIdentityRecord & { roles: RequestRole[]; csrfHash: string; sessionId: string; name: string | null; email: string | null; image: string | null };
 export type BrowserOAuthTransaction = { id: string; state: string; codeVerifier: string; returnUrl: string; referralCode?: string | null; expires: Date };
 export class BrowserGoogleAccountConflictError extends Error {}
 export interface BrowserIdentityRepository extends ApiIdentityRepository {
@@ -350,7 +350,7 @@ export function createPostgresApiIdentityRepository(databaseUrl: string, browser
     },
     async createBrowserSession(userId, sessionId, csrfHash, authorizationVersion, expires) { await sql`insert into browser_sessions (session_lookup_hash, user_id, csrf_hash, authorization_version, expires) values (${browserLookupHash(sessionId)}, ${userId}, ${csrfHash}, ${authorizationVersion}, ${expires})`; },
     async getBrowserSession(sessionId) {
-      const rows = await sql<Array<BrowserIdentity>>`select browser_sessions.user_id as "userId", browser_sessions.csrf_hash as "csrfHash", browser_sessions.expires, browser_sessions.authorization_version as "authorizationVersion", users.name, users.email, coalesce(array_agg(user_roles.role order by user_roles.role) filter (where user_roles.role is not null), '{}') as roles from browser_sessions join users on users.id = browser_sessions.user_id left join user_roles on user_roles.user_id = users.id where browser_sessions.session_lookup_hash = ${browserLookupHash(sessionId)} and browser_sessions.revoked_at is null and browser_sessions.authorization_version = users.authorization_version group by browser_sessions.user_id, browser_sessions.csrf_hash, browser_sessions.expires, browser_sessions.authorization_version, users.name, users.email`;
+      const rows = await sql<Array<BrowserIdentity>>`select browser_sessions.user_id as "userId", browser_sessions.csrf_hash as "csrfHash", browser_sessions.expires, browser_sessions.authorization_version as "authorizationVersion", users.name, users.email, users.image, coalesce(array_agg(user_roles.role order by user_roles.role) filter (where user_roles.role is not null), '{}') as roles from browser_sessions join users on users.id = browser_sessions.user_id left join user_roles on user_roles.user_id = users.id where browser_sessions.session_lookup_hash = ${browserLookupHash(sessionId)} and browser_sessions.revoked_at is null and browser_sessions.authorization_version = users.authorization_version group by browser_sessions.user_id, browser_sessions.csrf_hash, browser_sessions.expires, browser_sessions.authorization_version, users.name, users.email, users.image`;
       return rows[0] ? { ...rows[0], sessionId } : null;
     },
     async getBrowserLogoutCsrfHash(sessionId) {
