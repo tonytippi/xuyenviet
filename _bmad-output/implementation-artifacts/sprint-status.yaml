@@ -1,5 +1,5 @@
 # generated: 2026-07-25
-# last_updated: 2026-08-07 (Story 18.1 review repairs and focused integration verification complete.)
+# last_updated: 2026-08-07 (Story 18.2 created and validated; ready for development.)
 # project: xuyenviet
 # project_key: NOKEY
 # tracking_system: file-system
@@ -33,7 +33,7 @@
 #   - done: Completed
 
 generated: 2026-07-25
-last_updated: 2026-08-07 (Story 18.1 review repairs and focused integration verification complete.)
+last_updated: 2026-08-07 (Story 18.2 created and validated; ready for development.)
 project: xuyenviet
 project_key: NOKEY
 tracking_system: file-system
@@ -406,7 +406,7 @@ development_status:
   # and never schedules, invokes, or retries manual youtube:capture.
   epic-18: in-progress
   18-1-establish-discovery-ownership-policy-and-audit-foundation: done
-  18-2-execute-fenced-scheduled-discovery-runs: backlog
+  18-2-execute-fenced-scheduled-discovery-runs: ready-for-dev
   18-3-manage-system-and-operator-query-proposals: backlog
   18-4-discover-canonical-youtube-candidates-safely: backlog
   18-5-enrich-candidates-with-safe-derived-signals-and-retention: backlog
