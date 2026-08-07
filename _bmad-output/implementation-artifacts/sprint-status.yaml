@@ -1,5 +1,5 @@
 # generated: 2026-07-25
-# last_updated: 2026-08-07 (Story 18.2 final bounded repair verified; done.)
+# last_updated: 2026-08-07 (Story 18.3 created and independently validated; ready for development.)
 # project: xuyenviet
 # project_key: NOKEY
 # tracking_system: file-system
@@ -33,7 +33,7 @@
 #   - done: Completed
 
 generated: 2026-07-25
-last_updated: 2026-08-07 (Story 18.2 final bounded repair verified; done.)
+last_updated: 2026-08-07 (Story 18.3 created and independently validated; ready for development.)
 project: xuyenviet
 project_key: NOKEY
 tracking_system: file-system
@@ -410,7 +410,7 @@ development_status:
   # 2026-08-07: Second and final unattended independent review of b45101d89e0f8a1b9ba6ed9c36e284f58a7b79ba..a7a31f6758c2e5a9f3c22107dffba7517d532e30 ran Blind Hunter, Edge Case Hunter, and Acceptance Auditor synchronously. Blind Hunter and Edge Case Hunter: clean. Acceptance Auditor found one MEDIUM [patch]: tests/youtube-discovery-execution.integration.test.ts:48 did not prove AC 4 later-run independence after a separate run exhausts.
   # 2026-08-07: Final bounded repair adds serial PostgreSQL coverage that exhausts the first run, then claims and completes a second due run under the same policy while proving the first remains terminal with exactly one terminal audit. Focused integration verification passed; status synchronized to done.
   18-2-execute-fenced-scheduled-discovery-runs: done
-  18-3-manage-system-and-operator-query-proposals: backlog
+  18-3-manage-system-and-operator-query-proposals: ready-for-dev
   18-4-discover-canonical-youtube-candidates-safely: backlog
   18-5-enrich-candidates-with-safe-derived-signals-and-retention: backlog
   epic-18-retrospective: optional
