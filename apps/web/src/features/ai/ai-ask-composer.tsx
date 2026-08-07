@@ -13,7 +13,7 @@ import { tripChangeProposalLabels } from "@/features/chat-trips/trip-home-labels
 import { TripWorkspacePanel } from "@/features/ai/trip-workspace-panel";
 import { acceptDirectTripCreationRecommendation, chooseDirectPrivateTripRecommendation, continueDirectInTrip, declineDirectTripCreationRecommendation, DirectApiError, loadTripRecommendations, submitDirectAiAskStream } from "@/features/ai/direct-api-client";
 import { BrandMark } from "@/components/ui/brand-mark";
-import { AccountIcon, AttachmentIcon, ChatIcon, CloseIcon, CostIcon, HotelAreaIcon, LoadingIcon, MenuIcon, NewChatIcon, PlaceIcon, ProjectIcon, RouteSegmentIcon, SendIcon, SourceIcon } from "@/components/ui/icons";
+import { AttachmentIcon, ChatIcon, CloseIcon, CostIcon, HotelAreaIcon, LoadingIcon, MenuIcon, NewChatIcon, PlaceIcon, ProjectIcon, RouteSegmentIcon, SendIcon, SourceIcon } from "@/components/ui/icons";
 
 const maxQuestionLength = 2_000;
 const maxImageByteSize = 5 * 1024 * 1024;
@@ -1363,11 +1363,11 @@ export function AiAskComposer({
   async function handleDeleteSession(id: string) {
     if (isPending) {
       setStatus("Vui lòng chờ câu trả lời hiện tại hoàn tất trước khi xoá cuộc trò chuyện.");
-      return;
+      return false;
     }
 
     if (!deleteConversationAction || deletingConversationIdRef.current) {
-      return;
+      return false;
     }
 
     deletingConversationIdRef.current = id;
@@ -1387,7 +1387,7 @@ export function AiAskComposer({
           router.refresh();
         }
         setStatus(result.error ?? "Không thể xoá cuộc trò chuyện lúc này. Vui lòng thử lại.");
-        return;
+        return false;
       }
 
       setSessions((currentSessions) => currentSessions.filter((session) => session.id !== id));
@@ -1399,8 +1399,10 @@ export function AiAskComposer({
 
       setStatus("Đã xoá cuộc trò chuyện và các chi tiết đã ghi nhớ từ cuộc trò chuyện này.");
       router.refresh();
+      return true;
     } catch {
       setStatus("Không thể xoá cuộc trò chuyện lúc này. Vui lòng thử lại.");
+      return false;
     } finally {
       deletingConversationIdRef.current = null;
       setDeletingConversationId(null);
@@ -1785,7 +1787,7 @@ export function AiAskComposer({
       <summary className="flex cursor-pointer list-none items-center gap-3 rounded-xl px-2 py-2 transition hover:bg-[#f1f1f1] focus:outline-none focus:ring-2 focus:ring-[#167c5a]">
         {userImage ? (
           // eslint-disable-next-line @next/next/no-img-element
-          <img alt="" className="size-9 rounded-full object-cover" src={userImage} />
+          <img alt="" className="size-9 rounded-full object-cover" referrerPolicy="no-referrer" src={userImage} />
         ) : (
           <span aria-hidden="true" className="grid size-9 place-items-center rounded-full bg-[#167c5a] text-sm font-semibold text-white">{accountInitial}</span>
         )}
@@ -1801,9 +1803,6 @@ export function AiAskComposer({
             Vào khu vực quản trị
           </Link>
         ) : null}
-        <Link className="min-h-11 rounded-2xl border border-[#d8c9ad] bg-[#fffdf8] px-4 py-3 text-center text-sm font-semibold text-[#17342c] transition hover:bg-white focus:outline-none focus:ring-4 focus:ring-[#e5bd82]" href="/#quyen-rieng-tu">
-          Tìm hiểu thêm về quyền riêng tư
-        </Link>
         {signOutAction ? <form action={signOutAction}><button className="min-h-11 w-full rounded-2xl border border-[#d8c9ad] bg-white px-4 py-3 text-sm font-semibold text-[#17342c] transition hover:bg-[#fff8ec] focus:outline-none focus:ring-4 focus:ring-[#e5bd82]" type="submit">Đăng xuất</button></form> : null}
       </div>
     </details>
@@ -1830,7 +1829,7 @@ export function AiAskComposer({
           <h2 className="px-2 text-[11px] font-medium text-[#777]" id="trip-project-list-heading">Chuyến đi</h2>
           <div className="mt-2 flex flex-col gap-1">
             <button aria-current={!selectedTripProject ? "page" : undefined} className={!selectedTripProject ? "min-h-11 rounded-xl bg-[#e5eeea] px-3 py-2 text-left text-sm font-medium text-[#285c49] focus:outline-none focus:ring-2 focus:ring-[#167c5a]" : "min-h-11 rounded-xl px-3 py-2 text-left text-sm font-medium text-[#303030] transition hover:bg-white focus:outline-none focus:ring-2 focus:ring-[#167c5a]"} disabled={projectActionsDisabled} onClick={(event) => handleSelectTripProject(null, event.currentTarget)} type="button">Hỏi XuyenViet</button>
-            {tripProjects.map((project) => <button aria-current={project.id === activeTripProjectId ? "page" : undefined} className={project.id === activeTripProjectId ? "min-h-11 rounded-xl bg-[#e5eeea] px-3 py-2 text-left text-sm font-medium text-[#285c49] focus:outline-none focus:ring-2 focus:ring-[#167c5a]" : "min-h-11 rounded-xl px-3 py-2 text-left text-sm font-medium text-[#303030] transition hover:bg-white focus:outline-none focus:ring-2 focus:ring-[#167c5a]"} disabled={projectActionsDisabled} key={project.id} onClick={(event) => handleSelectTripProject(project, event.currentTarget)} type="button">{project.title}</button>)}
+            {tripProjects.map((project) => <button aria-current={project.id === activeTripProjectId ? "page" : undefined} className={project.id === activeTripProjectId ? "min-h-11 truncate rounded-xl bg-[#e5eeea] px-3 py-2 text-left text-sm font-medium text-[#285c49] focus:outline-none focus:ring-2 focus:ring-[#167c5a]" : "min-h-11 truncate rounded-xl px-3 py-2 text-left text-sm font-medium text-[#303030] transition hover:bg-white focus:outline-none focus:ring-2 focus:ring-[#167c5a]"} disabled={projectActionsDisabled} key={project.id} onClick={(event) => handleSelectTripProject(project, event.currentTarget)} type="button">{project.title}</button>)}
           </div>
           {createTripProjectAction ? <button className="mt-2 min-h-11 w-full rounded-xl border border-dashed border-[#8fb59f] px-3 py-2 text-left text-sm font-semibold text-[#285c49] focus:outline-none focus:ring-2 focus:ring-[#167c5a]" disabled={projectActionsDisabled} onClick={handleCreateTripProject} type="button">Tạo chuyến đi</button> : null}
           {selectedTripProject && deleteTripProjectAction ? <button className="mt-2 min-h-11 w-full rounded-xl border border-[#f0c8a0] px-3 py-2 text-left text-sm font-semibold text-[#8c4f13] focus:outline-none focus:ring-2 focus:ring-[#8c4f13]" disabled={projectActionsDisabled} onClick={handleDeleteTripProject} type="button">Xóa chuyến đi này</button> : null}
@@ -1887,7 +1886,7 @@ export function AiAskComposer({
             >
               {userImage ? (
                 // eslint-disable-next-line @next/next/no-img-element
-                <img alt="" className="size-9 rounded-full object-cover" src={userImage} />
+                <img alt="" className="size-9 rounded-full object-cover" referrerPolicy="no-referrer" src={userImage} />
               ) : (
                 <span aria-hidden="true" className="grid size-9 place-items-center rounded-full bg-[#167c5a] text-sm font-semibold text-white">{accountInitial}</span>
               )}
@@ -1930,13 +1929,6 @@ export function AiAskComposer({
               Kế hoạch
             </button>
           ) : null}
-          <Link
-            aria-label="Tài khoản và quyền riêng tư"
-            className="grid min-h-11 min-w-11 place-items-center rounded-2xl border border-[#d8c9ad] bg-white/75 text-[#17342c] transition hover:bg-white focus:outline-none focus:ring-4 focus:ring-[#e5bd82]"
-            href="/#quyen-rieng-tu"
-          >
-            <AccountIcon />
-          </Link>
         </div>
 
         {selectedTripProject && !isHistoricReview ? (
@@ -2150,7 +2142,7 @@ export function AiAskComposer({
                   <h2 className="px-2 text-[11px] font-medium text-[#777]" id="mobile-trip-project-list-heading">Chuyến đi</h2>
                   <div className="mt-2 flex flex-col gap-1">
                     <button aria-current={!selectedTripProject ? "page" : undefined} className={!selectedTripProject ? "min-h-11 rounded-xl bg-[#e5eeea] px-3 py-2 text-left text-sm font-medium text-[#285c49] focus:outline-none focus:ring-2 focus:ring-[#167c5a]" : "min-h-11 rounded-xl px-3 py-2 text-left text-sm font-medium text-[#303030] transition hover:bg-white focus:outline-none focus:ring-2 focus:ring-[#167c5a]"} disabled={projectActionsDisabled} onClick={(event) => handleSelectTripProject(null, event.currentTarget)} type="button">Hỏi XuyenViet</button>
-                    {tripProjects.map((project) => <button aria-current={project.id === activeTripProjectId ? "page" : undefined} className={project.id === activeTripProjectId ? "min-h-11 rounded-xl bg-[#e5eeea] px-3 py-2 text-left text-sm font-medium text-[#285c49] focus:outline-none focus:ring-2 focus:ring-[#167c5a]" : "min-h-11 rounded-xl px-3 py-2 text-left text-sm font-medium text-[#303030] transition hover:bg-white focus:outline-none focus:ring-2 focus:ring-[#167c5a]"} disabled={projectActionsDisabled} key={project.id} onClick={(event) => handleSelectTripProject(project, event.currentTarget)} type="button">{project.title}</button>)}
+                    {tripProjects.map((project) => <button aria-current={project.id === activeTripProjectId ? "page" : undefined} className={project.id === activeTripProjectId ? "min-h-11 truncate rounded-xl bg-[#e5eeea] px-3 py-2 text-left text-sm font-medium text-[#285c49] focus:outline-none focus:ring-2 focus:ring-[#167c5a]" : "min-h-11 truncate rounded-xl px-3 py-2 text-left text-sm font-medium text-[#303030] transition hover:bg-white focus:outline-none focus:ring-2 focus:ring-[#167c5a]"} disabled={projectActionsDisabled} key={project.id} onClick={(event) => handleSelectTripProject(project, event.currentTarget)} type="button">{project.title}</button>)}
                   </div>
                   {createTripProjectAction ? <button className="mt-2 min-h-11 w-full rounded-xl border border-dashed border-[#8fb59f] px-3 py-2 text-left text-sm font-semibold text-[#285c49] focus:outline-none focus:ring-2 focus:ring-[#167c5a]" disabled={projectActionsDisabled} onClick={handleCreateTripProject} type="button">Tạo chuyến đi</button> : null}
                   {selectedTripProject && deleteTripProjectAction ? <button className="mt-2 min-h-11 w-full rounded-xl border border-[#f0c8a0] px-3 py-2 text-left text-sm font-semibold text-[#8c4f13] focus:outline-none focus:ring-2 focus:ring-[#8c4f13]" disabled={projectActionsDisabled} onClick={handleDeleteTripProject} type="button">Xóa chuyến đi này</button> : null}

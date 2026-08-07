@@ -33,7 +33,7 @@ describe("admin workspace direct browser admission", () => {
     await identities.createBrowserSession("operator", sessionId, csrfHash(browserAuth, sessionId, csrf), 1, new Date(Date.now() + 60_000));
     const cookie = `${browserAuth.cookieName}=${sessionId}`;
     await request(app.getHttpServer()).get("/v1/admin/workspace").set({ Cookie: cookie, Origin: "https://admin.xuyenviet.app" }).expect(200, { ready: true });
-    await request(app.getHttpServer()).get("/auth/session").set({ Cookie: cookie, Origin: "https://admin.xuyenviet.app" }).expect(200, { account: { name: null, email: "operator@example.com" } });
+    await request(app.getHttpServer()).get("/auth/session").set({ Cookie: cookie, Origin: "https://admin.xuyenviet.app" }).expect(200, { account: { name: null, email: "operator@example.com", image: null } });
     await request(app.getHttpServer()).get("/v1/admin/workspace").set("Authorization", "Bearer malformed-admin-bff").expect(401);
     const response = await request(app.getHttpServer()).get("/v1/admin/workspace").set({ Cookie: cookie, Authorization: "Bearer malformed-admin-bff", Origin: "https://admin.xuyenviet.app" }).expect(401);
     expect(response.body).toMatchObject({ code: "unauthorized", message: "Không được phép truy cập." });

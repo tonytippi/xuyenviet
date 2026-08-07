@@ -67,6 +67,7 @@ export default async function SignInPage({ searchParams }: SignInPageProps) {
           ) : null}
           <a href={`/auth/google?returnUrl=${encodeURIComponent(apiReturnUrl)}${referralCode ? `&ref=${encodeURIComponent(referralCode)}` : ""}`}
               className="min-h-12 w-full rounded-xl bg-[#202020] px-5 py-4 text-center text-base font-medium text-white transition hover:bg-[#383838] active:translate-y-px"
+              style={{ color: "#fff" }}
             >
               Tiếp tục với Google
           </a>
