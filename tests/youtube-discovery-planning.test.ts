@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 import { deriveDiscoveryQueries, parseDiscoveryQuerySignalPortResult } from "@xuyenviet/domain";
 import { parseAdminYoutubeDiscoveryQueryList } from "@xuyenviet/contracts";
+import { createAiAskDiscoveryQuerySignalPort, createKnowledgeDiscoveryQuerySignalPort } from "@xuyenviet/database";
 
 describe("YouTube Discovery safe planning signals", () => {
   test("accepts only exact bounded signal and unavailable contracts", () => {
@@ -25,5 +26,17 @@ describe("YouTube Discovery safe planning signals", () => {
     const item = { id: "proposal", origin: "operator", queryText: "Da Lat route", reason: "operator_request", priority: 1, enabled: false, cadenceMinutes: 15, nextRunAt: null, pausedReason: "operator" };
     expect(parseAdminYoutubeDiscoveryQueryList({ items: Array.from({ length: 200 }, () => item) })).not.toBeNull();
     expect(parseAdminYoutubeDiscoveryQueryList({ items: Array.from({ length: 201 }, () => item) })).toBeNull();
+  });
+
+  test("adapts owner-published aggregate ports without persistence access", async () => {
+    const empty = createKnowledgeDiscoveryQuerySignalPort(async () => ({ status: "available", signals: [] }));
+    const allReasons = createAiAskDiscoveryQuerySignalPort(async () => ({ status: "available", signals: [
+      { reason: "coverage_gap", geography: "Da Lat", taxonomy: "route", priority: 10 },
+      { reason: "freshness_risk", geography: "Da Nang", taxonomy: "coast", priority: 20 },
+      { reason: "unresolved_conflict", geography: "Hue", taxonomy: "heritage", priority: 30 },
+      { reason: "anonymized_demand", geography: "Ha Noi", taxonomy: "food", priority: 40 },
+    ] }));
+    await expect(empty.readSignals()).resolves.toEqual({ status: "available", signals: [] });
+    await expect(allReasons.readSignals()).resolves.toMatchObject({ status: "available", signals: expect.arrayContaining([expect.objectContaining({ reason: "coverage_gap" }), expect.objectContaining({ reason: "freshness_risk" }), expect.objectContaining({ reason: "unresolved_conflict" }), expect.objectContaining({ reason: "anonymized_demand" })]) });
   });
 });

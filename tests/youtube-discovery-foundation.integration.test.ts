@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, test } from "vitest";
 import { eq, sql } from "drizzle-orm";
+import type { RequestPrincipal } from "@xuyenviet/contracts";
 
-import { auditEvents, claimYoutubeDiscoveryPlanning, createSystemAuditActor, createUserAuditActor, createYoutubeDiscoveryPolicyVersion, createYoutubeDiscoveryQueryProposal, createYoutubeDiscoveryRun, refreshYoutubeDiscoverySystemProposals, scheduleYoutubeDiscoveryDueRuns, youtubeDiscoveryPlanningLeases, youtubeDiscoveryPolicyVersions, youtubeDiscoveryQueryProposals, youtubeDiscoveryRuns } from "@xuyenviet/database";
+import { auditEvents, claimYoutubeDiscoveryPlanning, createPostgresAdminYoutubeDiscoveryPort, createSystemAuditActor, createUserAuditActor, createYoutubeDiscoveryPolicyVersion, createYoutubeDiscoveryQueryProposal, createYoutubeDiscoveryRun, refreshYoutubeDiscoverySystemProposals, scheduleYoutubeDiscoveryDueRuns, youtubeDiscoveryPlanningLeases, youtubeDiscoveryPolicyVersions, youtubeDiscoveryQueryProposals, youtubeDiscoveryRuns } from "@xuyenviet/database";
 
 import { resetTestDatabase, seedTestOperator, testDb } from "./helpers/db";
 
@@ -56,7 +57,7 @@ describe.sequential("YouTube Discovery foundation persistence", () => {
 
   test("rejects disabled queries and invalid policy or query persistence", async () => {
     const policy = await createYoutubeDiscoveryPolicyVersion({ version: 1, isCurrent: true, actor: createSystemAuditActor("system-youtube-discovery") }, testDb);
-    const query = await createYoutubeDiscoveryQueryProposal({ origin: "system", reason: "coverage_gap", priority: 50, queryText: "Đà Lạt đường đèo", enabled: false, cadenceMinutes: 1440, actor: createSystemAuditActor("system-youtube-discovery") }, testDb);
+    const query = await createYoutubeDiscoveryQueryProposal({ origin: "system", reason: "coverage_gap", priority: 50, queryText: "Da Lat route", enabled: false, cadenceMinutes: 1440, actor: createSystemAuditActor("system-youtube-discovery"), systemSignal: { reason: "coverage_gap", geography: "Da Lat", taxonomy: "route", priority: 50 } }, testDb);
 
     await expect(createYoutubeDiscoveryRun({ policyVersionId: policy.id, queryProposalId: query.id }, testDb)).rejects.toThrow("enabled query proposal");
     await expect(testDb.execute(sql`insert into youtube_discovery_policy_versions (id, version, is_current, enabled, minimum_candidate_score, priority_score_weight, freshness_score_weight, cadence_minutes, retention_days, comment_signal_ttl_days, max_concurrent_runs, max_retry_attempts, retry_delay_minutes) values ('invalid-policy', 2, false, true, 0.5, 0.6, 0.4, 14, 180, 30, 1, 3, 15)`)).rejects.toThrow();
@@ -92,5 +93,45 @@ describe.sequential("YouTube Discovery foundation persistence", () => {
     expect(resumed).toBeInstanceOf(Date);
     expect(resumed!.getTime()).toBeGreaterThan(Date.now());
     expect(enabled.id).toBeTruthy();
+  });
+
+  test("preserves origin and attributes every operator command to the authenticated user", async () => {
+    await seedTestOperator();
+    await createYoutubeDiscoveryPolicyVersion({ version: 1, isCurrent: true, actor: createSystemAuditActor("system-youtube-discovery") }, testDb);
+    const port = createPostgresAdminYoutubeDiscoveryPort();
+    const principal: RequestPrincipal = { userId: "operator", email: "operator@example.com", roles: ["operator"], authorizationVersion: 1, sessionId: "operator-session" };
+    const created = await port.create(principal, { queryText: "Da Lat route", priority: 40, cadenceMinutes: 15 });
+    await port.edit(principal, created.id, "Da Lat pass route");
+    await port.reprioritize(principal, created.id, 70);
+    await port.pause(principal, created.id);
+    const resumed = await port.resume(principal, created.id);
+    expect(resumed).toMatchObject({ origin: "operator", enabled: true, priority: 70, queryText: "Da Lat pass route" });
+    await expect(testDb.select({ origin: youtubeDiscoveryQueryProposals.origin }).from(youtubeDiscoveryQueryProposals).where(eq(youtubeDiscoveryQueryProposals.id, created.id))).resolves.toEqual([{ origin: "operator" }]);
+    await expect(testDb.select({ actorUserId: auditEvents.actorUserId, actorSystem: auditEvents.actorSystem }).from(auditEvents).where(eq(auditEvents.targetId, created.id))).resolves.toEqual(Array.from({ length: 5 }, () => ({ actorUserId: "operator", actorSystem: null })));
+  });
+
+  test("uses one singleton planning lease and fences a stale planner", async () => {
+    const policy = await createYoutubeDiscoveryPolicyVersion({ version: 1, isCurrent: true, actor: createSystemAuditActor("system-youtube-discovery") }, testDb);
+    const stale = await claimYoutubeDiscoveryPlanning("discovery-a", testDb);
+    expect(stale).not.toBeNull();
+    await testDb.update(youtubeDiscoveryPlanningLeases).set({ claimedAt: new Date(0), leaseExpiresAt: new Date(1) }).where(eq(youtubeDiscoveryPlanningLeases.id, "youtube-discovery-planning"));
+    const fresh = await claimYoutubeDiscoveryPlanning("discovery-b", testDb);
+    expect(fresh).toMatchObject({ id: "youtube-discovery-planning", policyVersionId: policy.id });
+    expect(fresh!.fencingToken).not.toBe(stale!.fencingToken);
+    expect(await refreshYoutubeDiscoverySystemProposals(stale!, [], testDb)).toBe("contended");
+    expect(await refreshYoutubeDiscoverySystemProposals(fresh!, [], testDb)).toBe("completed");
+  });
+
+  test("admits each due interval once without driver-error duplicate recovery", async () => {
+    await seedTestOperator();
+    const policy = await createYoutubeDiscoveryPolicyVersion({ version: 1, isCurrent: true, actor: createSystemAuditActor("system-youtube-discovery") }, testDb);
+    const proposal = await createYoutubeDiscoveryQueryProposal({ origin: "operator", reason: "operator_request", priority: 50, queryText: "Da Lat route", cadenceMinutes: 15, actor: createUserAuditActor({ userId: "operator", email: "operator@example.com" }) }, testDb);
+    await testDb.update(youtubeDiscoveryQueryProposals).set({ scheduleAnchorAt: new Date(0), nextDueAt: new Date(1) }).where(eq(youtubeDiscoveryQueryProposals.id, proposal.id));
+    expect(await scheduleYoutubeDiscoveryDueRuns(testDb)).toBe(1);
+    expect(await scheduleYoutubeDiscoveryDueRuns(testDb)).toBe(1);
+    const runs = await testDb.select({ scheduleIntervalAt: youtubeDiscoveryRuns.scheduleIntervalAt }).from(youtubeDiscoveryRuns).where(eq(youtubeDiscoveryRuns.queryProposalId, proposal.id));
+    expect(runs).toHaveLength(2);
+    expect(runs[0]!.scheduleIntervalAt).not.toEqual(runs[1]!.scheduleIntervalAt);
+    await expect(createYoutubeDiscoveryRun({ policyVersionId: policy.id, queryProposalId: proposal.id, scheduleIntervalAt: runs[0]!.scheduleIntervalAt! }, testDb)).resolves.toBeNull();
   });
 });

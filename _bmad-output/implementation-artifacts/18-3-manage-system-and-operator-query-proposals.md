@@ -1,6 +1,6 @@
 ---
 story_id: 18-3
-status: in-progress
+status: ready-for-dev
 created: 2026-08-07
 epic: 18
 ---
@@ -152,7 +152,19 @@ gpu4ai/gpt-5.6-terra
 - Ultimate context engine analysis completed - comprehensive developer guide created.
 - Independent BMad validation passed after resolving the planning lease lifecycle, due-query scheduling, safe-port contract, and protected API command boundary. No implementation, test execution, migration, or application-code change was performed.
 - 2026-08-07: Unattended independent review of `bbc752d79fb48927571beb4fe9f9ce0019b84db9..10c352b22c79bd10eb951f27eb6740ed57297b4d` ran Blind Hunter, Edge Case Hunter, and Acceptance Auditor synchronously. Actionable findings: migration `0047` rewrites legacy system `operator_request` rows to operator origin; the concrete Knowledge port queries Knowledge tables directly and treats healthy empty results as unavailable; system target identity differs between the generic create API and planner; new planning tables are missing from the exported schema aggregate; system-upsert audits can report an unpreserved enabled state; duplicate scheduling relies on driver error text; required bounded ports do not provide all required signal categories; and required API/concurrency/scheduling integration coverage is incomplete. Status set to in-progress; no implementation changes made.
+- 2026-08-07: Repaired the supplied independent-review findings only. Legacy system origins remain immutable; Discovery adapts owner-published bounded ports, including healthy empty signals; direct system creation derives the planner tuple identity; planning tables are exported; refresh audits retain persisted enablement; due scheduling uses conflict-safe insertion; and focused command/lease/fence/scheduling coverage was added. Status returned to ready-for-dev pending follow-up review.
 
 ### File List
 
 - _bmad-output/implementation-artifacts/18-3-manage-system-and-operator-query-proposals.md
+- _bmad-output/implementation-artifacts/spec-18-3-manage-system-and-operator-query-proposals.md
+- _bmad-output/implementation-artifacts/sprint-status.yaml
+- apps/worker/src/adapters.ts
+- drizzle/migrations/0047_discovery_query_planning.sql
+- packages/database/src/schema.ts
+- packages/database/src/youtube-discovery/index.ts
+- packages/database/src/youtube-discovery/planning-ports.ts
+- tests/admin-youtube-discovery-api.integration.test.ts
+- tests/youtube-discovery-foundation.integration.test.ts
+- tests/youtube-discovery-planning.test.ts
+- tests/youtube-discovery-policy.test.ts

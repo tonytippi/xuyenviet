@@ -411,7 +411,8 @@ development_status:
   # 2026-08-07: Final bounded repair adds serial PostgreSQL coverage that exhausts the first run, then claims and completes a second due run under the same policy while proving the first remains terminal with exactly one terminal audit. Focused integration verification passed; status synchronized to done.
   18-2-execute-fenced-scheduled-discovery-runs: done
   # 2026-08-07: Unattended independent review of bbc752d79fb48927571beb4fe9f9ce0019b84db9..10c352b22c79bd10eb951f27eb6740ed57297b4d ran Blind Hunter, Edge Case Hunter, and Acceptance Auditor synchronously. Actionable findings: legacy system-origin corruption in migration 0047; direct Knowledge-table access and empty-source misclassification in the concrete port; inconsistent system target identity; missing planning tables in exported schema; inaccurate preserved-enabled audit; driver-text duplicate scheduling recovery; incomplete required port categories; and incomplete protected-command, lease/fence, and scheduling integration evidence. No implementation changes were made during review.
-  18-3-manage-system-and-operator-query-proposals: in-progress
+  # 2026-08-07: Repaired only the independent-review findings: immutable legacy system origin, aggregate-owned safe port adapters and empty availability, shared tuple identity, schema export, preserved-enabled audit, conflict-safe due admission, and focused command/lease/fence/scheduling coverage. Status restored to ready-for-dev pending follow-up review.
+  18-3-manage-system-and-operator-query-proposals: ready-for-dev
   18-4-discover-canonical-youtube-candidates-safely: backlog
   18-5-enrich-candidates-with-safe-derived-signals-and-retention: backlog
   epic-18-retrospective: optional

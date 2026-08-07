@@ -30,7 +30,7 @@ describe("YouTube Discovery policy", () => {
     const unrelatedSystemActor = createSystemAuditActor("system-youtube-capture");
 
     await expect(createYoutubeDiscoveryPolicyVersion({ version: 2, isCurrent: false, actor: unrelatedSystemActor }, database)).rejects.toThrow("Discovery system actor");
-    await expect(createYoutubeDiscoveryQueryProposal({ origin: "system", reason: "coverage_gap", priority: 50, queryText: "Đà Lạt đường đèo", cadenceMinutes: 1440, actor: unrelatedSystemActor }, database)).rejects.toThrow("Discovery system actor");
+    await expect(createYoutubeDiscoveryQueryProposal({ origin: "system", reason: "coverage_gap", priority: 50, queryText: "Đà Lạt đường đèo", cadenceMinutes: 1440, actor: unrelatedSystemActor, systemSignal: { reason: "coverage_gap", geography: "Da Lat", taxonomy: "route", priority: 50 } }, database)).rejects.toThrow("Discovery system actor");
     await expect(createYoutubeDiscoveryQueryProposal({ origin: "operator", reason: "coverage_gap", priority: 50, queryText: "Đà Lạt đường đèo", cadenceMinutes: 1440, actor: createSystemAuditActor("system-youtube-discovery") }, database)).rejects.toThrow("user actor");
   });
 
@@ -38,9 +38,9 @@ describe("YouTube Discovery policy", () => {
     const database = { transaction: () => { throw new Error("query validation should run before transaction"); } } as never;
     const actor = createSystemAuditActor("system-youtube-discovery");
 
-    await expect(createYoutubeDiscoveryQueryProposal({ origin: "system", reason: "coverage_gap", priority: 50, queryText: "https://example.com/?token=secret", cadenceMinutes: 1440, actor }, database)).rejects.toThrow("Invalid YouTube Discovery query proposal");
+    await expect(createYoutubeDiscoveryQueryProposal({ origin: "system", reason: "coverage_gap", priority: 50, queryText: "https://example.com/?token=secret", cadenceMinutes: 1440, actor, systemSignal: { reason: "coverage_gap", geography: "Da Lat", taxonomy: "route", priority: 50 } }, database)).rejects.toThrow("Invalid YouTube Discovery query proposal");
     await expect(createYoutubeDiscoveryQueryProposal({ origin: "system", reason: "unsafe_reason" as never, priority: 50, queryText: "Đà Lạt đường đèo", cadenceMinutes: 1440, actor }, database)).rejects.toThrow("Invalid YouTube Discovery query proposal");
-    await expect(createYoutubeDiscoveryQueryProposal({ origin: "system", reason: "operator_request", priority: 50, queryText: "Đà Lạt đường đèo", cadenceMinutes: 1440, actor }, database)).rejects.toThrow("Invalid YouTube Discovery query proposal");
+    await expect(createYoutubeDiscoveryQueryProposal({ origin: "system", reason: "operator_request", priority: 50, queryText: "Đà Lạt đường đèo", cadenceMinutes: 1440, actor, systemSignal: { reason: "operator_request" as never, geography: "Da Lat", taxonomy: "route", priority: 50 } }, database)).rejects.toThrow("Invalid YouTube Discovery query proposal");
   });
 
   test("accepts user policy commands and matching query proposal actors", async () => {
@@ -52,7 +52,7 @@ describe("YouTube Discovery policy", () => {
     expect(transactions).toBe(1);
     await expect(createYoutubeDiscoveryQueryProposal({ origin: "operator", reason: "coverage_gap", priority: 50, queryText: "Đà Lạt đường đèo", cadenceMinutes: 1440, actor: operator }, database)).rejects.toThrow();
     expect(transactions).toBe(2);
-    await expect(createYoutubeDiscoveryQueryProposal({ origin: "system", reason: "coverage_gap", priority: 50, queryText: "Đà Lạt đường đèo", cadenceMinutes: 1440, actor: createSystemAuditActor("system-youtube-discovery") }, database)).rejects.toThrow();
-    expect(transactions).toBe(3);
+    await expect(createYoutubeDiscoveryQueryProposal({ origin: "system", reason: "coverage_gap", priority: 50, queryText: "Đà Lạt đường đèo", cadenceMinutes: 1440, actor: createSystemAuditActor("system-youtube-discovery"), systemSignal: { reason: "coverage_gap", geography: "Da Lat", taxonomy: "route", priority: 50 } }, database)).rejects.toThrow();
+    expect(transactions).toBe(2);
   });
 });

@@ -1,6 +1,7 @@
 import { runWorkerAdapter } from "@xuyenviet/worker-domain/adapters";
 import { consoleOperationalTelemetrySink, type OperationalTelemetrySink } from "@xuyenviet/contracts";
-import { closeDatabaseClient, createPostgresAiAskDiscoveryQuerySignalPort, createPostgresKnowledgeDiscoveryQuerySignalPort } from "@xuyenviet/database";
+import { closeDatabaseClient } from "@xuyenviet/database";
+import { createUnavailableAiAskDiscoveryQuerySignalPort, createUnavailableKnowledgeDiscoveryQuerySignalPort } from "@xuyenviet/domain";
 import { bindYoutubeDiscoveryPlanningPorts } from "@xuyenviet/worker-domain";
 import { closeSync, constants, openSync, writeSync } from "node:fs";
 import { extname, isAbsolute, normalize, resolve, sep } from "node:path";
@@ -24,7 +25,8 @@ function testTelemetryFileSink(environment = process.env): OperationalTelemetryS
 
 async function main() {
   try {
-    bindYoutubeDiscoveryPlanningPorts(createPostgresKnowledgeDiscoveryQuerySignalPort(), createPostgresAiAskDiscoveryQuerySignalPort());
+    // Aggregate owners have not yet bound their published safe projections here.
+    bindYoutubeDiscoveryPlanningPorts(createUnavailableKnowledgeDiscoveryQuerySignalPort(), createUnavailableAiAskDiscoveryQuerySignalPort());
     await runWorkerAdapter(process.argv.slice(2), { telemetry: testTelemetryFileSink() ?? consoleOperationalTelemetrySink });
   } catch {
     console.error("Worker adapter failed");

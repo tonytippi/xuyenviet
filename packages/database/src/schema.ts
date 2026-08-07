@@ -415,7 +415,7 @@ export const youtubeDiscoveryQueryProposals = pgTable(
     check("youtube_discovery_query_proposals_priority_check", sql`${proposal.priority} between 1 and 100`),
     check("youtube_discovery_query_proposals_query_check", sql`length(btrim(${proposal.queryText})) between 1 and 240 and position(chr(10) in ${proposal.queryText}) = 0 and position(chr(13) in ${proposal.queryText}) = 0 and ${proposal.queryText} !~* '(https?://|www\\.|[?&](token|secret|code|key|signature|password)=)'`),
     check("youtube_discovery_query_proposals_cadence_check", sql`${proposal.cadenceMinutes} between 15 and 10080`),
-    check("youtube_discovery_query_proposals_target_check", sql`(${proposal.origin} = 'system' and ${proposal.targetDigest} ~ '^[a-f0-9]{64}$' and ${proposal.safeSignalSummary} is not null and ${proposal.safeSignalSummary} in ('coverage_gap', 'freshness_risk', 'unresolved_conflict', 'anonymized_demand')) or (${proposal.origin} = 'operator' and ${proposal.targetDigest} is null and ${proposal.safeSignalSummary} is null)`),
+    check("youtube_discovery_query_proposals_target_check", sql`(${proposal.origin} = 'system' and ${proposal.targetDigest} ~ '^[a-f0-9]{64}$' and ${proposal.safeSignalSummary} is not null and ${proposal.safeSignalSummary} in ('coverage_gap', 'freshness_risk', 'unresolved_conflict', 'anonymized_demand', 'operator_request')) or (${proposal.origin} = 'operator' and ${proposal.targetDigest} is null and ${proposal.safeSignalSummary} is null)`),
   ],
 );
 
@@ -2299,6 +2299,8 @@ export const schema = {
   auditEvents,
   youtubeDiscoveryPolicyVersions,
   youtubeDiscoveryQueryProposals,
+  youtubeDiscoveryPlanningLeases,
+  youtubeDiscoveryPlanningOutcomes,
   youtubeDiscoveryRuns,
   sources,
   sourceCaptureVersions,

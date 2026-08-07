@@ -2,18 +2,18 @@
 title: 'Manage system and operator query proposals'
 type: 'feature'
 created: '2026-08-07'
-status: 'done'
+status: 'ready-for-dev'
 baseline_revision: 'bbc752d'
-review_loop_iteration: 0
-followup_review_recommended: false
-final_revision: '10c352b22c79bd10eb951f27eb6740ed57297b4d'
+review_loop_iteration: 1
+followup_review_recommended: true
+final_revision: null
 context: []
 warnings: []
 ---
 
 ## Auto Run Result
 
-- Status: done
-- Summary: Completed Story 18.3 system planning, operator proposal management, and due-query scheduling.
-- Verification: The implementation at `10c352b22c79bd10eb951f27eb6740ed57297b4d` is clean and verified.
-- Commit: `10c352b22c79bd10eb951f27eb6740ed57297b4d` (`feat(discovery): manage query proposals`).
+- Status: ready-for-dev
+- Summary: The supplied independent-review findings were repaired; a follow-up independent review remains required.
+- Verification: Targeted Discovery unit and integration tests, type checking, and whitespace validation passed for the repair.
+- Commit: pending repair commit.
