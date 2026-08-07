@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, test } from "vitest";
 import { eq, sql } from "drizzle-orm";
 
-import { auditEvents, createSystemAuditActor, createUserAuditActor, createYoutubeDiscoveryPolicyVersion, createYoutubeDiscoveryQueryProposal, createYoutubeDiscoveryRun, youtubeDiscoveryPolicyVersions, youtubeDiscoveryQueryProposals, youtubeDiscoveryRuns } from "@xuyenviet/database";
+import { auditEvents, claimYoutubeDiscoveryPlanning, createSystemAuditActor, createUserAuditActor, createYoutubeDiscoveryPolicyVersion, createYoutubeDiscoveryQueryProposal, createYoutubeDiscoveryRun, refreshYoutubeDiscoverySystemProposals, scheduleYoutubeDiscoveryDueRuns, youtubeDiscoveryPlanningLeases, youtubeDiscoveryPolicyVersions, youtubeDiscoveryQueryProposals, youtubeDiscoveryRuns } from "@xuyenviet/database";
 
 import { resetTestDatabase, seedTestOperator, testDb } from "./helpers/db";
 
@@ -61,5 +61,36 @@ describe.sequential("YouTube Discovery foundation persistence", () => {
     await expect(createYoutubeDiscoveryRun({ policyVersionId: policy.id, queryProposalId: query.id }, testDb)).rejects.toThrow("enabled query proposal");
     await expect(testDb.execute(sql`insert into youtube_discovery_policy_versions (id, version, is_current, enabled, minimum_candidate_score, priority_score_weight, freshness_score_weight, cadence_minutes, retention_days, comment_signal_ttl_days, max_concurrent_runs, max_retry_attempts, retry_delay_minutes) values ('invalid-policy', 2, false, true, 0.5, 0.6, 0.4, 14, 180, 30, 1, 3, 15)`)).rejects.toThrow();
     await expect(testDb.execute(sql`insert into youtube_discovery_query_proposals (id, origin, reason, priority, query_text, enabled, cadence_minutes) values ('unsafe-query', 'system', 'not_a_safe_reason', 50, 'https://example.com/?token=secret', true, 1440)`)).rejects.toThrow();
+  });
+
+  test("audits each fenced system proposal upsert without storing signal values", async () => {
+    await createYoutubeDiscoveryPolicyVersion({ version: 1, isCurrent: true, policy: { cadenceMinutes: 15 }, actor: createSystemAuditActor("system-youtube-discovery") }, testDb);
+    const claim = await claimYoutubeDiscoveryPlanning("discovery-a", testDb);
+    expect(claim).not.toBeNull();
+    await expect(refreshYoutubeDiscoverySystemProposals(claim!, [{ status: "available", signals: [{ reason: "coverage_gap", geography: "Da Lat", taxonomy: "route", priority: 70 }] }], testDb)).resolves.toBe("completed");
+    const proposal = await testDb.select().from(youtubeDiscoveryQueryProposals);
+    const audits = await testDb.select({ targetId: auditEvents.targetId, afterSummary: auditEvents.afterSummary, actorSystem: auditEvents.actorSystem }).from(auditEvents).where(eq(auditEvents.targetType, "youtube_discovery_query_proposal"));
+    expect(proposal).toHaveLength(1);
+    expect(audits).toEqual([{ targetId: proposal[0]!.id, actorSystem: "system-youtube-discovery", afterSummary: JSON.stringify({ origin: "system", priority: 70, enabled: true, cadenceMinutes: 15 }) }]);
+    expect(audits[0]!.afterSummary).not.toContain("Da Lat");
+  });
+
+  test("does not catch up planning or proposal intervals after global disable", async () => {
+    const enabled = await createYoutubeDiscoveryPolicyVersion({ version: 1, isCurrent: true, policy: { cadenceMinutes: 15 }, actor: createSystemAuditActor("system-youtube-discovery") }, testDb);
+    await seedTestOperator();
+    const proposal = await createYoutubeDiscoveryQueryProposal({ origin: "operator", reason: "operator_request", priority: 50, queryText: "Da Lat route", cadenceMinutes: 15, actor: createUserAuditActor({ userId: "operator", email: "operator@example.com" }) }, testDb);
+    await testDb.update(youtubeDiscoveryQueryProposals).set({ scheduleAnchorAt: new Date(0), nextDueAt: new Date(1) }).where(eq(youtubeDiscoveryQueryProposals.id, proposal.id));
+    await createYoutubeDiscoveryPolicyVersion({ version: 2, isCurrent: true, policy: { enabled: false, cadenceMinutes: 15 }, actor: createSystemAuditActor("system-youtube-discovery") }, testDb);
+    expect(await scheduleYoutubeDiscoveryDueRuns(testDb)).toBe(0);
+    expect((await testDb.select({ nextDueAt: youtubeDiscoveryQueryProposals.nextDueAt }).from(youtubeDiscoveryQueryProposals).where(eq(youtubeDiscoveryQueryProposals.id, proposal.id)))[0]!.nextDueAt).toBeNull();
+    expect(await claimYoutubeDiscoveryPlanning("discovery-a", testDb)).toBeNull();
+    await expect(testDb.select({ state: youtubeDiscoveryPlanningLeases.state }).from(youtubeDiscoveryPlanningLeases)).resolves.toEqual([{ state: "cancelled" }]);
+    await createYoutubeDiscoveryPolicyVersion({ version: 3, isCurrent: true, policy: { cadenceMinutes: 15 }, actor: createSystemAuditActor("system-youtube-discovery") }, testDb);
+    expect(await claimYoutubeDiscoveryPlanning("discovery-b", testDb)).toBeNull();
+    expect(await scheduleYoutubeDiscoveryDueRuns(testDb)).toBe(0);
+    const resumed = (await testDb.select({ nextDueAt: youtubeDiscoveryQueryProposals.nextDueAt }).from(youtubeDiscoveryQueryProposals).where(eq(youtubeDiscoveryQueryProposals.id, proposal.id)))[0]!.nextDueAt;
+    expect(resumed).toBeInstanceOf(Date);
+    expect(resumed!.getTime()).toBeGreaterThan(Date.now());
+    expect(enabled.id).toBeTruthy();
   });
 });

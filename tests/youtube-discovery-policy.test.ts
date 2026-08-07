@@ -40,6 +40,7 @@ describe("YouTube Discovery policy", () => {
 
     await expect(createYoutubeDiscoveryQueryProposal({ origin: "system", reason: "coverage_gap", priority: 50, queryText: "https://example.com/?token=secret", cadenceMinutes: 1440, actor }, database)).rejects.toThrow("Invalid YouTube Discovery query proposal");
     await expect(createYoutubeDiscoveryQueryProposal({ origin: "system", reason: "unsafe_reason" as never, priority: 50, queryText: "Đà Lạt đường đèo", cadenceMinutes: 1440, actor }, database)).rejects.toThrow("Invalid YouTube Discovery query proposal");
+    await expect(createYoutubeDiscoveryQueryProposal({ origin: "system", reason: "operator_request", priority: 50, queryText: "Đà Lạt đường đèo", cadenceMinutes: 1440, actor }, database)).rejects.toThrow("Invalid YouTube Discovery query proposal");
   });
 
   test("accepts user policy commands and matching query proposal actors", async () => {

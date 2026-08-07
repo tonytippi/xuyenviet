@@ -400,15 +400,49 @@ export const youtubeDiscoveryQueryProposals = pgTable(
     queryText: text("query_text").notNull(),
     enabled: boolean("enabled").default(true).notNull(),
     cadenceMinutes: integer("cadence_minutes").notNull(),
+    targetDigest: text("target_digest"),
+    safeSignalSummary: text("safe_signal_summary"),
+    scheduleAnchorAt: timestamp("schedule_anchor_at", { mode: "date" }),
+    nextDueAt: timestamp("next_due_at", { mode: "date" }),
     createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
   },
   (proposal) => [
     index("youtube_discovery_query_proposals_enabled_cadence_idx").on(proposal.enabled, proposal.cadenceMinutes),
+    uniqueIndex("youtube_discovery_system_query_target_idx").on(proposal.reason, proposal.targetDigest).where(sql`${proposal.origin} = 'system'`),
+    check("youtube_discovery_query_proposals_schedule_check", sql`(${proposal.scheduleAnchorAt} is null and ${proposal.nextDueAt} is null) or (${proposal.scheduleAnchorAt} is not null and (${proposal.nextDueAt} is null or ${proposal.nextDueAt} > ${proposal.scheduleAnchorAt}))`),
     check("youtube_discovery_query_proposals_origin_check", sql`${proposal.origin} in ('system', 'operator')`),
     check("youtube_discovery_query_proposals_reason_check", sql`${proposal.reason} in ('coverage_gap', 'freshness_risk', 'unresolved_conflict', 'anonymized_demand', 'operator_request')`),
     check("youtube_discovery_query_proposals_priority_check", sql`${proposal.priority} between 1 and 100`),
     check("youtube_discovery_query_proposals_query_check", sql`length(btrim(${proposal.queryText})) between 1 and 240 and position(chr(10) in ${proposal.queryText}) = 0 and position(chr(13) in ${proposal.queryText}) = 0 and ${proposal.queryText} !~* '(https?://|www\\.|[?&](token|secret|code|key|signature|password)=)'`),
     check("youtube_discovery_query_proposals_cadence_check", sql`${proposal.cadenceMinutes} between 15 and 10080`),
+    check("youtube_discovery_query_proposals_target_check", sql`(${proposal.origin} = 'system' and ${proposal.targetDigest} ~ '^[a-f0-9]{64}$' and ${proposal.safeSignalSummary} is not null and ${proposal.safeSignalSummary} in ('coverage_gap', 'freshness_risk', 'unresolved_conflict', 'anonymized_demand')) or (${proposal.origin} = 'operator' and ${proposal.targetDigest} is null and ${proposal.safeSignalSummary} is null)`),
+  ],
+);
+
+export const youtubeDiscoveryPlanningLeases = pgTable(
+  "youtube_discovery_planning_leases",
+  {
+    id: text("id").primaryKey(), policyVersionId: text("policy_version_id").references(() => youtubeDiscoveryPolicyVersions.id, { onDelete: "restrict" }), state: text("state").$type<"queued" | "running" | "completed" | "cancelled">().default("queued").notNull(), nextRunAt: timestamp("next_run_at", { mode: "date" }).notNull(), claimedBy: text("claimed_by"), claimedAt: timestamp("claimed_at", { mode: "date" }), leaseExpiresAt: timestamp("lease_expires_at", { mode: "date" }), fencingToken: text("fencing_token"), terminalAt: timestamp("terminal_at", { mode: "date" }), outcome: text("outcome").$type<"completed" | "unavailable" | "contended" | "cancelled">(), createdOrRefreshedCount: integer("created_or_refreshed_count").default(0).notNull(), unavailableCodes: text("unavailable_codes").array().default([]).notNull(), createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
+  },
+  (lease) => [check("youtube_discovery_planning_singleton_check", sql`${lease.id} = 'youtube-discovery-planning'`), check("youtube_discovery_planning_state_check", sql`${lease.state} in ('queued', 'running', 'completed', 'cancelled')`), check("youtube_discovery_planning_count_check", sql`${lease.createdOrRefreshedCount} between 0 and 200`), check("youtube_discovery_planning_codes_check", sql`${lease.unavailableCodes} <@ array['source_unavailable','source_timeout','source_invalid']::text[]`), check("youtube_discovery_planning_claim_check", sql`(${lease.claimedBy} is null and ${lease.claimedAt} is null and ${lease.leaseExpiresAt} is null and ${lease.fencingToken} is null) or (${lease.claimedBy} is not null and length(btrim(${lease.claimedBy})) between 1 and 160 and ${lease.claimedAt} is not null and ${lease.leaseExpiresAt} > ${lease.claimedAt} and ${lease.fencingToken} ~ '^[a-f0-9]{64}$')`), check("youtube_discovery_planning_state_shape_check", sql`(${lease.state} = 'running' and ${lease.policyVersionId} is not null and ${lease.claimedBy} is not null and ${lease.terminalAt} is null and ${lease.outcome} is null and ${lease.createdOrRefreshedCount} = 0 and cardinality(${lease.unavailableCodes}) = 0) or (${lease.state} = 'queued' and ${lease.claimedBy} is null and (${lease.outcome} is null or (${lease.outcome} in ('completed', 'unavailable') and ${lease.terminalAt} is not null))) or (${lease.state} = 'completed' and ${lease.claimedBy} is null and ${lease.terminalAt} is not null and ${lease.outcome} in ('completed', 'unavailable')) or (${lease.state} = 'cancelled' and ${lease.claimedBy} is null and ${lease.terminalAt} is not null and ${lease.outcome} = 'cancelled')`)],
+);
+
+export const youtubeDiscoveryPlanningOutcomes = pgTable(
+  "youtube_discovery_planning_outcomes",
+  {
+    id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+    planningId: text("planning_id").notNull().references(() => youtubeDiscoveryPlanningLeases.id, { onDelete: "restrict" }),
+    policyVersionId: text("policy_version_id").notNull().references(() => youtubeDiscoveryPolicyVersions.id, { onDelete: "restrict" }),
+    outcome: text("outcome").$type<"completed" | "unavailable" | "cancelled">().notNull(),
+    createdOrRefreshedCount: integer("created_or_refreshed_count").notNull(),
+    unavailableCodes: text("unavailable_codes").array().default([]).notNull(),
+    completedAt: timestamp("completed_at", { mode: "date" }).defaultNow().notNull(),
+  },
+  (outcome) => [
+    index("youtube_discovery_planning_outcomes_planning_idx").on(outcome.planningId, outcome.completedAt),
+    check("youtube_discovery_planning_outcomes_state_check", sql`${outcome.outcome} in ('completed', 'unavailable', 'cancelled')`),
+    check("youtube_discovery_planning_outcomes_count_check", sql`${outcome.createdOrRefreshedCount} between 0 and 200`),
+    check("youtube_discovery_planning_outcomes_codes_check", sql`${outcome.unavailableCodes} <@ array['source_unavailable','source_timeout','source_invalid']::text[]`),
   ],
 );
 
@@ -418,6 +452,7 @@ export const youtubeDiscoveryRuns = pgTable(
     id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
     policyVersionId: text("policy_version_id").notNull().references(() => youtubeDiscoveryPolicyVersions.id, { onDelete: "restrict" }),
     queryProposalId: text("query_proposal_id").references(() => youtubeDiscoveryQueryProposals.id, { onDelete: "restrict" }),
+    scheduleIntervalAt: timestamp("schedule_interval_at", { mode: "date" }),
     state: text("state").$type<YoutubeDiscoveryRunState>().default("queued").notNull(),
     nextRunAt: timestamp("next_run_at", { mode: "date" }).defaultNow().notNull(),
     claimedBy: text("claimed_by"),
@@ -438,6 +473,7 @@ export const youtubeDiscoveryRuns = pgTable(
     index("youtube_discovery_runs_claim_queue_idx").on(run.state, run.nextRunAt, run.createdAt),
     index("youtube_discovery_runs_lease_expiry_idx").on(run.leaseExpiresAt).where(sql`${run.leaseExpiresAt} is not null`),
     index("youtube_discovery_runs_policy_version_idx").on(run.policyVersionId),
+    uniqueIndex("youtube_discovery_runs_proposal_interval_idx").on(run.queryProposalId, run.scheduleIntervalAt).where(sql`${run.queryProposalId} is not null and ${run.scheduleIntervalAt} is not null`),
     check("youtube_discovery_runs_state_check", sql`${run.state} in ('queued', 'running', 'retrying', 'completed', 'failed', 'cancelled')`),
     check("youtube_discovery_runs_snapshots_check", sql`${run.maxRetryAttempts} between 0 and 10 and ${run.retryDelayMinutes} between 1 and 1440 and ${run.maxConcurrentRuns} between 1 and 20 and ${run.attemptCount} between 0 and ${run.maxRetryAttempts} + 1`),
     check("youtube_discovery_runs_error_code_check", sql`${run.safeErrorCode} is null or ${run.safeErrorCode} in ('stage_transient', 'retry_exhausted', 'lease_retry_exhausted', 'policy_revoked')`),

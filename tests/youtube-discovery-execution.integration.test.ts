@@ -3,7 +3,7 @@ import { and, eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 
-import { auditEvents, cancelYoutubeDiscoveryRunIfDisabled, claimNextYoutubeDiscoveryRun, createSystemAuditActor, createYoutubeDiscoveryPolicyVersion, createYoutubeDiscoveryRun, finishYoutubeDiscoveryRun, retryYoutubeDiscoveryRun, schema, youtubeDiscoveryRuns } from "@xuyenviet/database";
+import { auditEvents, cancelYoutubeDiscoveryRunIfDisabled, claimNextYoutubeDiscoveryRun, claimYoutubeDiscoveryPlanning, createSystemAuditActor, createYoutubeDiscoveryPolicyVersion, createYoutubeDiscoveryRun, finishYoutubeDiscoveryRun, refreshYoutubeDiscoverySystemProposals, retryYoutubeDiscoveryRun, schema, youtubeDiscoveryRuns } from "@xuyenviet/database";
 import { resetTestDatabase, testDb } from "./helpers/db";
 import { runYoutubeDiscoveryPoll, setYoutubeDiscoveryExecutionStageForTest } from "../packages/worker-domain/src/features/youtube-discovery/execution";
 
@@ -11,6 +11,11 @@ let firstWorker: ReturnType<typeof drizzle<typeof schema>>;
 let secondWorker: ReturnType<typeof drizzle<typeof schema>>;
 let firstWorkerSql: ReturnType<typeof postgres>;
 let secondWorkerSql: ReturnType<typeof postgres>;
+
+async function completeDuePlanning() {
+  const claim = await claimYoutubeDiscoveryPlanning("discovery-planning-fixture", testDb);
+  if (claim) await refreshYoutubeDiscoverySystemProposals(claim, [], testDb);
+}
 
 describe.sequential("YouTube Discovery run execution", () => {
   beforeAll(() => {
@@ -137,6 +142,7 @@ describe.sequential("YouTube Discovery run execution", () => {
   test("cancels before the final write when a stage revokes the policy", async () => {
     const policy = await createYoutubeDiscoveryPolicyVersion({ version: 1, isCurrent: true, actor: createSystemAuditActor("system-youtube-discovery") }, testDb);
     const run = await createYoutubeDiscoveryRun({ policyVersionId: policy.id }, testDb);
+    await completeDuePlanning();
     setYoutubeDiscoveryExecutionStageForTest(async () => {
       await createYoutubeDiscoveryPolicyVersion({ version: 2, isCurrent: true, policy: { enabled: false }, actor: createSystemAuditActor("system-youtube-discovery") }, testDb);
       return "complete";
@@ -150,6 +156,7 @@ describe.sequential("YouTube Discovery run execution", () => {
   test("cancels before retry requeue when a transient stage revokes the policy", async () => {
     const policy = await createYoutubeDiscoveryPolicyVersion({ version: 1, isCurrent: true, policy: { maxRetryAttempts: 2 }, actor: createSystemAuditActor("system-youtube-discovery") }, testDb);
     const run = await createYoutubeDiscoveryRun({ policyVersionId: policy.id }, testDb);
+    await completeDuePlanning();
     setYoutubeDiscoveryExecutionStageForTest(async () => {
       await createYoutubeDiscoveryPolicyVersion({ version: 2, isCurrent: true, policy: { enabled: false }, actor: createSystemAuditActor("system-youtube-discovery") }, testDb);
       return "stage_transient";
@@ -163,6 +170,7 @@ describe.sequential("YouTube Discovery run execution", () => {
   test("converts a rejecting private stage seam into a fenced retry", async () => {
     const policy = await createYoutubeDiscoveryPolicyVersion({ version: 1, isCurrent: true, policy: { maxRetryAttempts: 2 }, actor: createSystemAuditActor("system-youtube-discovery") }, testDb);
     const run = await createYoutubeDiscoveryRun({ policyVersionId: policy.id }, testDb);
+    await completeDuePlanning();
     setYoutubeDiscoveryExecutionStageForTest(async () => { throw new Error("unsafe provider detail"); });
     await expect(runYoutubeDiscoveryPoll("discovery-a")).resolves.toMatchObject({ capability: "youtube.discovery", resultCode: "retry", durableId: run.id });
     await expect(testDb.select().from(youtubeDiscoveryRuns).where(eq(youtubeDiscoveryRuns.id, run.id))).resolves.toMatchObject([{ state: "retrying", safeErrorCode: "stage_transient", claimedBy: null }]);
@@ -172,6 +180,7 @@ describe.sequential("YouTube Discovery run execution", () => {
   test("observes recovery-only terminal maintenance safely", async () => {
     const policy = await createYoutubeDiscoveryPolicyVersion({ version: 1, isCurrent: true, policy: { maxRetryAttempts: 0 }, actor: createSystemAuditActor("system-youtube-discovery") }, testDb);
     const run = await createYoutubeDiscoveryRun({ policyVersionId: policy.id }, testDb);
+    await completeDuePlanning();
     const claim = (await claimNextYoutubeDiscoveryRun({ workerId: "discovery-a" }, testDb)).claim;
     await testDb.update(youtubeDiscoveryRuns).set({ claimedAt: new Date(0), leaseExpiresAt: new Date(1) }).where(eq(youtubeDiscoveryRuns.id, run.id));
     await expect(runYoutubeDiscoveryPoll("discovery-b")).resolves.toEqual({ capability: "youtube.discovery", resultCode: "failure", leaseRecovery: "recovered", leaseRecoveryCount: 1 });

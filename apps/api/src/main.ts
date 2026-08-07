@@ -7,7 +7,7 @@ import { loadEnvFile } from "node:process";
 import { NestFactory } from "@nestjs/core";
 
 import { getBrowserAuthConfig } from "@xuyenviet/config";
-import { createPostgresAdminAiModelCatalogPort, createPostgresAdminFacebookCapturePort, createPostgresAdminKnowledgeCoveragePort, createPostgresAdminKnowledgeIntakePort, createPostgresAdminKnowledgeReviewPort, createPostgresAdminOverviewPort, createPostgresAdminQualityDashboardPort, createPostgresAdminYoutubeCapturePort, createPostgresAiAskStreamExecutionPort, createPostgresApiIdentityRepository, createPostgresConversationSummaryRepository, createPostgresPlanningReadRepository, createPostgresTravelerCommandPort, createPostgresTravelerShellRepository, createPostgresTripProjectSidebarReadRepository, createPostgresTripRecommendationReadRepository, createPostgresUserRoleGovernancePort } from "@xuyenviet/database";
+import { createPostgresAdminAiModelCatalogPort, createPostgresAdminFacebookCapturePort, createPostgresAdminKnowledgeCoveragePort, createPostgresAdminKnowledgeIntakePort, createPostgresAdminKnowledgeReviewPort, createPostgresAdminOverviewPort, createPostgresAdminQualityDashboardPort, createPostgresAdminYoutubeCapturePort, createPostgresAdminYoutubeDiscoveryPort, createPostgresAiAskStreamExecutionPort, createPostgresApiIdentityRepository, createPostgresConversationSummaryRepository, createPostgresPlanningReadRepository, createPostgresTravelerCommandPort, createPostgresTravelerShellRepository, createPostgresTripProjectSidebarReadRepository, createPostgresTripRecommendationReadRepository, createPostgresUserRoleGovernancePort } from "@xuyenviet/database";
 import { createAiAskStreamExecution } from "@xuyenviet/domain";
 
 import { createApiModule } from "./app.module";
@@ -35,6 +35,7 @@ async function bootstrap() {
     adminKnowledgeCoverage: createPostgresAdminKnowledgeCoveragePort(),
     adminFacebookCaptures: createPostgresAdminFacebookCapturePort(),
     adminYoutubeCaptures: createPostgresAdminYoutubeCapturePort(),
+    adminYoutubeDiscovery: createPostgresAdminYoutubeDiscoveryPort(),
     aiAskExecution,
     browserAuth,
   }));

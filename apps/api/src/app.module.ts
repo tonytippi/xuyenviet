@@ -5,7 +5,7 @@ import { APP_FILTER, APP_GUARD, APP_PIPE } from "@nestjs/core";
 import type { BrowserAuthConfig } from "@xuyenviet/config";
 import { consoleOperationalTelemetrySink, type OperationalTelemetrySink } from "@xuyenviet/contracts";
 import type { ApiIdentityRepository, ConversationSummaryRepository, TravelerShellRepository } from "@xuyenviet/database";
-import type { AdminAiModelCatalogPort, AdminFacebookCapturePort, AdminKnowledgeCoveragePort, AdminKnowledgeIntakePort, AdminKnowledgeReviewPort, AdminOverviewPort, AdminQualityPort, AdminYoutubeCapturePort, PlanningReadRepository, TravelerCommandPort, TripProjectSidebarReadRepository, TripRecommendationReadRepository, UserRoleGovernancePort } from "@xuyenviet/domain";
+import type { AdminAiModelCatalogPort, AdminFacebookCapturePort, AdminKnowledgeCoveragePort, AdminKnowledgeIntakePort, AdminKnowledgeReviewPort, AdminOverviewPort, AdminQualityPort, AdminYoutubeCapturePort, AdminYoutubeDiscoveryPort, PlanningReadRepository, TravelerCommandPort, TripProjectSidebarReadRepository, TripRecommendationReadRepository, UserRoleGovernancePort } from "@xuyenviet/domain";
 
 import { API_IDENTITY_REPOSITORY, ResourceServerGuard } from "./auth/resource-server.guard";
 import { AdminCapabilityGuard } from "./auth/admin-capability.guard";
@@ -21,6 +21,7 @@ import { AdminYoutubeCapturesController, ADMIN_YOUTUBE_CAPTURE_PORT } from "./ad
 import { AdminKnowledgeReviewController, ADMIN_KNOWLEDGE_REVIEW_PORT } from "./admin/admin-knowledge-review.controller";
 import { AdminKnowledgeCoverageController, ADMIN_KNOWLEDGE_COVERAGE_PORT } from "./admin/admin-knowledge-coverage.controller";
 import { AdminQualityController, ADMIN_QUALITY_PORT } from "./admin/admin-quality.controller";
+import { AdminYoutubeDiscoveryController, ADMIN_YOUTUBE_DISCOVERY_PORT } from "./admin/admin-youtube-discovery.controller";
 import { RequestIdMiddleware } from "./common/request-id.middleware";
 import { SafeValidationPipe } from "./common/safe-validation.pipe";
 import { SafeApiExceptionFilter } from "./safe-api-exception.filter";
@@ -32,9 +33,9 @@ import { VersionController } from "./version/version.controller";
 import { AiAskController, AI_ASK_STREAM_EXECUTION, OPERATIONAL_TELEMETRY_SINK } from "./ai-ask/ai-ask.controller";
 import type { AiAskStreamExecution } from "@xuyenviet/domain";
 
-export function createApiModule(identities: ApiIdentityRepository, dependencies?: { conversationSummaries: ConversationSummaryRepository; travelerShells?: TravelerShellRepository; planningReads?: PlanningReadRepository; tripRecommendations?: TripRecommendationReadRepository; tripProjectSidebarReads?: TripProjectSidebarReadRepository; travelerCommands?: TravelerCommandPort; userRoleGovernance?: UserRoleGovernancePort; adminAiModelCatalog?: AdminAiModelCatalogPort; adminOverview?: AdminOverviewPort; adminQuality?: AdminQualityPort; adminKnowledgeIntake?: AdminKnowledgeIntakePort; adminKnowledgeReview?: AdminKnowledgeReviewPort; adminKnowledgeCoverage?: AdminKnowledgeCoveragePort; adminFacebookCaptures?: AdminFacebookCapturePort; adminYoutubeCaptures?: AdminYoutubeCapturePort; aiAskExecution?: AiAskStreamExecution; telemetry?: OperationalTelemetrySink; browserAuth?: BrowserAuthConfig }) {
+export function createApiModule(identities: ApiIdentityRepository, dependencies?: { conversationSummaries: ConversationSummaryRepository; travelerShells?: TravelerShellRepository; planningReads?: PlanningReadRepository; tripRecommendations?: TripRecommendationReadRepository; tripProjectSidebarReads?: TripProjectSidebarReadRepository; travelerCommands?: TravelerCommandPort; userRoleGovernance?: UserRoleGovernancePort; adminAiModelCatalog?: AdminAiModelCatalogPort; adminOverview?: AdminOverviewPort; adminQuality?: AdminQualityPort; adminKnowledgeIntake?: AdminKnowledgeIntakePort; adminKnowledgeReview?: AdminKnowledgeReviewPort; adminKnowledgeCoverage?: AdminKnowledgeCoveragePort; adminFacebookCaptures?: AdminFacebookCapturePort; adminYoutubeCaptures?: AdminYoutubeCapturePort; adminYoutubeDiscovery?: AdminYoutubeDiscoveryPort; aiAskExecution?: AiAskStreamExecution; telemetry?: OperationalTelemetrySink; browserAuth?: BrowserAuthConfig }) {
   @Module({
-     controllers: [...(dependencies ? [HealthController, VersionController, ConversationsController, OpenApiController, BrowserIdentityController, ...(dependencies.travelerCommands ? [TravelerCommandsController] : []), ...(dependencies.aiAskExecution ? [AiAskController] : []), ...(dependencies.userRoleGovernance ? [AdminUsersController] : []), ...(dependencies.adminAiModelCatalog ? [AdminAiModelsController] : []), ...(dependencies.adminOverview ? [AdminOverviewController] : []), ...(dependencies.adminQuality ? [AdminQualityController] : []), ...(dependencies.adminKnowledgeIntake ? [AdminKnowledgeIntakeController] : []), ...(dependencies.adminKnowledgeReview ? [AdminKnowledgeReviewController] : []), ...(dependencies.adminKnowledgeCoverage ? [AdminKnowledgeCoverageController] : []), ...(dependencies.adminFacebookCaptures ? [AdminFacebookCapturesController] : []), ...(dependencies.adminYoutubeCaptures ? [AdminYoutubeCapturesController] : [])] : []), AdminWorkspaceController],
+     controllers: [...(dependencies ? [HealthController, VersionController, ConversationsController, OpenApiController, BrowserIdentityController, ...(dependencies.travelerCommands ? [TravelerCommandsController] : []), ...(dependencies.adminYoutubeDiscovery ? [AdminYoutubeDiscoveryController] : []), ...(dependencies.aiAskExecution ? [AiAskController] : []), ...(dependencies.userRoleGovernance ? [AdminUsersController] : []), ...(dependencies.adminAiModelCatalog ? [AdminAiModelsController] : []), ...(dependencies.adminOverview ? [AdminOverviewController] : []), ...(dependencies.adminQuality ? [AdminQualityController] : []), ...(dependencies.adminKnowledgeIntake ? [AdminKnowledgeIntakeController] : []), ...(dependencies.adminKnowledgeReview ? [AdminKnowledgeReviewController] : []), ...(dependencies.adminKnowledgeCoverage ? [AdminKnowledgeCoverageController] : []), ...(dependencies.adminFacebookCaptures ? [AdminFacebookCapturesController] : []), ...(dependencies.adminYoutubeCaptures ? [AdminYoutubeCapturesController] : [])] : []), AdminWorkspaceController],
     providers: [
         { provide: API_IDENTITY_REPOSITORY, useValue: identities },
        { provide: BROWSER_AUTH_CONFIG, useValue: { config: dependencies?.browserAuth } },
@@ -53,7 +54,8 @@ export function createApiModule(identities: ApiIdentityRepository, dependencies?
                 ...(dependencies.adminKnowledgeReview ? [{ provide: ADMIN_KNOWLEDGE_REVIEW_PORT, useValue: dependencies.adminKnowledgeReview }] : []),
                 ...(dependencies.adminKnowledgeCoverage ? [{ provide: ADMIN_KNOWLEDGE_COVERAGE_PORT, useValue: dependencies.adminKnowledgeCoverage }] : []),
               ...(dependencies.adminFacebookCaptures ? [{ provide: ADMIN_FACEBOOK_CAPTURE_PORT, useValue: dependencies.adminFacebookCaptures }] : []),
-              ...(dependencies.adminYoutubeCaptures ? [{ provide: ADMIN_YOUTUBE_CAPTURE_PORT, useValue: dependencies.adminYoutubeCaptures }] : []),
+               ...(dependencies.adminYoutubeCaptures ? [{ provide: ADMIN_YOUTUBE_CAPTURE_PORT, useValue: dependencies.adminYoutubeCaptures }] : []),
+               ...(dependencies.adminYoutubeDiscovery ? [{ provide: ADMIN_YOUTUBE_DISCOVERY_PORT, useValue: dependencies.adminYoutubeDiscovery }] : []),
          { provide: OPERATIONAL_TELEMETRY_SINK, useValue: dependencies.telemetry ?? consoleOperationalTelemetrySink },
         ...(dependencies.aiAskExecution ? [{ provide: AI_ASK_STREAM_EXECUTION, useValue: dependencies.aiAskExecution }] : []),
       ] : []),

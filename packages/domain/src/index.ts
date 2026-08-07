@@ -41,6 +41,8 @@ export * from "./admin-knowledge-coverage";
 export * from "./evaluation-scenarios";
 export * from "./admin-quality";
 export * from "./youtube-discovery/policy";
+export * from "./youtube-discovery/planning";
+export * from "./youtube-discovery/admin";
 
 const newConversationPreview = "Hội thoại mới";
 const previewMaxLength = 60;

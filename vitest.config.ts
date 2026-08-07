@@ -35,6 +35,8 @@ const unitTests = [
     "tests/youtube-discovery-ownership.test.ts",
     "tests/youtube-discovery-worker.test.ts",
     "tests/youtube-discovery-execution.test.ts",
+    "tests/youtube-discovery-planning.test.ts",
+    "tests/admin-youtube-discovery-contract.test.ts",
 ];
 
 export default defineConfig({

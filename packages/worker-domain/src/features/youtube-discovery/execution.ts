@@ -1,12 +1,22 @@
-import { cancelYoutubeDiscoveryRunIfDisabled, claimNextYoutubeDiscoveryRun, finishYoutubeDiscoveryRun, retryYoutubeDiscoveryRun } from "@xuyenviet/database";
+import { cancelYoutubeDiscoveryRunIfDisabled, claimNextYoutubeDiscoveryRun, claimYoutubeDiscoveryPlanning, finishYoutubeDiscoveryRun, refreshYoutubeDiscoverySystemProposals, retryYoutubeDiscoveryRun, scheduleYoutubeDiscoveryDueRuns } from "@xuyenviet/database";
 import type { WorkerPollObservation } from "@xuyenviet/contracts";
+import { createUnavailableAiAskDiscoveryQuerySignalPort, createUnavailableKnowledgeDiscoveryQuerySignalPort, type AiAskDiscoveryQuerySignalPort, type DiscoveryQuerySignalPortResult, type KnowledgeDiscoveryQuerySignalPort } from "@xuyenviet/domain";
 
 type DiscoveryStageResult = "complete" | "stage_transient";
 
 // This is deliberately private and finite; Story 18.4 replaces the no-provider stage.
 let executionStage: (() => Promise<DiscoveryStageResult>) | undefined;
+let knowledgePlanningPort: KnowledgeDiscoveryQuerySignalPort = createUnavailableKnowledgeDiscoveryQuerySignalPort();
+let aiAskPlanningPort: AiAskDiscoveryQuerySignalPort = createUnavailableAiAskDiscoveryQuerySignalPort();
 
 export async function runYoutubeDiscoveryPoll(workerId: string): Promise<WorkerPollObservation> {
+  const planning = await claimYoutubeDiscoveryPlanning(workerId);
+  if (planning) {
+    const results = await Promise.all([readPlanningPort(knowledgePlanningPort), readPlanningPort(aiAskPlanningPort)]);
+    const outcome = await refreshYoutubeDiscoverySystemProposals(planning, results);
+    return { capability: "youtube.discovery", resultCode: outcome === "contended" ? "contended" : "success", durableId: planning.id, leaseRecovery: "none" };
+  }
+  await scheduleYoutubeDiscoveryDueRuns();
   const claim = await claimNextYoutubeDiscoveryRun({ workerId });
   if (!claim.claim) return { capability: "youtube.discovery", resultCode: claim.contended ? "contended" : claim.recoveredTerminalCount ? "failure" : claim.recoveredCount ? "success" : "no_work", leaseRecovery: claim.recoveredCount ? "recovered" : claim.contended ? "contended" : "none", ...(claim.recoveredCount ? { leaseRecoveryCount: claim.recoveredCount } : {}) };
   const active = await cancelYoutubeDiscoveryRunIfDisabled(claim.claim);
@@ -36,4 +46,16 @@ function observationFor(claim: NonNullable<Awaited<ReturnType<typeof claimNextYo
 /** @internal Test-only stage seam. It is intentionally not exported from the package barrel. */
 export function setYoutubeDiscoveryExecutionStageForTest(stage: (() => Promise<DiscoveryStageResult>) | undefined) {
   executionStage = stage;
+}
+
+async function readPlanningPort(port: KnowledgeDiscoveryQuerySignalPort | AiAskDiscoveryQuerySignalPort): Promise<DiscoveryQuerySignalPortResult> {
+  try { return await port.readSignals(); } catch { return { status: "unavailable", code: "source_unavailable" }; }
+}
+
+/** Public composition seam. Owners bind their explicit aggregate-only ports here. */
+export function bindYoutubeDiscoveryPlanningPorts(knowledge: KnowledgeDiscoveryQuerySignalPort, aiAsk: AiAskDiscoveryQuerySignalPort) { knowledgePlanningPort = knowledge; aiAskPlanningPort = aiAsk; }
+
+/** @internal Test-only safe-port seam. */
+export function setYoutubeDiscoveryPlanningPortsForTest(knowledge: (() => Promise<DiscoveryQuerySignalPortResult>) | undefined, aiAsk: (() => Promise<DiscoveryQuerySignalPortResult>) | undefined) {
+  bindYoutubeDiscoveryPlanningPorts(knowledge ? { readSignals: knowledge } : createUnavailableKnowledgeDiscoveryQuerySignalPort(), aiAsk ? { readSignals: aiAsk } : createUnavailableAiAskDiscoveryQuerySignalPort());
 }
