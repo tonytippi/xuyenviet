@@ -1,5 +1,5 @@
 # generated: 2026-07-25
-# last_updated: 2026-08-06 (Story 16.4 review repairs complete; browser accessibility evidence remains blocked.)
+# last_updated: 2026-08-07 (YouTube Discovery Epics 18-20 added from final readiness-approved plan.)
 # project: xuyenviet
 # project_key: NOKEY
 # tracking_system: file-system
@@ -33,7 +33,7 @@
 #   - done: Completed
 
 generated: 2026-07-25
-last_updated: 2026-08-06 (Story 16.4 review repairs complete; browser accessibility evidence remains blocked.)
+last_updated: 2026-08-07 (YouTube Discovery Epics 18-20 added from final readiness-approved plan.)
 project: xuyenviet
 project_key: NOKEY
 tracking_system: file-system
@@ -400,6 +400,33 @@ development_status:
   epic-17: done
   17-1-align-admin-guides-with-the-current-knowledge-flow: done
   epic-17-retrospective: optional
+
+  # 2026-08-07: YouTube Discovery implementation plan passed final readiness.
+  # Discovery remains URL-only: it delegates accepted URLs to Knowledge intake
+  # and never schedules, invokes, or retries manual youtube:capture.
+  epic-18: backlog
+  18-1-establish-discovery-ownership-policy-and-audit-foundation: backlog
+  18-2-execute-fenced-scheduled-discovery-runs: backlog
+  18-3-manage-system-and-operator-query-proposals: backlog
+  18-4-discover-canonical-youtube-candidates-safely: backlog
+  18-5-enrich-candidates-with-safe-derived-signals-and-retention: backlog
+  epic-18-retrospective: optional
+
+  epic-19: backlog
+  19-1-register-discovery-ai-metadata-triage: backlog
+  19-2-produce-deterministic-candidate-recommendations: backlog
+  19-3-review-one-ranked-candidate-at-a-time: backlog
+  19-4-accept-a-candidate-through-knowledge-intake: backlog
+  19-5-defer-skip-and-verify-candidate-decision-safety: backlog
+  epic-19-retrospective: optional
+
+  epic-20: backlog
+  20-1-build-the-action-required-discovery-queue: backlog
+  20-2-deliver-knowledge-mission-drill-downs: backlog
+  20-3-deliver-automation-health-and-safe-incident-detail: backlog
+  20-4-control-discovery-enablement-safely: backlog
+  20-5-verify-control-tower-accessibility-and-operational-boundaries: backlog
+  epic-20-retrospective: optional
 
 action_items:
   - epic: 5

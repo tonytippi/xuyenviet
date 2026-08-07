@@ -24,6 +24,10 @@ stepsCompleted:
   - step-02-epic-16-design
   - step-03-epic-16-story-generation
   - step-04-epic-16-final-validation
+  - step-01-youtube-discovery-requirements-extraction
+  - step-02-youtube-discovery-epic-design
+  - step-03-youtube-discovery-story-generation
+  - step-04-youtube-discovery-final-validation
 inputDocuments:
   - _bmad-output/planning-artifacts/prds/prd-xuyenviet-2026-07-04/prd.md
   - _bmad-output/planning-artifacts/architecture/architecture-xuyenviet-2026-07-04/ARCHITECTURE-SPINE.md
@@ -33,6 +37,10 @@ inputDocuments:
   - _bmad-output/planning-artifacts/proposal-eliminate-fake-system-users-with-audit-actors.md
   - _bmad-output/planning-artifacts/knowledge-lifecycle-normalization-2026-08-05.md
   - _bmad-output/planning-artifacts/implementation-readiness-report-2026-08-05.md
+  - docs/proposals/ai-first-youtube-discovery.md
+  - _bmad-output/planning-artifacts/architecture/architecture-xuyenviet-youtube-discovery-2026-08-06/ARCHITECTURE-SPINE.md
+  - _bmad-output/planning-artifacts/ux-designs/ux-xuyenviet-youtube-discovery-2026-08-06/DESIGN.md
+  - _bmad-output/planning-artifacts/ux-designs/ux-xuyenviet-youtube-discovery-2026-08-06/EXPERIENCE.md
 ---
 
 # xuyenviet - Epic Breakdown
@@ -246,6 +254,81 @@ UX-DR22: Traveler/admin/public surfaces target WCAG 2.2 AA keyboard, focus, live
 UX-DR25: Traveler UI uses plain-language action/recovery copy and hides implementation details, including technical states, provenance taxonomy, confidence codes, provider/model data, audit vocabulary, request IDs, error codes, and diagnostics. Authorized admin projections remain separate.
 UX-DR23: Admin knowledge workflows stay separate, structured, explicit, and desktop-optimized for dense review.
 UX-DR24: Referral attribution is silent and introduces no reward/credit/ranking/payout UI.
+
+### YouTube Discovery Requirements (2026-08-06)
+
+#### Functional Requirements
+
+YTD-FR1: Generate and refresh system query proposals from coverage gaps, freshness risk, unresolved conflicts, and aggregated anonymized AI Ask demand; support simple operator-created queries in the same proposal aggregate.
+
+YTD-FR2: Let authorized operators view query origin, reason, priority, query text, enabled/paused state, cadence, and next-run context; create, edit, reprioritize, pause, and resume simple queries.
+
+YTD-FR3: Let an authorized operator enable or disable Discovery globally. The switch controls Discovery planning, search, enrichment, and triage only; it never changes queued Knowledge sources or runs/cancels `youtube:capture`.
+
+YTD-FR4: Create and execute Discovery planning and due-query runs through the registered Worker adapter while global Discovery and per-query policy allow it.
+
+YTD-FR5: Search documented YouTube Data API endpoints and create one canonical candidate per eligible individual public YouTube video ID, retaining query/run appearances and safe ranking history.
+
+YTD-FR6: Enrich candidates only with bounded safe video/channel metadata and sanitized derived comment signals; comments remain triage-only and never become evidence, capture material, cards, source bundles, or traveler content.
+
+YTD-FR7: Use AI Gateway metadata triage under the dedicated `youtube_discovery_triage` model purpose and versioned prompt; validate typed output and combine it with deterministic eligibility/ranking into `skip`, `defer`, or `consider` recommendations.
+
+YTD-FR8: Expose operators to a ranked, one-at-a-time candidate review queue with safe metadata, plain-language recommendation, concise factors/penalties, derived signals, and prior safe capture outcome.
+
+YTD-FR9: Let an operator accept, defer, or skip a candidate through audited, role-protected commands. Accept calls the existing Knowledge intake API with the canonical URL and records `accepted` only after `submitted` or `duplicate`; it never writes a Discovery-owned source or starts capture.
+
+YTD-FR10: Provide distinct submitted, duplicate, failed, and unknown/reconciling Accept feedback; only submitted feedback reminds the operator that `youtube:capture` remains a separate manual action.
+
+YTD-FR11: Show a Discovery control tower with action-required queue, Knowledge Mission views for Coverage needs, Queries, Candidates, and Discovery funnel, and Automation Health views for schedule/state, throughput/backlog, incidents, usage telemetry when available, freshness, and safe affected-record drill-down.
+
+YTD-FR12: Route high-impact verification/conflict items to the existing Knowledge recommendation surface without allowing Discovery to verify, publish, suppress, or otherwise change Knowledge claims.
+
+YTD-FR13: Retain safe candidate/audit/dedupe metadata under policy-controlled retention with 180 days as initial default; use a shorter policy-controlled TTL for derived comment signals.
+
+#### Non-Functional Requirements
+
+YTD-NFR1: Discovery must remain URL-only. It must not create or directly write Knowledge sources, capture versions, ingestion jobs, evidence, cards, or publication state; only Knowledge intake may create sources and only the manual `youtube:capture` workflow may invoke Gemini video analysis.
+
+YTD-NFR2: Discovery must use only documented YouTube Data API capabilities. It must not introduce Playwright/direct browser scraping, undocumented APIs, transcript scraping, video downloads, media persistence, or a second Gemini path.
+
+YTD-NFR3: Persist and expose only bounded safe operational metadata. Exclude raw comments, raw model prompts/responses, provider payloads, transcripts, media, credentials, cookies, raw source material, evidence spans, and traveler content.
+
+YTD-NFR4: Worker stages use PostgreSQL leases/fencing, policy-version snapshots, stage-level global-switch revocation checks, bounded exponential retry, terminal safe error codes, and durable run states `queued | running | retrying | completed | failed | cancelled`.
+
+YTD-NFR5: Discovery runs under `system-youtube-discovery`, with registered Worker readiness/telemetry and auditable automated execution. Metadata-triage usage records the Discovery model purpose, prompt version, system executor, and linked run.
+
+YTD-NFR6: Admin commands and read models are role-protected API capabilities; `apps/admin` remains a typed presentation client. Candidate/query mutations record actor, target, action, timestamp, and safe before/after summary.
+
+YTD-NFR7: The control tower targets WCAG 2.2 AA, keyboard operation, visible focus, color-independent statuses, screen-reader announcements, and 320 CSS-pixel/400% zoom reflow without loss of authorized function.
+
+YTD-NFR8: Desktop optimizes queue-plus-inspector review; mobile/narrow layouts retain all authorized functions through sequential list/detail surfaces without two-dimensional scrolling.
+
+#### Additional Architecture Requirements
+
+- Use one exported canonicalizer shared by Discovery and Knowledge intake for documented HTTPS `youtube.com`/`youtu.be` individual-video forms and canonical `https://www.youtube.com/watch?v=<video-id>` URLs.
+- Use a Knowledge-owned safe prior-capture eligibility lookup; Discovery must not query Knowledge tables directly.
+- Implement policy as one versioned PostgreSQL record. It owns global enablement, score bands/weights, cadence, retention, and bounded concurrency/retry settings; hard budget/quota reservations remain deferred.
+- Keep triage recommendation (`skip | defer | consider`), candidate operator state (`pending | accepted | deferred | skipped`), and run state separate closed enums.
+- Treat global disable as a fence before each provider call and Discovery write. It cancels Discovery work only; re-enabling schedules new eligible work and never revives terminal cancelled runs.
+- Keep candidate/channel/query blocking and exclusion policy deferred from the initial slice.
+
+#### UX Design Requirements
+
+YTD-UX1: Discovery opens on an action-required queue, not a KPI dashboard. It contains only reviewable candidates, stalled high-priority Mission needs, persistent Discovery failures/rate limits, and links to existing high-impact Knowledge recommendations.
+
+YTD-UX2: Desktop candidate review uses a ranked queue and persistent inspector; the inspector shows safe context and one-at-a-time `Accept`, `Để sau`, and `Bỏ qua` actions. Narrow/mobile layouts reflow this into sequential queue/detail views.
+
+YTD-UX3: Accept is immediate, disables duplicate actions while pending, does not use a confirmation dialog, and advances selection after a submitted/duplicate result. Failed or unknown outcomes preserve safe recovery behavior without claiming a source/capture exists.
+
+YTD-UX4: Candidate scoring uses a plain-language recommendation plus three to five factors/penalties; numeric model scores are authorized progressive disclosure and never establish fact correctness or credibility.
+
+YTD-UX5: Mission exposes Coverage needs, Queries, Candidates, and Discovery funnel, including gap-to-query-to-candidate drill-down. Queries visibly distinguish system-generated from operator-created origin and support simple editing/priority/pause/resume.
+
+YTD-UX6: Health shows enablement, last/next run, safe recent result, throughput/review backlog/deferred age, rate-limit/provider/schema incidents, telemetry freshness/unavailability, and safe affected-record drill-down.
+
+YTD-UX7: The global switch changes immediately with clear enabled/disabled, fencing, cancelled, and completed-before-cancellation states; it communicates that queued Knowledge sources and manual capture are unaffected.
+
+YTD-UX8: Use Vietnamese-first, direct operational copy; never render raw comments, model output, source material, provider diagnostics, secrets, or capture internals.
 
 ### Architecture Delta Requirements (2026-07-28)
 
@@ -2128,6 +2211,467 @@ So that the clean-break migration remains safe as the pipeline evolves.
 **When** verification runs
 **Then** focused tests, `pnpm test:unit`, `pnpm test:integration`, `pnpm lint`, `pnpm typecheck`, `pnpm build`, and `pnpm exec drizzle-kit check` are run
 **And** any environmental blocker is recorded exactly in the implementation artifact.
+
+### YouTube Discovery Coverage Map (2026-08-06)
+
+YTD-FR1: Epic 18 - System and operator query proposals.
+YTD-FR2: Epic 18 - Query management and scheduling context.
+YTD-FR3: Epic 18 - Global Discovery enablement boundary.
+YTD-FR4: Epic 18 - Worker-owned planning and due-query execution.
+YTD-FR5: Epic 18 - Documented YouTube discovery and canonical candidates.
+YTD-FR6: Epic 18 - Safe bounded enrichment and derived comment signals.
+YTD-FR7: Epic 19 - AI Gateway metadata triage and deterministic recommendation.
+YTD-FR8: Epic 19 - Explainable one-at-a-time candidate review.
+YTD-FR9: Epic 19 - Audited Accept/Defer/Skip and Knowledge intake handoff.
+YTD-FR10: Epic 19 - Submitted/duplicate/failure/unknown Accept recovery.
+YTD-FR11: Epic 20 - Action queue, Mission, and Health control tower.
+YTD-FR12: Epic 20 - Safe routing to existing Knowledge recommendations.
+YTD-FR13: Epic 18 - Policy-controlled safe retention.
+YTD-NFR1 through YTD-NFR6: Epic 18 establishes ownership, safe persistence, Worker/audit/API contracts; Epic 19 verifies candidate-review boundaries.
+YTD-NFR7 and YTD-NFR8: Epic 20 - Accessible responsive control-tower implementation.
+YTD-UX1: Epic 20 - Action-first control tower.
+YTD-UX2 through YTD-UX4: Epic 19 - Candidate queue/inspector, immediate Accept, and plain-language explanation.
+YTD-UX5 through YTD-UX8: Epic 20 - Mission/Health surfaces, switch states, and safe Vietnamese operations copy.
+YTD-ARCH1: Epic 18 Story 18.4 - Shared canonicalizer and Knowledge-owned prior-capture lookup.
+YTD-ARCH2: Epic 18 Story 18.1 - One versioned PostgreSQL Discovery policy record.
+YTD-ARCH3: Epic 18 Story 18.3 - Separate triage/candidate/run state enums.
+YTD-ARCH4: Epic 18 Story 18.2 - Global-disable fence before every provider call and Discovery write.
+YTD-ARCH5: Epic 18 Stories 18.1 through 18.5 - No hard budget/quota reservation enforcement in the initial slice.
+YTD-ARCH6: Epic 19 Story 19.5 - Blocking/exclusion policy is deferred.
+
+## Epic 18: Automated Discovery Mission Foundation
+
+Operators gain a safe, scheduled Discovery mission that derives useful query proposals, searches documented YouTube APIs, and retains deduplicated URL candidates without creating a second Knowledge or capture lifecycle.
+
+**Requirements covered:** YTD-FR1, YTD-FR2, YTD-FR3, YTD-FR4, YTD-FR5, YTD-FR6, YTD-FR13; YTD-NFR1 through YTD-NFR6.
+
+**Implementation notes:** This epic creates the Discovery-owned policy, query, run, candidate, safe audit, retention, Worker adapter, and read-model foundation. It uses PostgreSQL lease/fence/revocation semantics, documented YouTube Data API endpoints, a shared canonicalizer, and a Knowledge-owned prior-capture lookup. It does not call Gemini video analysis, invoke Knowledge intake, or implement candidate triage/review UI.
+
+## Epic 19: Explainable Candidate Review And Knowledge Intake Handoff
+
+Operators can review one ranked video URL at a time, understand its recommendation and penalties, and safely decide to accept, defer, or skip it. An accepted URL enters the existing Knowledge intake contract without being mistaken for capture or publication.
+
+**Requirements covered:** YTD-FR7, YTD-FR8, YTD-FR9, YTD-FR10; YTD-UX2, YTD-UX3, YTD-UX4; YTD-NFR1, YTD-NFR3, YTD-NFR5, YTD-NFR6.
+
+**Implementation notes:** This epic extends the managed AI Gateway catalog with `youtube_discovery_triage`, validates structured triage, applies deterministic eligibility/ranking, and delivers role-protected candidate commands. Accept calls the existing Knowledge intake API and handles submitted, duplicate, failed, and unknown/reconciling outcomes. It never writes `sources`, never tracks capture lifecycle, and never schedules `youtube:capture`.
+
+## Epic 20: Discovery Control Tower
+
+Operators can act on the few Discovery items that need attention, trace mission gaps to queries and candidates, inspect automation health, and safely control Discovery without affecting Knowledge capture.
+
+**Requirements covered:** YTD-FR11, YTD-FR12; YTD-UX1, YTD-UX5, YTD-UX6, YTD-UX7, YTD-UX8; YTD-NFR7, YTD-NFR8.
+
+**Implementation notes:** The default entry is an action-required queue, not a KPI dashboard. Mission delivers Coverage needs, Queries, Candidates, and Funnel drill-down. Health delivers schedule, backlog, incidents, telemetry freshness, and safe affected-record detail. The immediate global switch fences Discovery work only; it never changes queued Knowledge sources or executes/cancels manual `youtube:capture`. Blocking/exclusion policy and hard budget enforcement remain deferred.
+
+### Story 18.1: Establish Discovery Ownership, Policy, and Audit Foundation
+
+As an operator,
+I want Discovery to have its own governed policy, records, and automated identity,
+So that scheduled URL discovery can operate without becoming a second Knowledge or capture lifecycle.
+
+**Acceptance Criteria:**
+
+**Given** the Discovery foundation migration is applied
+**When** the versioned Discovery policy, query proposal, run, and required safe audit records are created
+**Then** they are introduced through Drizzle migrations and owned by Discovery modules only
+**And** no Discovery command or repository writes `sources`, capture versions, ingestion jobs, evidence, cards, or publication state.
+
+**Given** Discovery policy is persisted
+**When** an operator changes its governed configuration or a Worker starts a run
+**Then** one versioned PostgreSQL policy record owns global enablement, score bands/weights, cadence, retention, and bounded concurrency/retry settings and each run snapshots its effective version
+**And** hard budget/quota reservations and enforcement are not introduced in the initial slice.
+
+**Given** automated Discovery work or a protected Discovery command records attribution
+**When** it persists an audit or execution record
+**Then** it uses registered `system-youtube-discovery` executor attribution and preserves the real operator only as the command actor where applicable
+**And** actor, target, action, timestamp, and bounded safe before/after summary are retained.
+
+**Given** the immutable system actor catalog is migrated
+**When** Discovery execution attribution is validated
+**Then** `system-youtube-discovery` is a server-owned catalog entry and arbitrary or missing Discovery executor IDs are rejected
+**And** no system actor can authenticate, receive a role, or become a user-owned record.
+
+### Story 18.2: Execute Fenced Scheduled Discovery Runs
+
+As an operator,
+I want Discovery runs to execute and recover safely in the Worker,
+So that scheduled search work cannot overlap, outlive a kill switch, or silently fail.
+
+**Acceptance Criteria:**
+
+**Given** the Worker runtime starts
+**When** Discovery is registered as a finite `youtube-discovery` adapter
+**Then** its readiness and safe telemetry participate in the existing Worker runtime contracts
+**And** it does not create a continuous request-serving loop or schedule `youtube:capture`.
+
+**Given** a planning or due-query run is eligible
+**When** the Worker claims it
+**Then** it uses PostgreSQL lease, fencing, policy-version snapshot, and closed states `queued | running | retrying | completed | failed | cancelled`
+**And** stale or duplicate workers cannot write a later stage result.
+
+**Given** an operator disables Discovery while a run is claimed
+**When** the Worker reaches any provider-call or Discovery-write boundary
+**Then** it compares its policy snapshot with current enablement under its lease and transitions revoked work to `cancelled`
+**And** it writes one safe audit/telemetry outcome for every terminal `completed`, `failed`, or `cancelled` transition without changing Knowledge intake, queued sources, or manual capture.
+
+**Given** a documented provider/API stage fails transiently
+**When** the run remains retryable
+**Then** it retries with bounded exponential backoff and safe error codes
+**And** exhausted work becomes terminal `failed`, while later eligible scheduled runs remain independent.
+
+### Story 18.3: Manage System and Operator Query Proposals
+
+As an operator,
+I want system and operator discovery queries in one manageable proposal list,
+So that Discovery can pursue knowledge needs while I can steer priority and scheduling.
+
+**Acceptance Criteria:**
+
+**Given** Discovery needs system-generated proposal inputs
+**When** the Discovery-owned planning stage reads Knowledge and AI Ask signals
+**Then** Knowledge and AI Ask publish explicit safe query ports for coverage gaps, freshness risk, unresolved conflicts, and aggregated anonymized demand
+**And** each port returns only bounded aggregate geography/taxonomy/priority/reason context, never traveler identity, prompt, conversation content, raw answer, raw source material, or provider payload.
+
+**Given** coverage gaps, freshness risk, unresolved conflicts, or aggregated anonymized AI Ask demand are available through safe upstream read contracts
+**When** the Worker-owned planning stage refreshes proposals
+**Then** it creates or refreshes system-origin query proposals idempotently with reason, target, priority, query text, cadence, enabled/paused state, and safe signal summary
+**And** it persists no traveler identity, prompt, conversation content, raw answer, or raw source material.
+
+**Given** an upstream signal port returns no signals or is temporarily unavailable
+**When** system proposal planning runs
+**Then** it creates no invented proposal from the missing input and records a safe planning outcome
+**And** operator-managed queries and other available signal sources continue according to their independent policy.
+
+**Given** an authorized operator manages a query proposal
+**When** they create a simple query, edit text, reprioritize, pause, or resume it
+**Then** the command is role-protected, audited, and preserves `origin = operator | system`
+**And** advanced rule builders and blocking/exclusion policy are not introduced.
+
+**Given** an enabled query is globally disabled or paused by the operator
+**When** its next execution is calculated
+**Then** global disable and per-query pause remain distinguishable states
+**And** neither state creates new due query work until the relevant control is enabled or resumed.
+
+### Story 18.4: Discover Canonical YouTube Candidates Safely
+
+As an operator,
+I want each useful YouTube search result represented once in Discovery while preserving where it was found,
+So that I can review a deduplicated URL queue with query-specific discovery context.
+
+**Acceptance Criteria:**
+
+**Given** Discovery or Knowledge intake receives a documented HTTPS `youtube.com` or `youtu.be` individual-video URL
+**When** canonicalization runs
+**Then** both use the same exported validator for allowed host/path forms and video-ID grammar
+**And** it returns the normalized canonical `https://www.youtube.com/watch?v=<video-id>` URL or rejects the input without provider/capture work.
+
+**Given** one enabled query run calls documented YouTube Data API search
+**When** it receives multiple eligible individual-video results
+**Then** it creates or updates one canonical Discovery candidate per distinct video ID
+**And** it records a separate query/run appearance for every result so one query can yield many candidates and one candidate can retain many appearances.
+
+**Given** multiple query runs discover the same canonical video ID
+**When** candidate persistence occurs concurrently or later
+**Then** only one canonical candidate remains reviewable while all safe appearances/history remain linked
+**And** duplicate candidates cannot create duplicate operator review work.
+
+**Given** a candidate is found, enriched, or later triaged in separate runs
+**When** its safe ranking context changes
+**Then** Discovery retains bounded ranking-history entries linked to the canonical candidate, query/run appearance, policy version, and timestamp
+**And** historical rank context contains no raw model output, comments, provider payloads, or Knowledge source link.
+
+**Given** Discovery evaluates a candidate against existing Knowledge capture history
+**When** it checks prior capture eligibility
+**Then** it calls a Knowledge-owned safe lookup keyed by canonical video identity and applicable capture compatibility
+**And** Discovery never queries Knowledge tables directly or stores a Knowledge source link.
+
+### Story 18.5: Enrich Candidates With Safe Derived Signals and Retention
+
+As an operator,
+I want candidate context that is useful for later triage without retaining unsafe source content,
+So that Discovery can rank URLs while protecting privacy and Knowledge boundaries.
+
+**Acceptance Criteria:**
+
+**Given** a canonical Discovery candidate is eligible for enrichment
+**When** Discovery reads documented YouTube API data
+**Then** it retains only bounded safe video/channel metadata, discovery identity, and allowed aggregate fields needed for triage
+**And** popularity/channel fields remain ranking signals only and never establish correctness or credibility.
+
+**Given** Discovery implementation chooses a search or enrichment mechanism
+**When** code and dependency boundaries are reviewed
+**Then** it uses only documented YouTube Data API capabilities
+**And** it introduces no Playwright/direct browser scraping, undocumented API, transcript scraping, video download, media persistence, or second Gemini path.
+
+**Given** comment information is used for triage
+**When** Discovery derives comment signals
+**Then** it strips or neutralizes links, instruction-like text, excessive content, PII, and unsupported markup before model use
+**And** it persists only sanitized derived signals, never raw comments, evidence, capture material, source bundles, or traveler-visible content.
+
+**Given** candidate/audit records and derived comment signals age past their policy retention
+**When** retention processing runs
+**Then** candidate, audit, and dedupe metadata use the policy-controlled retention with 180 days as the initial default
+**And** derived comment signals expire on a shorter policy-controlled TTL while concise required audit remains safe.
+
+**Given** focused unit and serial integration tests run
+**When** they cover canonicalization, many-results-per-query appearances, cross-query dedupe, prior-capture lookup isolation, lease/revocation, safe comment handling, retention, and provider failures
+**Then** invalid or unsafe paths fail closed without Discovery-created Knowledge state
+**And** tests follow the project unit/integration database boundaries.
+
+**Given** successful and failed search, enrichment, retry, retention, and telemetry paths persist Discovery records
+**When** persistence-level safety tests inspect the resulting rows
+**Then** they prove raw comments, prompts/responses, provider payloads, transcripts, media, credentials, cookies, raw source material, evidence spans, and traveler content cannot be stored
+**And** only the bounded safe operational schema is retained.
+
+### Story 19.1: Register Discovery AI Metadata Triage
+
+As an operator,
+I want Discovery triage to use a governed AI model with accountable safe output,
+So that candidate recommendations are explainable operational input rather than an untracked provider shortcut.
+
+**Acceptance Criteria:**
+
+**Given** Discovery metadata triage requires an AI Gateway model
+**When** the model catalog and Usage contract are extended
+**Then** they include dedicated `youtube_discovery_triage` purpose, text-input and structured-extraction capability requirements, versioned prompt identity, and `system-youtube-discovery` execution attribution
+**And** Gemini video-analysis credentials and `youtube:capture` remain outside Discovery triage.
+
+**Given** a candidate bundle is sent to triage
+**When** the AI Gateway request is assembled
+**Then** it includes only bounded safe video/channel metadata, query context, and sanitized derived signals
+**And** raw comments, raw source material, transcripts, media, prompts/responses, provider payloads, traveler data, and credentials are excluded.
+
+**Given** a Discovery triage invocation records AI usage
+**When** the Usage writer persists the event
+**Then** it records `youtube_discovery_triage` model purpose, prompt version, `system-youtube-discovery` executor, and the linked Discovery run
+**And** missing or invalid attribution prevents a successful triage record.
+
+**Given** model selection, provider invocation, or output validation fails
+**When** Discovery processes the result
+**Then** it records safe Usage/audit/run failure metadata and no Knowledge state is created
+**And** invalid output cannot become a candidate recommendation.
+
+**Given** successful and failed metadata-triage paths persist Discovery records
+**When** persistence-level safety tests inspect the resulting triage, usage, and run rows
+**Then** they prove raw comments, prompts/responses, provider payloads, transcripts, media, credentials, cookies, raw source material, evidence spans, and traveler content cannot be stored
+**And** only the bounded safe operational schema and required triage attribution are retained.
+
+### Story 19.2: Produce Deterministic Candidate Recommendations
+
+As an operator,
+I want AI triage recommendations constrained by deterministic policy,
+So that ranking helps prioritize review without becoming authority over eligibility or truth.
+
+**Acceptance Criteria:**
+
+**Given** a schema-valid triage output is available
+**When** Discovery persists its result
+**Then** it records immutable recommendation `skip | defer | consider`, bounded score factors, penalties, reasons, and safe derived signals
+**And** recommendation remains separate from mutable candidate state `pending | accepted | deferred | skipped`.
+
+**Given** Discovery determines whether a candidate can appear in review
+**When** deterministic policy evaluates it
+**Then** it rechecks canonical URL, public individual-video eligibility, dedupe, Knowledge-owned prior-capture eligibility, and configured score bands
+**And** model scores cannot override any failed hard eligibility condition.
+
+**Given** candidate explanation is projected to an authorized operator
+**When** it is rendered
+**Then** it uses a plain-language recommendation and concise factors/penalties
+**And** numeric scores remain progressive disclosure and never imply correctness, source verification, or publication eligibility.
+
+### Story 19.3: Review One Ranked Candidate at a Time
+
+As an operator,
+I want to inspect one ranked Discovery candidate with its safe rationale,
+So that I can make an informed intake decision without reviewing raw source content.
+
+**Acceptance Criteria:**
+
+**Given** an authorized operator opens candidate review on desktop/tablet
+**When** ranked candidates are available
+**Then** the API provides paginated or explicit load-more queue data and a selected-candidate safe detail projection
+**And** the UI renders a scan-friendly queue with persistent inspector for one candidate at a time.
+
+**Given** an operator selects a candidate
+**When** its inspector renders
+**Then** it shows canonical URL, safe video/channel metadata, query reason, recommendation, three to five factors/penalties, derived signals, and prior safe capture outcome
+**And** it never exposes raw comments, model output, raw source material, provider diagnostics, source IDs, or capture internals.
+
+**Given** Accept is pending for the selected candidate
+**When** the inspector renders its action row
+**Then** Accept, Defer, and Skip are disabled until the command resolves or reconciles
+**And** the pending state is announced without opening a confirmation dialog.
+
+**Given** the workspace is narrow, mobile, keyboard-operated, or uses assistive technology
+**When** candidate review is used
+**Then** all authorized functions reflow into sequential queue/detail views without two-dimensional scrolling
+**And** selection, focus, pagination, details, and state changes use accessible names, visible focus, selected-state semantics, and concise live announcements.
+
+### Story 19.4: Accept a Candidate Through Knowledge Intake
+
+As an operator,
+I want to accept a useful candidate directly from Discovery,
+So that its canonical URL enters the existing Knowledge intake workflow without Discovery taking ownership of capture.
+
+**Acceptance Criteria:**
+
+**Given** an authorized operator selects a reviewable candidate
+**When** they use immediate `Accept`
+**Then** the audited Discovery command calls the existing Knowledge seed-batch intake API with the canonical URL
+**And** Discovery does not directly write `sources`, retain a `sourceId`, invoke Gemini, execute capture, or schedule/retry `youtube:capture`.
+
+**Given** Knowledge intake returns `submitted`
+**When** the accept command completes
+**Then** Discovery records `accepted`, removes the candidate from active review, and returns `Đã thêm URL vào nguồn chờ xử lý. Bạn vẫn cần chạy YouTube Capture thủ công.`
+**And** the response does not claim capture, evidence, cards, publication, or traveler retrieval occurred.
+
+**Given** Knowledge intake returns `duplicate`
+**When** the accept command completes
+**Then** Discovery records `accepted`, removes the candidate from active review, and returns duplicate-specific feedback
+**And** it does not direct the operator to run capture again or infer existing capture state.
+
+**Given** intake response is ambiguous, unavailable, or fails
+**When** the operator attempts Accept
+**Then** the UI shows a distinct safe `Đang kiểm tra kết quả thêm URL` reconciling state before exposing retry for an unknown outcome
+**And** confirmed failure preserves the candidate review state with only a safe retry/recovery message.
+
+### Story 19.5: Defer, Skip, and Verify Candidate Decision Safety
+
+As an operator,
+I want safe alternatives to acceptance and reliable review recovery,
+So that the queue reflects deliberate decisions without duplicate intake or inaccessible actions.
+
+**Acceptance Criteria:**
+
+**Given** an authorized operator selects `Để sau` or `Bỏ qua`
+**When** the corresponding audited command succeeds
+**Then** it transitions only to `deferred` or `skipped`, removes the candidate from immediate review, and retains only policy-allowed safe history
+**And** no channel/query/candidate blocking or exclusion policy is introduced.
+
+**Given** an Accept, defer, or skip command completes
+**When** the queue refreshes
+**Then** it re-fetches the active ranked result set and selects the first remaining eligible candidate after the acted-on item
+**And** if none remain it shows a calm completion state rather than selecting unrelated Mission or Health work.
+
+**Given** focused unit, serial integration, API contract, and UI accessibility tests run
+**When** they exercise authorization, stale/concurrent decisions, submitted/duplicate/failed/unknown intake outcomes, retry/reconciliation, keyboard focus, live feedback, and narrow reflow
+**Then** only authorized valid transitions persist and manual capture remains separate
+**And** no test path permits Discovery to create Knowledge state beyond the existing intake API result.
+
+### Story 20.1: Build the Action-Required Discovery Queue
+
+As an operator,
+I want Discovery to open on the work that needs my attention,
+So that I can act quickly without scanning a noisy dashboard or routine history.
+
+**Acceptance Criteria:**
+
+**Given** an authorized operator opens Discovery
+**When** the default action queue loads
+**Then** it shows only reviewable candidates, aged high-priority review work, stalled high-priority Mission needs, persistent Discovery failures/rate limits, and safe links to high-impact Knowledge recommendations
+**And** ordinary deferrals and routine successful runs remain in Mission or Health history.
+
+**Given** an action-queue item is selected
+**When** it represents a candidate, Mission need, Health incident, or Knowledge recommendation
+**Then** it opens the corresponding Discovery workspace or existing Knowledge recommendation surface
+**And** it never implies Discovery can verify, publish, suppress, or otherwise mutate a Knowledge claim.
+
+**Given** no action-required work remains or queue pages change
+**When** the queue renders or is navigated by keyboard/assistive technology
+**Then** it provides a calm completion state or announced result range with predictable focus
+**And** it never substitutes a KPI card wall for actionable work.
+
+### Story 20.2: Deliver Knowledge Mission Drill-Downs
+
+As an operator,
+I want to trace Discovery needs from coverage gaps through queries to candidates,
+So that I can understand why a URL matters before reviewing or accepting it.
+
+**Acceptance Criteria:**
+
+**Given** an authorized operator opens Knowledge Mission
+**When** they select a Mission view
+**Then** they can inspect Coverage needs, Queries, Candidates, and Discovery funnel as distinct safe read models
+**And** coverage can be organized by corridor, location, route segment, taxonomy, and seasonal need with safe freshness/conflict/demand context.
+
+**Given** a high-priority coverage or freshness need exists
+**When** the operator opens its detail
+**Then** they can drill down to linked system/operator query proposals, safe latest run context, and ranked candidates
+**And** no raw AI Ask content, raw source material, comments, provider payloads, or evidence spans are rendered.
+
+**Given** the operator manages a query from Mission
+**When** they create, edit, reprioritize, pause, or resume a simple query
+**Then** the UI distinguishes `Hệ thống đề xuất` from `Operator tạo`, shows reason/state/next run, and calls the existing role-protected query command
+**And** it does not introduce advanced rule building or blocking/exclusion policy.
+
+### Story 20.3: Deliver Automation Health and Safe Incident Detail
+
+As an operator,
+I want to understand whether Discovery is operating and where it is blocked,
+So that I can respond to persistent failures without exposing sensitive operational data.
+
+**Acceptance Criteria:**
+
+**Given** an authorized operator opens Automation Health
+**When** safe Discovery projections are available
+**Then** they show enabled state, last/next run, most recent safe result, stage throughput, review backlog/deferred age, provider/rate-limit/schema incidents, and usage telemetry when available
+**And** incident state distinguishes retrying, terminal failed, and rate-limited work with next-attempt context when available.
+
+**Given** an operator drills into a run or incident
+**When** affected records are displayed
+**Then** the detail contains only safe candidate/run identity, stage, timestamp, retry/terminal state, and stable safe error category
+**And** it never exposes provider payloads, raw comments, raw source material, prompts/responses, credentials, evidence spans, or traveler data.
+
+**Given** Health has not run, has no incidents, is stale, or its projection is unavailable
+**When** the Health surface renders
+**Then** it distinguishes each state, shows last-updated time when known, and offers safe reload/recovery
+**And** missing or stale telemetry is never presented as healthy operation.
+
+### Story 20.4: Control Discovery Enablement Safely
+
+As an operator,
+I want to immediately pause or resume Discovery safely,
+So that I can stop new Discovery work during an operational issue without affecting Knowledge capture.
+
+**Acceptance Criteria:**
+
+**Given** an authorized operator changes the global Discovery switch
+**When** the server command succeeds
+**Then** the UI immediately reflects `Đang bật` or `Đang tắt` with persistent text status and accessible completed-result announcement
+**And** disabling controls Discovery planning/search/enrichment/triage only, not queued Knowledge sources or manual `youtube:capture`.
+
+**Given** Discovery is disabled while runs are in progress
+**When** Health projects those runs
+**Then** it distinguishes fencing requested, cancelled, and completed before cancellation
+**And** repeated switch commands are guarded until the server confirms the prior command result.
+
+**Given** Discovery is disabled or later re-enabled
+**When** run scheduling state is displayed
+**Then** disabled state shows no next run and an explicit paused explanation
+**And** re-enable schedules only new eligible planning/query work without reviving terminal cancelled runs.
+
+### Story 20.5: Verify Control Tower Accessibility and Operational Boundaries
+
+As a product owner,
+I want executable evidence that the Discovery control tower remains accessible and safely bounded,
+So that operational convenience cannot bypass the Discovery, Knowledge intake, or manual capture contracts.
+
+**Acceptance Criteria:**
+
+**Given** control-tower UI and contract tests run across desktop, narrow, and mobile viewports
+**When** they exercise action queue, candidate review, Mission query actions, Health, and global switch flows at 320 CSS pixels and 400% zoom
+**Then** every authorized function remains reachable through responsive sequential reflow without two-dimensional scrolling
+**And** keyboard operation, visible non-obscured focus, selected-state semantics, color-independent status, `aria-live`, and 44px touch targets meet the Discovery UX contract.
+
+**Given** read models, errors, and action feedback are inspected
+**When** safe-display tests run
+**Then** they exclude raw comments, source material, model/provider payloads, secrets, capture internals, evidence spans, and traveler content
+**And** submitted, duplicate, failed, and unknown intake outcomes never claim capture or publication.
+
+**Given** role-protected API, worker, and UI flows are tested end to end
+**When** they exercise one representative Action queue item, one Mission/Health drill-down, Accept, and the global switch
+**Then** no hidden path directly creates a source, invokes Gemini video analysis, schedules/retries `youtube:capture`, or changes a Knowledge claim
+**And** only the existing Knowledge intake API may create a source after a Discovery accept command.
 
 ## Epic 17: Current Operator Runbook
 

@@ -1,12 +1,14 @@
 # AI-First YouTube Discovery Proposal
 
-**Status:** Proposed and outside the active MVP scope. The active PRD excludes fully automated scraping at scale and contains no YouTube-discovery requirement. This proposal automates discovery and ranking, not Gemini capture admission. Align it with the active architecture and Facebook capture contracts before creating an epic.
+**Status:** Proposed and outside the active MVP scope. The active PRD excludes fully automated scraping at scale and contains no YouTube-discovery requirement. This proposal automates discovery and ranking only. It produces a ranked list of canonical video URLs for operator review; an operator accepts a URL through the existing Knowledge intake API, then `youtube:capture` remains manual. Discovery never writes or owns a Knowledge `source`.
 
 ## Purpose
 
 XuyenViet already captures operator-submitted individual YouTube videos with Gemini and routes timestamped bounded evidence into the Knowledge pipeline. Discovery is still manual: an operator must first find and submit each video.
 
-This proposal adds an AI-first discovery layer that periodically finds, prioritizes, and proposes useful Vietnam road-trip videos. It optimizes for useful traveler knowledge, not for video volume. The operator decides which ranked candidates justify Gemini analysis; the system supervises discovery health and presents the evidence needed for that admission decision.
+This proposal adds an AI-first discovery layer that periodically finds, prioritizes, and proposes useful Vietnam road-trip videos. It optimizes for useful traveler knowledge, not for video volume. The operator decides which ranked URLs justify manual submission to the existing Gemini capture workflow; the system supervises discovery health and presents the information needed for that decision.
+
+Discovery is a URL consideration workflow, not source intake. Searching, enrichment, and AI triage create only a candidate for a canonical video URL. They do not write or own a Knowledge `source`, raw source material, capture version, ingestion job, evidence, or card. A role-protected Discovery accept command calls the existing Knowledge intake API, which independently creates any queued source; Knowledge exclusively owns the source and all downstream lifecycle state.
 
 The proposal does not introduce a second knowledge lifecycle. It must reuse the existing source capture, immutable capture version, ingestion job, independent judgment, relation/conflict, freshness, review recommendation, publication, and retrieval policy.
 
@@ -16,12 +18,11 @@ The proposal does not introduce a second knowledge lifecycle. It must reuse the 
 - Practical information and experiential insight are both valuable.
 - Practical facts can become stale; experiential reports can conflict. Existing freshness, verification, evidence, and conflict policy must apply unchanged to YouTube-derived claims.
 - Discovery runs periodically. Operators may disable discovery when required.
-- AI ranks candidates and recommends `skip`, targeted capture, or full capture from bounded metadata and derived signals. An operator must approve a candidate before any Gemini analysis.
-- Candidates deferred after operator approval by quota or a transient provider failure remain prioritized for a later scheduled capture run. They are not individual operator incidents.
+- AI ranks candidates and recommends `skip` or `consider` from bounded metadata and derived signals. An operator accepts a candidate through the existing Knowledge intake API before any Gemini analysis.
 - YouTube comments are scoring signals only. They are never evidence, raw knowledge material, or traveler-visible retrieval input.
 - The system generates query proposals from knowledge gaps and operational signals. Operators can inspect and manage those proposals.
 - Operators need one operations control tower serving two equal needs: Knowledge Mission and Automation Health.
-- The existing 30-minute Gemini capture windows remain the complete-analysis path. Targeted analysis of high-signal windows is a cost-saving fast path, not a replacement for complete analysis.
+- The existing 30-minute Gemini capture windows remain the only capture path in scope.
 
 ## Existing Baseline
 
@@ -48,11 +49,10 @@ Facebook capture established useful operational boundaries that this proposal pr
 - Query proposals derived from knowledge coverage gaps, freshness risk, unresolved conflicts, and traveler-demand signals.
 - YouTube Data API discovery and bounded video/channel/comment enrichment.
 - AI triage of enriched candidates.
-- Deterministic policy for skip, deferred, targeted-capture recommendation, and full-capture recommendation.
-- Operator admission of ranked candidates before Gemini capture, subject to configured budgets and quotas.
-- Targeted Gemini windows as an optimization before full sequential capture.
+- Deterministic policy for skip, defer, and consider recommendations.
+- Ranked canonical URL candidates for operator review and acceptance through the existing Knowledge intake API.
 - Safe candidate/run observability and an operator control tower.
-- An operator switch for discovery and operator controls for candidate admission.
+- An operator switch for discovery and operator controls for candidate review.
 
 ### Out of scope
 
@@ -61,7 +61,7 @@ Facebook capture established useful operational boundaries that this proposal pr
 - Treating YouTube comments as evidence, claims, or traveler content.
 - Replacing the existing Knowledge ingestion pipeline or creating a separate YouTube claim aggregate.
 - Automatically treating YouTube as official or verified.
-- Sending the entire backlog to Gemini without quota, budget, and priority controls.
+- Automatically submitting any discovered URL to Gemini or the Knowledge source-intake workflow.
 
 ## Technical Constraint: Transcripts
 
@@ -78,15 +78,28 @@ coverage/freshness/conflict/demand signals + operator query catalog
   -> canonical video dedupe and metadata enrichment
   -> bounded channel and comment scoring signals
   -> AI triage with structured output
-  -> deterministic recommendation and hard eligibility policy
-     -> skip
-     -> ranked operator admission queue
-     -> operator approves targeted Gemini windows or full Gemini capture
-     -> approved-capture backlog for quota/transient deferrals
-  -> existing immutable capture + Knowledge ingestion pipeline
-  -> active knowledge, caveat-only knowledge, review recommendation,
-     suppression, verification, or conflict handling
+  -> deterministic recommendation and eligibility policy
+       -> skip
+       -> ranked operator review list
+       -> operator accepts a canonical URL through existing Knowledge intake API
+       -> existing immutable capture + Knowledge ingestion pipeline
 ```
+
+### Ownership And Execution Boundary
+
+```text
+Discovery scheduler
+  -> YouTube Data API search/enrichment + bounded AI metadata triage
+  -> youtube_discovery_candidate (URL consideration only; no Knowledge source)
+  -> operator accepts URL; Discovery calls existing Knowledge intake API
+
+Manual Knowledge intake and youtube:capture execution
+  -> claims only queued, operator-submitted YouTube sources
+  -> Gemini analysis under the existing capture contract
+  -> immutable capture version -> one canonical ingestion job -> Knowledge lifecycle
+```
+
+Discovery never invokes Gemini video analysis and never creates a Knowledge source, capture version, or ingestion job. Its AI triage is a separate bounded metadata-classification call, with no video-media input. The existing Knowledge intake and operator-controlled `youtube:capture` commands exclusively create/execute capture work. Discovery must not schedule, invoke, or enqueue either command.
 
 ### 1. Query Planning
 
@@ -117,7 +130,7 @@ AI triage receives the bounded candidate bundle and the discovery context. It pr
 
 ```ts
 type YoutubeCandidateTriage = {
-  decision: "skip" | "defer" | "targeted_capture" | "full_capture";
+  decision: "skip" | "defer" | "consider";
   relevanceScore: number;
   expectedValueScore: number;
   freshnessFitScore: number;
@@ -125,12 +138,6 @@ type YoutubeCandidateTriage = {
   visualEvidenceLikelihood: number;
   commercialRiskScore: number;
   duplicateRiskScore: number;
-  suggestedWindows: Array<{
-    startSeconds: number;
-    endSeconds: number;
-    topic: string;
-    reason: string;
-  }>;
   reasons: string[];
   commentSignals: string[];
 };
@@ -138,43 +145,27 @@ type YoutubeCandidateTriage = {
 
 The scores rank candidates and explain the recommendation; they do not establish fact correctness, source verification, publication eligibility, evidence, or permission to invoke Gemini. Model output must be schema-validated, bounded, and treated as untrusted operational input.
 
-### 4. Deterministic Recommendation, Operator Admission, And Backlog Policy
+### 4. Deterministic Recommendation And Operator Review
 
-A deterministic policy evaluates model scores alongside hard constraints before a candidate can enter the operator admission queue:
+A deterministic policy evaluates model scores alongside hard constraints before a candidate appears in the operator review list. The candidate remains Discovery-owned and has no `sources` row:
 
 - Candidate is a canonical individual public video and is not already captured at the applicable capture method/prompt version.
 - Query target, locale/topic, duration, and source conditions are valid.
 - Candidate is not a duplicate or near-duplicate under the configured identity/content policy.
-- A requested targeted window is bounded, valid, and falls within the public video duration.
 
 The operator sees the priority score and its factors: query/gap relevance, freshness fit, expected practical knowledge value, first-hand and visual-evidence likelihood, weak source-quality signals, and coverage/demand urgency. Views, likes, comments, and subscriber count are ranking inputs only; they never prove correctness or credibility. Commercial risk, duplicate risk, stale content, invalid scope, and unsuitable duration are explicit penalties that cannot be offset merely by popularity.
 
-The admission view includes safe video and channel metadata, the discovery query and reason, score factors and penalties, bounded derived comment signals when available, the recommended mode and windows, and the candidate's prior XuyenViet capture outcome. An operator may approve targeted capture, approve full capture, defer, skip, or block a channel/query according to role-protected audited commands. The operator does not need to watch the entire video before admission.
+The review view includes safe video and channel metadata, the discovery query and reason, score factors and penalties, bounded derived comment signals when available, and the candidate's prior XuyenViet capture outcome. An operator may accept, defer, or skip a candidate through role-protected audited commands. The accept command calls the existing Knowledge intake API, which alone can create a queued YouTube `source`; the later `youtube:capture` execution remains a separate manual operator action. Discovery does not invoke Gemini or track the capture lifecycle. Channel/query blocking is deferred.
 
 Expected outcomes:
 
 | Outcome | Meaning |
 |---|---|
 | `skip` | Low relevance/value, inaccessible, duplicate, invalid, or unsuitable candidate. Keep only safe audit/dedupe state. |
-| `defer` | Candidate awaits an operator decision, or an operator-approved capture cannot run because of budget, quota, or transient failure. Preserve priority and retry only the approved capture in a future run. |
-| `targeted_capture` | Recommend that the operator approve analysis of selected high-signal windows first. Escalate to full capture only through a bounded policy and, unless explicitly pre-authorized, a further operator decision. |
-| `full_capture` | Recommend that the operator approve the existing sequential 30-minute window capture for candidates with high expected value, distributed signals, or insufficiently precise targeting. |
+| `defer` | Candidate awaits a later operator decision. Preserve its priority for the next review. |
+| `consider` | Candidate is a useful URL for operator review. An operator may accept it through the existing Knowledge intake API. |
 
-Quota exhaustion and transient provider failures are normal conditions for an already operator-approved capture backlog, not individual operator alerts. The scheduler retries approved captures by priority and age with bounded backoff. Persistent provider failure, an aging high-priority approved backlog, repeated no-evidence capture, or budget anomaly becomes an action-required operational signal.
-
-### 5. Gemini Video Capture
-
-The current complete path remains valid: sequential 30-minute windows, window-level cache artifacts, timestamp conversion, bounded evidence, and all-or-nothing aggregate production write.
-
-Targeted capture is an extension of the same capture contract:
-
-- It selects a small set of validated video-relative windows proposed by triage or a deterministic heuristic.
-- It uses the same Gemini prompt family, bounded evidence schema, cache identity, archive, safe metadata, audit behavior, and operator-only storage boundary.
-- It records why a window was selected without storing raw triage prompt/response content.
-- It may escalate once to full capture according to a bounded policy. It must not repeatedly reanalyze the same video indefinitely.
-- Evidence from either path still enters the same immutable capture-version and ingestion-job workflow.
-
-Gemini-derived video evidence is evidence generation, not verification. Existing independent judgment, freshness, verification, relation/conflict, review, and retrieval eligibility policies remain authoritative.
+The existing `youtube:capture` runbook owns provider quota, transient failure, retry, cache replay, and Gemini-capture operations once Knowledge intake has created a source. Discovery does not create a capture backlog or retry capture work. A persistent discovery API failure, repeated triage schema failure, or provider rate limiting becomes an action-required operational signal.
 
 ## Operator Control Tower
 
@@ -185,16 +176,16 @@ The operator needs a control tower, not a noisy event feed. It has two first-cla
 - Coverage by corridor, location, route segment, taxonomy, and seasonal need.
 - High-priority gaps, stale facts, unresolved conflicts, and verification-required gaps.
 - AI-generated and operator-managed query proposals, their reason, priority, state, and scheduled run.
-- A ranked candidate admission queue showing safe metadata, score factors, explicit penalties, recommendation, and actions to approve targeted/full capture, defer, skip, or block a channel/query.
-- Funnel outcomes: candidates found, triaged, captured, evidence generated, active cards, caveat-only cards, suppressed cards, and review recommendations.
-- Drill-down from a gap to its query, discovered candidates, capture run, and resulting knowledge cards/evidence.
+- A ranked candidate review list showing safe metadata, score factors, explicit penalties, recommendation, and actions to accept, defer, or skip.
+- Funnel outcomes through discovery: candidates found, triaged, considered, deferred, skipped, and accepted. Capture and Knowledge outcomes remain in their existing operational views.
+- Drill-down from a gap to its query and discovered candidates. Capture runs and resulting knowledge remain linked through existing Knowledge views only when independently available.
 
 ### Automation Health
 
 - Discovery state: enabled/disabled, last run, next run, and most recent safe result.
-- Throughput by pipeline stage, candidates awaiting operator admission, approved-capture queue depth, deferred approved-backlog age, retry state, and no-evidence rate.
-- YouTube API quota, Gemini capture minutes/windows, usage/cost, remaining budget, and projected capacity.
-- Provider failures, rate limits, schema failures, and retry trends using safe error codes only.
+- Throughput by discovery stage, candidates awaiting operator review, deferred-candidate age, and triage schema-failure rate.
+- YouTube Data API rate-limit state and discovery AI-triage usage/cost where available.
+- Discovery provider failures, rate limits, and schema-failure trends using safe error codes only.
 - Drill-down from a run or provider issue to affected safe candidate/run records.
 
 ### Shared Action Required
@@ -202,9 +193,8 @@ The operator needs a control tower, not a noisy event feed. It has two first-cla
 Only surface issues that need a person:
 
 - Discovery is disabled while a high-priority coverage/freshness need exists.
-- High-priority operator-approved candidates have exceeded approved-backlog-age policy.
-- Persistent provider/API failure, repeated schema failure, or rate limiting prevents progress.
-- Budget/cost usage is anomalous or projected to exceed the configured cap.
+- High-priority candidates have exceeded the operator-review-age policy.
+- Persistent discovery provider/API failure, repeated schema failure, or rate limiting prevents progress.
 - A high-impact verification/conflict recommendation needs a deliberate decision.
 
 Ordinary deferrals remain visible in the backlog but do not create notification noise.
@@ -213,59 +203,55 @@ Ordinary deferrals remain visible in the backlog but do not create notification 
 
 Use one audited, role-protected switch:
 
-- **Discovery enabled:** controls scheduled query planning, YouTube search, enrichment, and new candidate creation.
+- **Discovery enabled:** controls scheduled query planning, YouTube search, enrichment, AI triage, and new candidate creation. It does not control `youtube:capture`.
 
-Operator admission is a per-candidate command, not a global auto-capture switch. Disabling discovery stops new discovery work safely; it does not alter completed capture versions, knowledge cards, evidence, existing ingestion jobs, or captures already approved for retry.
+Operator review acceptance submits a URL only to existing Knowledge intake; it does not schedule or execute capture. Disabling discovery fences in-flight Discovery stages before provider calls or writes, stops new Discovery work safely, and does not alter completed capture versions, knowledge cards, evidence, existing ingestion jobs, or sources created through Knowledge intake awaiting manual capture.
 
 ## Alignment Required Before Epic Creation
 
-The proposal deliberately follows the current AI-first Knowledge policy, but its new discovery and admission capability requires the following architecture and documentation decisions before creating an epic or story.
+The proposal deliberately follows the current AI-first Knowledge policy, but its new Discovery capability requires the following architecture and documentation decisions before creating an epic or story.
 
-1. **Ratify operator admission separately from knowledge publication.** AD-10 already follows the canonical AI-first publication policy: a qualifying low-risk evidence-grounded card may become active without operator approval, while high-risk claims route to verification. Extend the architecture to state that operator approval controls only whether a discovery candidate may incur Gemini capture cost; it must not become a general publication prerequisite for downstream cards.
-2. **Keep the YouTube runbook aligned.** `docs/runbooks/youtube-capture.md` documents only the current manual command. Update it after implementation changes so it distinguishes the scheduled discovery/ranking workflow from the operator-admitted capture path and preserves its server-only credential boundary.
-3. **Reconcile Facebook documentation with canonical policy.** `docs/runbooks/facebook-capture.md` must preserve the canonical policy that review is a prioritized recommendation, not a general publication prerequisite. Decide which Facebook-specific controls remain required before implementing source discovery.
-4. **Ratify source-neutral capture semantics.** A readable YouTube capture must append an immutable capture version and atomically create exactly one canonical ingestion job, exactly like readable Facebook and generic captures. Discovery candidates before Gemini capture are not readable captures and must not create ingestion jobs.
-5. **Define safe operational persistence.** Specify candidate, query proposal, run, priority, operator-decision, defer/retry, budget, kill-switch, and control-tower read models. They must exclude raw comments, raw model prompts/responses, provider payloads, video media, credentials, cookies, and evidence quote/span from normal observability output.
-6. **Set initial policy values through configuration.** Define reviewable configuration for ranking weights and score bands, daily/run quotas, maximum approved-backlog age, retry/backoff limits, maximum targeted windows, escalation conditions, and budget caps. Do not hard-code values into scattered scripts. Ranking must not bypass the operator admission gate.
-7. **Confirm provider/API terms and quota operations.** The implementation must use only documented YouTube API capabilities and the existing Gemini URL analysis path. Validate key restrictions, quota billing, retention expectations, and failure/rate-limit monitoring before scheduled discovery reaches production.
-8. **Refresh architecture and UX before epics.** This is a significant automated operations capability. Architecture must establish ownership, scheduling/worker invariants, persistence boundaries, operator admission, and AI call/usage semantics. UX must define the control tower and action-required interaction before an admin surface is built.
+1. **Ratify Discovery as URL-only and separate it from Knowledge intake and publication.** Discovery owns candidates only. It never writes a `sources` row or invokes Gemini. A Discovery accept command delegates URL submission to the existing Knowledge intake API; a later `youtube:capture` execution remains manual. Candidate review must not become a general publication prerequisite for downstream cards.
+2. **Keep the YouTube runbook unchanged for capture.** `docs/runbooks/youtube-capture.md` remains the operator-controlled, unscheduled capture contract. Scheduled Discovery is limited to query planning, YouTube API search/enrichment, and metadata triage; it must not schedule, invoke, or enqueue `youtube:capture`.
+3. **Ratify source-neutral capture semantics as inherited policy.** A readable YouTube capture appends an immutable capture version and atomically creates exactly one canonical ingestion job, exactly like readable Facebook and generic captures. Discovery candidates are not readable captures and never create ingestion jobs.
+4. **Define safe operational persistence.** Specify candidate, query proposal, run, priority, operator-review action, kill-switch, and control-tower read models. They must exclude raw comments, raw model prompts/responses, provider payloads, video media, credentials, cookies, and evidence quote/span from normal observability output.
+5. **Set initial policy values through configuration.** Define reviewable configuration for ranking weights and score bands, bounded worker concurrency/retry behavior, maximum operator-review age, and candidate retention. Do not hard-code values into scattered scripts. Ranking must not bypass the Knowledge intake and manual capture boundaries.
+6. **Confirm provider/API terms and quota operations.** The implementation must use only documented YouTube API capabilities and bounded metadata triage. Validate key restrictions, quota billing, retention expectations, and failure/rate-limit monitoring before scheduled discovery reaches production.
+7. **Refresh architecture and UX before epics.** This is a significant automated operations capability. Architecture must establish ownership, scheduling/worker invariants, persistence boundaries, safe AI-triage/usage semantics, and the manual handoff to capture. UX must define the control tower and action-required interaction before an admin surface is built.
 
 ## Suggested Delivery Slices
 
 The following is sequencing guidance, not yet an epic/story commitment.
 
 1. **Policy and architecture alignment**
-   Update the conflicting YouTube/Facebook policy wording, define source-neutral capture semantics, discovery ownership, scheduling, configurations, and operational privacy boundaries.
+   Define Discovery ownership, scheduling, configuration, operational privacy boundaries, and the manual handoff to the existing YouTube capture runbook.
 2. **Discovery foundation**
-   Add query proposals, periodic scheduling, documented YouTube search, canonical candidate identity/dedupe, safe run/audit records, the discovery kill switch, and a ranked operator admission queue. No Gemini invocation occurs without a per-candidate operator decision.
+   Add query proposals, periodic scheduling, documented YouTube search, canonical candidate identity/dedupe, safe run/audit records, the discovery kill switch, and a ranked operator review list. Discovery never invokes Gemini or creates a Knowledge source.
 3. **Enrichment and AI triage**
-   Add bounded metadata/channel enrichment, derived comment signals, typed triage, deterministic recommendation, explainable ranking, operator admission commands, and budget/retry controls for approved captures.
-4. **Targeted capture extension**
-   Reuse current capture artifacts and evidence contract for selected windows, bounded escalation to full capture, cache identity/versioning, and idempotent recovery.
-5. **Control tower**
-   Deliver Knowledge Mission, Automation Health, shared action-required signals, drill-down, and operator controls. Reuse safe pipeline/job status projections rather than exposing raw sources.
-6. **Evaluation and tuning**
-   Measure capture yield, active-card yield, gap closure, stale/conflict outcomes, cost per useful card, deferral age, and false-positive capture rate. Adjust thresholds only through reviewed configuration.
+   Add bounded metadata/channel enrichment, derived comment signals, typed triage, deterministic recommendation, explainable ranking, and operator-review commands that call the existing Knowledge intake API.
+4. **Control tower**
+   Deliver Knowledge Mission, Automation Health, shared action-required signals, drill-down, and operator controls. Reuse safe Discovery and existing Knowledge projections rather than exposing raw sources.
+5. **Evaluation and tuning**
+   Measure operator consideration rate, gap coverage, deferred-review age, false-positive recommendation rate, and triage usage where available. Capture and card yield remain reported by existing Knowledge operations. Adjust thresholds only through reviewed configuration.
 
 ## Acceptance Invariants
 
 - No Playwright, direct browser scraping, undocumented YouTube APIs, video downloads, or third-party transcript scraping are introduced.
 - A discovery candidate cannot become a traveler-facing fact without the existing evidence-backed Knowledge pipeline.
 - Comments affect triage only; they never become evidence, capture text, cards, source bundles, or traveler UI content.
-- Every readable Gemini capture is immutable, content/version identified, operator-only at raw level, and atomically obtains one canonical ingestion job.
-- AI triage cannot override hard eligibility, operator admission, privacy, evidence, verification, conflict, or publication gates.
+- Every readable Gemini capture remains immutable, content/version identified, operator-only at raw level, and atomically obtains one canonical ingestion job through the existing capture workflow.
+- AI triage cannot override hard eligibility, the manual capture boundary, privacy, evidence, verification, conflict, or publication gates.
 - Automation routes grounded high-risk claims to `verify_first`; only an authorized operator may revise or publish them with available validated evidence. Conflicted claims cannot support factual itinerary premises.
-- Quota and provider deferrals retry by priority and age without notification noise; persistent failures and aging high-priority work become action-required.
-- Operators can disable discovery, and only an authorized operator can admit a candidate to Gemini capture; stopping discovery does not mutate completed knowledge.
+- Discovery provider deferrals retain candidate priority without notification noise; persistent failures, rate limiting, and aging high-priority review work become action-required.
+- Operators can disable discovery. Discovery acceptance can submit a candidate only to existing Knowledge intake; only the manual `youtube:capture` workflow invokes Gemini. Stopping discovery does not mutate completed knowledge.
 - Control-tower projections and logs expose only safe operational summaries, never secrets, raw comments, raw source material, model prompts/responses, provider payloads, or evidence spans.
-- AI usage, model/prompt/capture method versions, safe failure status, and cost metadata remain attributable and observable under the established usage/audit model.
+- Discovery AI usage, model/prompt versions, safe failure status, and cost metadata remain attributable and observable under the established usage/audit model.
 
 ## Open Design Questions
 
 - What initial threshold/configuration values balance coverage, cost, and false-positive capture for Vietnamese road-trip video discovery?
 - Which demand signals from AI Ask are safe and sufficiently aggregated to feed query proposals without exposing traveler content?
 - What retention window applies to skipped/deferred candidate metadata and sanitized comment-derived signals?
-- What is the minimum evidence yield or priority condition that triggers targeted-to-full capture escalation?
 - Which control-tower metrics are live versus periodically aggregated, and what latency is acceptable for operator decisions?
 - How should an operator override, pause, resume, or reprioritize a query proposal or candidate while preserving auditability?
 
