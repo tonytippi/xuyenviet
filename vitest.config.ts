@@ -22,6 +22,7 @@ const unitTests = [
   "tests/direct-api-launch-evidence.test.ts",
   "tests/traveler-ui-foundation.test.ts",
   "tests/trip-recommendations.test.ts",
+  "tests/ai-ask-api-adapter.test.ts",
   "tests/ai-ask-direct-api.test.ts",
   "tests/direct-shell-proposal-actions.test.ts",
   "tests/legacy-auth-retirement.test.ts",

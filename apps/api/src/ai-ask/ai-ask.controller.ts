@@ -9,6 +9,7 @@ export const AI_ASK_STREAM_EXECUTION = Symbol("AI_ASK_STREAM_EXECUTION");
 export const OPERATIONAL_TELEMETRY_SINK = Symbol("OPERATIONAL_TELEMETRY_SINK");
 const safeStreamFailure = new TextEncoder().encode('{"type":"error","errorMessage":"Không thể hoàn tất luồng trả lời lúc này. Hãy thử lại sau."}\n');
 const maxIncompleteNdjsonRecordBytes = 1024 * 1024;
+const streamChunkTimeoutMs = 195_000;
 
 @Controller("v1/ai-ask")
 export class AiAskController {
@@ -29,11 +30,15 @@ export class AiAskController {
     if (!parsed) throw new BadRequestException({ code: "validation_error" });
 
     const abort = new AbortController();
-    const onAborted = () => abort.abort(new Error("caller disconnected"));
+    let callerDisconnected = false;
+    const onAborted = () => {
+      callerDisconnected = true;
+      abort.abort(new Error("caller disconnected"));
+    };
     // IncomingMessage emits close on normal request completion too. Response close
     // is the only close event that means the stream consumer has gone away.
     const onResponseClose = () => {
-      if (!response.writableEnded) abort.abort(new Error("caller disconnected"));
+      if (!response.writableEnded) onAborted();
     };
     request.once("aborted", onAborted);
     response.once("close", onResponseClose);
@@ -42,15 +47,20 @@ export class AiAskController {
     let prefixInvalid = false;
     let upstreamObserved = false;
     let terminalSent = false;
+    let deadlineExceeded = false;
     const framer = createNdjsonFramer();
     try {
       iterator = this.execution.execute(parsed, principal, request.requestId!, abort.signal)[Symbol.asyncIterator]();
-      let next = await iterator.next();
-      if (!next.done) {
+      let next = await nextStreamChunk(iterator, abort.signal);
+      if (next === "timeout") {
+        deadlineExceeded = true;
+        abort.abort(new Error("AI Ask stream timed out"));
+      }
+      if (next !== "timeout" && next !== "aborted" && !next.done) {
         response.setHeader("content-type", "application/x-ndjson; charset=utf-8");
         response.setHeader("cache-control", "no-store");
       }
-      while (!next.done) {
+      while (next !== "timeout" && next !== "aborted" && !next.done) {
         if (abort.signal.aborted || response.writableEnded) break;
         upstreamObserved = true;
         for (const frame of framer.push(next.value)) {
@@ -72,7 +82,11 @@ export class AiAskController {
         }
         if (terminalSent) break;
         if (abort.signal.aborted || response.writableEnded) break;
-        next = await iterator.next();
+        next = await nextStreamChunk(iterator, abort.signal);
+        if (next === "timeout") {
+          deadlineExceeded = true;
+          abort.abort(new Error("AI Ask stream timed out"));
+        }
       }
       if (!terminalSent) resultCode = "failure";
     } catch (error) {
@@ -83,10 +97,14 @@ export class AiAskController {
         throw new InternalServerErrorException({ code: "internal_error" });
       }
     } finally {
-       if (recoveryAllowed && !terminalSent && !abort.signal.aborted && !response.writableEnded) {
-        try { response.write(safeStreamFailure); } catch { /* The client may have disconnected between write failure and close. */ }
-      }
-      try { await iterator?.return?.(); } catch { /* Iterator cleanup cannot keep an already-completed HTTP response open. */ }
+       if (recoveryAllowed && !terminalSent && !callerDisconnected && !response.writableEnded) {
+         try { response.write(safeStreamFailure); } catch { /* The client may have disconnected between write failure and close. */ }
+       }
+       if (deadlineExceeded || callerDisconnected) {
+         void iterator?.return?.().catch(() => undefined);
+       } else {
+         try { await iterator?.return?.(); } catch { /* Iterator cleanup cannot keep an already-completed HTTP response open. */ }
+       }
       request.removeListener("aborted", onAborted);
       response.removeListener("close", onResponseClose);
       if (!response.writableEnded) response.end();
@@ -95,6 +113,27 @@ export class AiAskController {
         latencyMs: Math.min(Date.now() - startedAt, 86_400_000),
       });
     }
+  }
+}
+
+async function nextStreamChunk(iterator: AsyncIterator<Uint8Array>, signal: AbortSignal): Promise<IteratorResult<Uint8Array> | "timeout" | "aborted"> {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  let onAbort: (() => void) | undefined;
+  try {
+    return await Promise.race([
+      iterator.next(),
+      new Promise<"timeout">((resolve) => {
+        timeout = setTimeout(() => resolve("timeout"), streamChunkTimeoutMs);
+      }),
+      new Promise<"aborted">((resolve) => {
+        onAbort = () => resolve("aborted");
+        if (signal.aborted) onAbort();
+        else signal.addEventListener("abort", onAbort, { once: true });
+      }),
+    ]);
+  } finally {
+    if (timeout) clearTimeout(timeout);
+    if (onAbort) signal.removeEventListener("abort", onAbort);
   }
 }
 

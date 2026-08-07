@@ -132,6 +132,128 @@ describe("AI Ask API adapter", () => {
     expect(response.end).toHaveBeenCalledOnce();
   });
 
+  test("aborts a stalled execution after a valid preparing prefix, writes one safe terminal, and closes the response", async () => {
+    vi.useFakeTimers();
+    try {
+      let signal: AbortSignal | undefined;
+      let releaseNext!: () => void;
+      const heldNext = new Promise<IteratorResult<Uint8Array>>((resolve) => { releaseNext = () => resolve({ done: true, value: undefined }); });
+      const iterator = {
+        next: vi.fn()
+          .mockResolvedValueOnce({ done: false as const, value: new TextEncoder().encode('{"type":"preparing"}\n') })
+          .mockImplementationOnce(() => heldNext),
+        return: vi.fn(async () => ({ done: true as const, value: undefined })),
+      };
+      const controller = new AiAskController({
+        execute: vi.fn((_input, _principal, _requestId, abortSignal) => {
+          signal = abortSignal;
+          return { [Symbol.asyncIterator]: () => iterator };
+        }) as AiAskStreamExecution["execute"],
+      });
+      const written: Uint8Array[] = [];
+      const response = { writableEnded: false, headersSent: false, setHeader: vi.fn(), write: vi.fn((bytes: Uint8Array) => { written.push(bytes); return true; }), end: vi.fn(), once: vi.fn(), removeListener: vi.fn() };
+
+      const streaming = controller.stream(principal(), "valid_idempotency_key", multipartRequest("adapter-boundary"), response);
+      await vi.waitFor(() => expect(iterator.next).toHaveBeenCalledTimes(2));
+      await vi.advanceTimersByTimeAsync(195_000);
+      await expect(streaming).resolves.toBeUndefined();
+
+      expect(signal?.aborted).toBe(true);
+      expect(new TextDecoder().decode(concatenate(written))).toBe('{"type":"preparing"}\n{"type":"error","errorMessage":"Không thể hoàn tất luồng trả lời lúc này. Hãy thử lại sau."}\n');
+      expect(response.end).toHaveBeenCalledOnce();
+      releaseNext();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test("does not synthesize a terminal when execution stalls before a valid preparing prefix", async () => {
+    vi.useFakeTimers();
+    try {
+      let signal: AbortSignal | undefined;
+      const iterator = {
+        next: vi.fn(() => new Promise<IteratorResult<Uint8Array>>(() => undefined)),
+        return: vi.fn(async () => ({ done: true as const, value: undefined })),
+      };
+      const controller = new AiAskController({
+        execute: vi.fn((_input, _principal, _requestId, abortSignal) => {
+          signal = abortSignal;
+          return { [Symbol.asyncIterator]: () => iterator };
+        }) as AiAskStreamExecution["execute"],
+      });
+      const written: Uint8Array[] = [];
+      const response = { writableEnded: false, headersSent: false, setHeader: vi.fn(), write: vi.fn((bytes: Uint8Array) => { written.push(bytes); return true; }), end: vi.fn(), once: vi.fn(), removeListener: vi.fn() };
+
+      const streaming = controller.stream(principal(), "valid_idempotency_key", multipartRequest("adapter-boundary"), response);
+      await vi.advanceTimersByTimeAsync(195_000);
+      await expect(streaming).resolves.toBeUndefined();
+
+      expect(signal?.aborted).toBe(true);
+      expect(written).toEqual([]);
+      expect(response.end).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test("closes promptly without a terminal when a caller disconnects while execution is stalled", async () => {
+    let signal: AbortSignal | undefined;
+    const iterator = {
+      next: vi.fn()
+        .mockResolvedValueOnce({ done: false as const, value: new TextEncoder().encode('{"type":"preparing"}\n') })
+        .mockImplementationOnce(() => new Promise<IteratorResult<Uint8Array>>(() => undefined)),
+      return: vi.fn(() => new Promise<IteratorResult<Uint8Array>>(() => undefined)),
+    };
+    const controller = new AiAskController({
+      execute: vi.fn((_input, _principal, _requestId, abortSignal) => {
+        signal = abortSignal;
+        return { [Symbol.asyncIterator]: () => iterator };
+      }) as AiAskStreamExecution["execute"],
+    });
+    const listeners = new Map<string, () => void>();
+    const written: Uint8Array[] = [];
+    const response = { writableEnded: false, headersSent: false, setHeader: vi.fn(), write: vi.fn((bytes: Uint8Array) => { written.push(bytes); return true; }), end: vi.fn(), once: vi.fn((event: string, listener: () => void) => listeners.set(event, listener)), removeListener: vi.fn() };
+
+    const streaming = controller.stream(principal(), "valid_idempotency_key", multipartRequest("adapter-boundary"), response);
+    await vi.waitFor(() => expect(iterator.next).toHaveBeenCalledTimes(2));
+    listeners.get("close")?.();
+    await expect(streaming).resolves.toBeUndefined();
+
+    expect(signal?.aborted).toBe(true);
+    expect(new TextDecoder().decode(concatenate(written))).toBe('{"type":"preparing"}\n');
+    expect(response.end).toHaveBeenCalledOnce();
+  });
+
+  test("does not write a recovery terminal when the caller disconnects as the deadline expires", async () => {
+    vi.useFakeTimers();
+    try {
+      const iterator = {
+        next: vi.fn()
+          .mockResolvedValueOnce({ done: false as const, value: new TextEncoder().encode('{"type":"preparing"}\n') })
+          .mockImplementationOnce(() => new Promise<IteratorResult<Uint8Array>>(() => undefined)),
+        return: vi.fn(async () => ({ done: true as const, value: undefined })),
+      };
+      const controller = new AiAskController({
+        execute: vi.fn(() => ({ [Symbol.asyncIterator]: () => iterator })) as AiAskStreamExecution["execute"],
+      });
+      const listeners = new Map<string, () => void>();
+      const written: Uint8Array[] = [];
+      const response = { writableEnded: false, headersSent: false, setHeader: vi.fn(), write: vi.fn((bytes: Uint8Array) => { written.push(bytes); return true; }), end: vi.fn(), once: vi.fn((event: string, listener: () => void) => listeners.set(event, listener)), removeListener: vi.fn() };
+
+      // Register before the controller's chunk deadline so close wins at the same clock time.
+      setTimeout(() => listeners.get("close")?.(), 195_000);
+      const streaming = controller.stream(principal(), "valid_idempotency_key", multipartRequest("adapter-boundary"), response);
+      await vi.waitFor(() => expect(iterator.next).toHaveBeenCalledTimes(2));
+      await vi.advanceTimersByTimeAsync(195_000);
+      await expect(streaming).resolves.toBeUndefined();
+
+      expect(new TextDecoder().decode(concatenate(written))).toBe('{"type":"preparing"}\n');
+      expect(response.end).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   test("adds one canonical safe terminal error when a begun iterator ends early", async () => {
     const controller = new AiAskController({
       execute: async function* () { yield new TextEncoder().encode('{"type":"preparing"}\n'); },
