@@ -1,7 +1,7 @@
 import { recordAuditEvent, type AuditEventWriter } from "../audit-writers";
 import { createSystemAuditActor, type AuditActor } from "../actors";
 import { getDb } from "../client";
-import { youtubeDiscoveryPolicyVersions, youtubeDiscoveryQueryProposals, youtubeDiscoveryRuns, type YoutubeDiscoveryQueryProposalOrigin } from "../schema";
+import { youtubeDiscoveryPolicyVersions, youtubeDiscoveryQueryProposals, youtubeDiscoveryQueryProposalReasonValues, youtubeDiscoveryRuns, type YoutubeDiscoveryQueryProposalOrigin, type YoutubeDiscoveryQueryProposalReason } from "../schema";
 import type { YoutubeDiscoveryPolicyAuditSummary, YoutubeDiscoveryQueryProposalAuditSummary, YoutubeDiscoveryRunAuditSummary } from "@xuyenviet/contracts";
 import { parseYoutubeDiscoveryPolicy } from "@xuyenviet/domain";
 import { eq } from "drizzle-orm";
@@ -9,7 +9,7 @@ import { eq } from "drizzle-orm";
 type DiscoveryWriter = Pick<ReturnType<typeof getDb>, "insert" | "select" | "update" | "transaction"> & AuditEventWriter;
 
 export type CreateYoutubeDiscoveryPolicyVersionInput = Readonly<{ version: number; isCurrent: boolean; policy?: unknown; actor: AuditActor }>;
-export type CreateYoutubeDiscoveryQueryProposalInput = Readonly<{ origin: YoutubeDiscoveryQueryProposalOrigin; reason: string; priority: number; queryText: string; enabled?: boolean; cadenceMinutes: number; actor: AuditActor }>;
+export type CreateYoutubeDiscoveryQueryProposalInput = Readonly<{ origin: YoutubeDiscoveryQueryProposalOrigin; reason: YoutubeDiscoveryQueryProposalReason; priority: number; queryText: string; enabled?: boolean; cadenceMinutes: number; actor: AuditActor }>;
 export type CreateYoutubeDiscoveryRunInput = Readonly<{ policyVersionId: string; queryProposalId?: string }>;
 
 export async function createYoutubeDiscoveryPolicyVersion(input: CreateYoutubeDiscoveryPolicyVersionInput, database: DiscoveryWriter = getDb()) {
@@ -26,6 +26,7 @@ export async function createYoutubeDiscoveryPolicyVersion(input: CreateYoutubeDi
 
 export async function createYoutubeDiscoveryQueryProposal(input: CreateYoutubeDiscoveryQueryProposalInput, database: DiscoveryWriter = getDb()) {
   assertDiscoveryQueryActor(input.origin, input.actor);
+  assertSafeDiscoveryQueryProposal(input);
   return database.transaction(async (transaction) => {
     const { actor, ...proposal } = input;
     const [created] = await transaction.insert(youtubeDiscoveryQueryProposals).values({ ...proposal, enabled: input.enabled ?? true }).returning();
@@ -41,6 +42,10 @@ export async function createYoutubeDiscoveryRun(input: CreateYoutubeDiscoveryRun
     if (!policy) throw new Error("YouTube Discovery runs require the current policy version.");
     if (policy.id !== input.policyVersionId) throw new Error("YouTube Discovery runs require the current policy version.");
     if (!policy.enabled) throw new Error("YouTube Discovery runs require an enabled current policy version.");
+    if (input.queryProposalId) {
+      const [proposal] = await transaction.select({ id: youtubeDiscoveryQueryProposals.id, enabled: youtubeDiscoveryQueryProposals.enabled }).from(youtubeDiscoveryQueryProposals).where(eq(youtubeDiscoveryQueryProposals.id, input.queryProposalId)).limit(1).for("update");
+      if (!proposal || !proposal.enabled) throw new Error("YouTube Discovery runs require an enabled query proposal.");
+    }
     const [created] = await transaction.insert(youtubeDiscoveryRuns).values({ policyVersionId: input.policyVersionId, queryProposalId: input.queryProposalId, state: "queued" }).returning();
     if (!created) throw new Error("YouTube Discovery run creation failed.");
     await recordAuditEvent({ actor: createSystemAuditActor("system-youtube-discovery"), operation: "create", targetType: "youtube_discovery_run", targetId: created.id, afterSummary: JSON.stringify(runAuditSummary(created)) }, transaction);
@@ -60,6 +65,12 @@ function assertDiscoveryQueryActor(origin: YoutubeDiscoveryQueryProposalOrigin, 
   }
   if (origin === "operator" && actor.kind !== "user") {
     throw new Error("YouTube Discovery operator query proposals require a user actor.");
+  }
+}
+
+function assertSafeDiscoveryQueryProposal(input: CreateYoutubeDiscoveryQueryProposalInput) {
+  if (!youtubeDiscoveryQueryProposalReasonValues.includes(input.reason) || !/^[\p{L}\p{N} '-]{1,240}$/u.test(input.queryText.trim())) {
+    throw new Error("Invalid YouTube Discovery query proposal.");
   }
 }
 

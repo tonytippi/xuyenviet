@@ -31,6 +31,9 @@ export type AiUsageStatus = (typeof aiUsageStatusValues)[number];
 export const youtubeDiscoveryQueryProposalOriginValues = ["system", "operator"] as const;
 export type YoutubeDiscoveryQueryProposalOrigin = (typeof youtubeDiscoveryQueryProposalOriginValues)[number];
 
+export const youtubeDiscoveryQueryProposalReasonValues = ["coverage_gap", "freshness_risk", "unresolved_conflict", "anonymized_demand", "operator_request"] as const;
+export type YoutubeDiscoveryQueryProposalReason = (typeof youtubeDiscoveryQueryProposalReasonValues)[number];
+
 export const youtubeDiscoveryRunStateValues = ["queued", "running", "retrying", "completed", "failed", "cancelled"] as const;
 export type YoutubeDiscoveryRunState = (typeof youtubeDiscoveryRunStateValues)[number];
 
@@ -386,7 +389,7 @@ export const youtubeDiscoveryQueryProposals = pgTable(
   {
     id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
     origin: text("origin").$type<YoutubeDiscoveryQueryProposalOrigin>().notNull(),
-    reason: text("reason").notNull(),
+    reason: text("reason").$type<YoutubeDiscoveryQueryProposalReason>().notNull(),
     priority: integer("priority").notNull(),
     queryText: text("query_text").notNull(),
     enabled: boolean("enabled").default(true).notNull(),
@@ -396,9 +399,9 @@ export const youtubeDiscoveryQueryProposals = pgTable(
   (proposal) => [
     index("youtube_discovery_query_proposals_enabled_cadence_idx").on(proposal.enabled, proposal.cadenceMinutes),
     check("youtube_discovery_query_proposals_origin_check", sql`${proposal.origin} in ('system', 'operator')`),
-    check("youtube_discovery_query_proposals_reason_check", sql`length(btrim(${proposal.reason})) between 1 and 160 and position(chr(10) in ${proposal.reason}) = 0 and position(chr(13) in ${proposal.reason}) = 0`),
+    check("youtube_discovery_query_proposals_reason_check", sql`${proposal.reason} in ('coverage_gap', 'freshness_risk', 'unresolved_conflict', 'anonymized_demand', 'operator_request')`),
     check("youtube_discovery_query_proposals_priority_check", sql`${proposal.priority} between 1 and 100`),
-    check("youtube_discovery_query_proposals_query_check", sql`length(btrim(${proposal.queryText})) between 1 and 240 and position(chr(10) in ${proposal.queryText}) = 0 and position(chr(13) in ${proposal.queryText}) = 0`),
+    check("youtube_discovery_query_proposals_query_check", sql`length(btrim(${proposal.queryText})) between 1 and 240 and position(chr(10) in ${proposal.queryText}) = 0 and position(chr(13) in ${proposal.queryText}) = 0 and ${proposal.queryText} !~* '(https?://|www\\.|[?&](token|secret|code|key|signature|password)=)'`),
     check("youtube_discovery_query_proposals_cadence_check", sql`${proposal.cadenceMinutes} between 15 and 10080`),
   ],
 );

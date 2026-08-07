@@ -34,6 +34,14 @@ describe("YouTube Discovery policy", () => {
     await expect(createYoutubeDiscoveryQueryProposal({ origin: "operator", reason: "coverage_gap", priority: 50, queryText: "Đà Lạt đường đèo", cadenceMinutes: 1440, actor: createSystemAuditActor("system-youtube-discovery") }, database)).rejects.toThrow("user actor");
   });
 
+  test("rejects unsafe query proposal content before persistence", async () => {
+    const database = { transaction: () => { throw new Error("query validation should run before transaction"); } } as never;
+    const actor = createSystemAuditActor("system-youtube-discovery");
+
+    await expect(createYoutubeDiscoveryQueryProposal({ origin: "system", reason: "coverage_gap", priority: 50, queryText: "https://example.com/?token=secret", cadenceMinutes: 1440, actor }, database)).rejects.toThrow("Invalid YouTube Discovery query proposal");
+    await expect(createYoutubeDiscoveryQueryProposal({ origin: "system", reason: "unsafe_reason" as never, priority: 50, queryText: "Đà Lạt đường đèo", cadenceMinutes: 1440, actor }, database)).rejects.toThrow("Invalid YouTube Discovery query proposal");
+  });
+
   test("accepts user policy commands and matching query proposal actors", async () => {
     let transactions = 0;
     const database = { transaction: async (callback: (transaction: never) => Promise<unknown>) => { transactions += 1; return callback({} as never); } } as never;

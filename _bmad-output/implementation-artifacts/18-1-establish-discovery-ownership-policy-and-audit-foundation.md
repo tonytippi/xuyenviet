@@ -1,6 +1,6 @@
 ---
 story_id: 18-1
-status: review
+status: done
 created: 2026-08-07
 epic: 18
 ---
@@ -58,7 +58,13 @@ so that scheduled URL discovery can operate without becoming a second Knowledge 
   - [x] Update `tests/story-8-6-actor-isolation.test.ts` so the clean migrated database proves every catalog executor, including Discovery, cannot be a user, account, session, or role principal, and that system audit rows retain the exclusive system actor shape.
   - [x] Add a serial integration test for the Discovery migration/schema. It must explicitly use `resetTestDatabase()` in its own setup where clean tables are required and prove policy singleton/version, allowed bounded configuration, policy-version run snapshot FK, and safe Discovery-only ownership.
   - [x] Add unit tests for policy input validation/defaults and audit construction. Assert invalid/unbounded configuration and missing/arbitrary executor IDs fail before persistence.
-  - [x] Add a source-level ownership regression that prevents the Discovery repository/domain boundary from inserting into Knowledge-owned tables or protected Audit tables directly.
+   - [x] Add a source-level ownership regression that prevents the Discovery repository/domain boundary from inserting into Knowledge-owned tables or protected Audit tables directly.
+
+### Review Findings
+
+- [x] [Review][Patch] Reject unsafe query-proposal persistence [packages/database/src/youtube-discovery/index.ts:31] — Replaced free-form reasons with closed safe codes, reject URL and credential-shaped queries before persistence, and added a forward migration plus unit/integration regressions.
+- [x] [Review][Patch] Do not queue disabled query proposals [packages/database/src/youtube-discovery/index.ts:44] — Runs now lock and require an existing enabled query proposal when one is supplied; regression coverage is included in the integration test.
+- [x] [Review][Patch] Complete and accurately record required integration verification [tests/youtube-discovery-foundation.integration.test.ts:13] — Reset the confirmed disposable `xuyenviet_test` database, migrated and seeded it successfully, and verified the Story 18.1 integration file passes. The full integration project still has nine pre-existing unrelated failures; they do not involve Discovery.
 
 ## Dev Notes
 
@@ -135,6 +141,7 @@ gpu4ai/gpt-5.6-terra
 - Ultimate context engine analysis completed - comprehensive developer guide created.
 - Implemented Discovery-only policy-version, query-proposal, and run persistence with safe policy validation, registered system audit attribution, and Audit-owned writes.
 - Focused unit tests passed; typecheck, lint (warnings only), build, normal Drizzle migration, and diff whitespace verification passed. Integration migration setup remains blocked because its disposable `DATABASE_URL_TEST` target retains a partial earlier 0044 state and its Drizzle subprocess exits without emitting a database diagnostic.
+- Review repair 2026-08-07: closed query-proposal reasons, rejects URL/credential-shaped query text, and prevents queued runs for disabled/missing query proposals. Focused unit coverage passed (24 tests), typecheck, lint (0 errors, 43 existing warnings), build, and `git diff --check` passed. With user authorization, reset only the confirmed disposable `DATABASE_URL_TEST` target `database=xuyenviet_test;host=127.0.0.1;port=5432`; its migrations and seed completed successfully. The Story 18.1 integration test passed. Full integration ran 423 tests with 414 passing; its nine failures are pre-existing unrelated browser identity, Facebook capture rerun, ingestion pipeline, and safe validation tests.
 
 ### File List
 

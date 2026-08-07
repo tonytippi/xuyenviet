@@ -53,4 +53,13 @@ describe.sequential("YouTube Discovery foundation persistence", () => {
     await expect(createYoutubeDiscoveryRun({ policyVersionId: policy.id }, testDb)).rejects.toThrow("enabled current policy version");
     await expect(testDb.select().from(youtubeDiscoveryRuns)).resolves.toEqual([]);
   });
+
+  test("rejects disabled queries and invalid policy or query persistence", async () => {
+    const policy = await createYoutubeDiscoveryPolicyVersion({ version: 1, isCurrent: true, actor: createSystemAuditActor("system-youtube-discovery") }, testDb);
+    const query = await createYoutubeDiscoveryQueryProposal({ origin: "system", reason: "coverage_gap", priority: 50, queryText: "Đà Lạt đường đèo", enabled: false, cadenceMinutes: 1440, actor: createSystemAuditActor("system-youtube-discovery") }, testDb);
+
+    await expect(createYoutubeDiscoveryRun({ policyVersionId: policy.id, queryProposalId: query.id }, testDb)).rejects.toThrow("enabled query proposal");
+    await expect(testDb.execute(sql`insert into youtube_discovery_policy_versions (id, version, is_current, enabled, minimum_candidate_score, priority_score_weight, freshness_score_weight, cadence_minutes, retention_days, comment_signal_ttl_days, max_concurrent_runs, max_retry_attempts, retry_delay_minutes) values ('invalid-policy', 2, false, true, 0.5, 0.6, 0.4, 14, 180, 30, 1, 3, 15)`)).rejects.toThrow();
+    await expect(testDb.execute(sql`insert into youtube_discovery_query_proposals (id, origin, reason, priority, query_text, enabled, cadence_minutes) values ('unsafe-query', 'system', 'not_a_safe_reason', 50, 'https://example.com/?token=secret', true, 1440)`)).rejects.toThrow();
+  });
 });
