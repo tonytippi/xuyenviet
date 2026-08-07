@@ -48,6 +48,7 @@ describe("audit actor boundary", () => {
       "system-facebook-capture",
       "system-youtube-capture",
       "system-admin-bootstrap",
+      "system-youtube-discovery",
     ]);
     expect(ids.map(createSystemAuditActor)).toEqual(ids.map((system) => ({ kind: "system", system })));
     expect(Object.isFrozen(systemAuditActorCatalog)).toBe(true);
@@ -56,6 +57,7 @@ describe("audit actor boundary", () => {
 
   test("resolves only server-owned system labels", () => {
     expect(getSystemAuditActorLabel("system-trip-planning")).toBe("Lập kế hoạch chuyến đi");
+    expect(getSystemAuditActorLabel("system-youtube-discovery")).toBe("Khám phá YouTube");
     expect(getSystemAuditActorLabel("unknown-system")).toBeNull();
     expect(getSystemAuditActorLabel(" ")).toBeNull();
     expect(() => createSystemAuditActor("unknown-system")).toThrow(AuditActorValidationError);

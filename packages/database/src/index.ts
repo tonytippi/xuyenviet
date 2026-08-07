@@ -44,6 +44,7 @@ export * from "./usage";
 export * from "./usage-constants";
 export * from "./usage-events";
 export * from "./web-search";
+export * from "./youtube-discovery";
 export * from "./admin-overview";
 export * from "./admin-quality";
 export * from "./admin-knowledge-intake";

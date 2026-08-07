@@ -29,7 +29,9 @@ const unitTests = [
   "tests/trip-home.test.ts",
   "tests/traveler-writer-inventory.test.ts",
   "tests/web-search-quality.test.ts",
-  "tests/youtube-seed-urls.test.ts",
+    "tests/youtube-seed-urls.test.ts",
+    "tests/youtube-discovery-policy.test.ts",
+    "tests/youtube-discovery-ownership.test.ts",
 ];
 
 export default defineConfig({

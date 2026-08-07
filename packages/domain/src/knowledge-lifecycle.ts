@@ -1,6 +1,6 @@
 export type AuditActor =
   | Readonly<{ kind: "user"; userId: string; email: string }>
-  | Readonly<{ kind: "system"; system: "system-ai-orchestration" | "system-knowledge-pipeline" | "system-trip-planning" | "system-facebook-capture" | "system-youtube-capture" | "system-admin-bootstrap" }>;
+  | Readonly<{ kind: "system"; system: "system-ai-orchestration" | "system-knowledge-pipeline" | "system-trip-planning" | "system-facebook-capture" | "system-youtube-capture" | "system-admin-bootstrap" | "system-youtube-discovery" }>;
 
 export type KnowledgeVersionFence = Readonly<{
   contentVersion: number;

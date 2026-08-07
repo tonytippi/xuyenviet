@@ -28,6 +28,12 @@ export type MessageRole = (typeof messageRoleValues)[number];
 export const aiUsageStatusValues = ["success", "failure"] as const;
 export type AiUsageStatus = (typeof aiUsageStatusValues)[number];
 
+export const youtubeDiscoveryQueryProposalOriginValues = ["system", "operator"] as const;
+export type YoutubeDiscoveryQueryProposalOrigin = (typeof youtubeDiscoveryQueryProposalOriginValues)[number];
+
+export const youtubeDiscoveryRunStateValues = ["queued", "running", "retrying", "completed", "failed", "cancelled"] as const;
+export type YoutubeDiscoveryRunState = (typeof youtubeDiscoveryRunStateValues)[number];
+
 export const aiAskCommandStatusValues = ["pending", "completed", "failed", "aborted", "discarded"] as const;
 export type AiAskCommandStatus = (typeof aiAskCommandStatusValues)[number];
 
@@ -228,7 +234,7 @@ export const users = pgTable("users", {
 }, (user) => [
   check(
     "users_no_system_executor_id_check",
-    sql`${user.id} not in ('system-ai-orchestration', 'system-knowledge-pipeline', 'system-trip-planning', 'system-facebook-capture', 'system-youtube-capture', 'system-admin-bootstrap')`,
+    sql`${user.id} not in ('system-ai-orchestration', 'system-knowledge-pipeline', 'system-trip-planning', 'system-facebook-capture', 'system-youtube-capture', 'system-admin-bootstrap', 'system-youtube-discovery')`,
   ),
 ]);
 
@@ -343,6 +349,73 @@ export const auditEvents = pgTable(
       "audit_events_actor_shape_check",
       sql`(${auditEvent.actorClass} = 'user' and ${auditEvent.actorUserId} is not null and ${auditEvent.actorEmail} is not null and length(btrim(${auditEvent.actorEmail})) > 0 and ${auditEvent.actorSystem} is null) or (${auditEvent.actorClass} = 'system' and ${auditEvent.actorUserId} is null and ${auditEvent.actorEmail} is null and ${auditEvent.actorSystem} is not null and length(btrim(${auditEvent.actorSystem})) > 0)`,
     ),
+  ],
+);
+
+export const youtubeDiscoveryPolicyVersions = pgTable(
+  "youtube_discovery_policy_versions",
+  {
+    id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+    version: integer("version").notNull(),
+    isCurrent: boolean("is_current").default(false).notNull(),
+    enabled: boolean("enabled").default(true).notNull(),
+    minimumCandidateScore: real("minimum_candidate_score").notNull(),
+    priorityScoreWeight: real("priority_score_weight").notNull(),
+    freshnessScoreWeight: real("freshness_score_weight").notNull(),
+    cadenceMinutes: integer("cadence_minutes").notNull(),
+    retentionDays: integer("retention_days").notNull(),
+    commentSignalTtlDays: integer("comment_signal_ttl_days").notNull(),
+    maxConcurrentRuns: integer("max_concurrent_runs").notNull(),
+    maxRetryAttempts: integer("max_retry_attempts").notNull(),
+    retryDelayMinutes: integer("retry_delay_minutes").notNull(),
+    createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
+  },
+  (policy) => [
+    uniqueIndex("youtube_discovery_policy_versions_version_idx").on(policy.version),
+    uniqueIndex("youtube_discovery_policy_versions_one_current_idx").on(policy.isCurrent).where(sql`${policy.isCurrent}`),
+    check("youtube_discovery_policy_versions_version_check", sql`${policy.version} >= 1`),
+    check("youtube_discovery_policy_versions_score_check", sql`${policy.minimumCandidateScore} >= 0 and ${policy.minimumCandidateScore} <= 1 and ${policy.priorityScoreWeight} >= 0 and ${policy.priorityScoreWeight} <= 1 and ${policy.freshnessScoreWeight} >= 0 and ${policy.freshnessScoreWeight} <= 1`),
+    check("youtube_discovery_policy_versions_cadence_check", sql`${policy.cadenceMinutes} between 15 and 10080`),
+    check("youtube_discovery_policy_versions_retention_check", sql`${policy.retentionDays} between 1 and 365 and ${policy.commentSignalTtlDays} between 1 and ${policy.retentionDays} - 1`),
+    check("youtube_discovery_policy_versions_execution_check", sql`${policy.maxConcurrentRuns} between 1 and 20 and ${policy.maxRetryAttempts} between 0 and 10 and ${policy.retryDelayMinutes} between 1 and 1440`),
+  ],
+);
+
+export const youtubeDiscoveryQueryProposals = pgTable(
+  "youtube_discovery_query_proposals",
+  {
+    id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+    origin: text("origin").$type<YoutubeDiscoveryQueryProposalOrigin>().notNull(),
+    reason: text("reason").notNull(),
+    priority: integer("priority").notNull(),
+    queryText: text("query_text").notNull(),
+    enabled: boolean("enabled").default(true).notNull(),
+    cadenceMinutes: integer("cadence_minutes").notNull(),
+    createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
+  },
+  (proposal) => [
+    index("youtube_discovery_query_proposals_enabled_cadence_idx").on(proposal.enabled, proposal.cadenceMinutes),
+    check("youtube_discovery_query_proposals_origin_check", sql`${proposal.origin} in ('system', 'operator')`),
+    check("youtube_discovery_query_proposals_reason_check", sql`length(btrim(${proposal.reason})) between 1 and 160 and position(chr(10) in ${proposal.reason}) = 0 and position(chr(13) in ${proposal.reason}) = 0`),
+    check("youtube_discovery_query_proposals_priority_check", sql`${proposal.priority} between 1 and 100`),
+    check("youtube_discovery_query_proposals_query_check", sql`length(btrim(${proposal.queryText})) between 1 and 240 and position(chr(10) in ${proposal.queryText}) = 0 and position(chr(13) in ${proposal.queryText}) = 0`),
+    check("youtube_discovery_query_proposals_cadence_check", sql`${proposal.cadenceMinutes} between 15 and 10080`),
+  ],
+);
+
+export const youtubeDiscoveryRuns = pgTable(
+  "youtube_discovery_runs",
+  {
+    id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+    policyVersionId: text("policy_version_id").notNull().references(() => youtubeDiscoveryPolicyVersions.id, { onDelete: "restrict" }),
+    queryProposalId: text("query_proposal_id").references(() => youtubeDiscoveryQueryProposals.id, { onDelete: "restrict" }),
+    state: text("state").$type<YoutubeDiscoveryRunState>().default("queued").notNull(),
+    createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
+  },
+  (run) => [
+    index("youtube_discovery_runs_state_created_at_idx").on(run.state, run.createdAt),
+    index("youtube_discovery_runs_policy_version_idx").on(run.policyVersionId),
+    check("youtube_discovery_runs_state_check", sql`${run.state} in ('queued', 'running', 'retrying', 'completed', 'failed', 'cancelled')`),
   ],
 );
 
@@ -2161,6 +2234,9 @@ export const schema = {
   verificationTokens,
   userRoles,
   auditEvents,
+  youtubeDiscoveryPolicyVersions,
+  youtubeDiscoveryQueryProposals,
+  youtubeDiscoveryRuns,
   sources,
   sourceCaptureVersions,
   rawSourceMaterial,

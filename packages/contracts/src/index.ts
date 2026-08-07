@@ -1,4 +1,5 @@
 export const requestRoles = ["traveler", "operator", "admin"] as const;
+export * from "./youtube-discovery";
 export type RequestRole = (typeof requestRoles)[number];
 
 export type RequestPrincipal = {

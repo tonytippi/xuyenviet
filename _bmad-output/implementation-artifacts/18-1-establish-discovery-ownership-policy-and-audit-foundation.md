@@ -1,6 +1,6 @@
 ---
 story_id: 18-1
-status: ready-for-dev
+status: review
 created: 2026-08-07
 epic: 18
 ---
@@ -29,36 +29,36 @@ so that scheduled URL discovery can operate without becoming a second Knowledge 
 
 ## Tasks / Subtasks
 
-- [ ] Add the Discovery-owned persistence foundation (AC: 1, 2)
-  - [ ] Add closed TypeScript values/types and `youtube_discovery_*` Drizzle tables to `packages/database/src/schema.ts`: one policy record, query proposals, and runs. Keep all values bounded and operationally safe.
-  - [ ] Model one versioned policy aggregate containing global enablement, score bands/weights, cadence, retention, bounded concurrency, and retry settings. Enforce singleton/version/configuration invariants with database constraints rather than scattered environment constants.
-  - [ ] Require every run to reference and snapshot the effective policy version. Establish the closed run-state representation required by Story 18.2: `queued | running | retrying | completed | failed | cancelled`; do not implement claiming, execution, or transitions beyond what is necessary to persist the foundation.
-  - [ ] Create migration `0044_<discovery-foundation>.sql`, update `drizzle/migrations/meta/_journal.json`, and retain Drizzle as the only migration authority.
-  - [ ] Create a focused `packages/database/src/youtube-discovery/` repository/module boundary and export it from `packages/database/src/index.ts`. It may write only Discovery tables and call the Audit boundary; it must not import/write Knowledge lifecycle tables.
+- [x] Add the Discovery-owned persistence foundation (AC: 1, 2)
+  - [x] Add closed TypeScript values/types and `youtube_discovery_*` Drizzle tables to `packages/database/src/schema.ts`: one policy record, query proposals, and runs. Keep all values bounded and operationally safe.
+  - [x] Model one versioned policy aggregate containing global enablement, score bands/weights, cadence, retention, bounded concurrency, and retry settings. Enforce singleton/version/configuration invariants with database constraints rather than scattered environment constants.
+  - [x] Require every run to reference and snapshot the effective policy version. Establish the closed run-state representation required by Story 18.2: `queued | running | retrying | completed | failed | cancelled`; do not implement claiming, execution, or transitions beyond what is necessary to persist the foundation.
+  - [x] Create migration `0044_<discovery-foundation>.sql`, update `drizzle/migrations/meta/_journal.json`, and retain Drizzle as the only migration authority.
+  - [x] Create a focused `packages/database/src/youtube-discovery/` repository/module boundary and export it from `packages/database/src/index.ts`. It may write only Discovery tables and call the Audit boundary; it must not import/write Knowledge lifecycle tables.
 
-- [ ] Establish the governed Discovery policy contract and defaults (AC: 1, 2)
-  - [ ] Create `packages/domain/src/youtube-discovery/` policy types/validation and export them from `packages/domain/src/index.ts`.
-  - [ ] Create safe typed Discovery contract types under `packages/contracts/src/youtube-discovery/` or the established contracts boundary and export them from `packages/contracts/src/index.ts`.
-  - [ ] Choose and document test-safe initial persisted defaults: candidate/audit retention starts at 180 days; derived comment-signal TTL must be shorter; cadence, score bands/weights, concurrency, and retry settings must be finite and bounded. Do not create a hard budget/quota field, reservation table, or enforcement path.
-  - [ ] Keep command/API/Worker ports explicit and narrow. Story 18.1 does not register an API controller, Worker adapter, provider client, scheduler, query planning, canonicalizer, candidate, triage, or UI.
+- [x] Establish the governed Discovery policy contract and defaults (AC: 1, 2)
+  - [x] Create `packages/domain/src/youtube-discovery/` policy types/validation and export them from `packages/domain/src/index.ts`.
+  - [x] Create safe typed Discovery contract types under `packages/contracts/src/youtube-discovery/` or the established contracts boundary and export them from `packages/contracts/src/index.ts`.
+  - [x] Choose and document test-safe initial persisted defaults: candidate/audit retention starts at 180 days; derived comment-signal TTL must be shorter; cadence, score bands/weights, concurrency, and retry settings must be finite and bounded. Do not create a hard budget/quota field, reservation table, or enforcement path.
+  - [x] Keep command/API/Worker ports explicit and narrow. Story 18.1 does not register an API controller, Worker adapter, provider client, scheduler, query planning, canonicalizer, candidate, triage, or UI.
 
-- [ ] Register and protect the Discovery automated identity (AC: 3, 4)
-  - [ ] Add `{ id: "system-youtube-discovery", label: "Khám phá YouTube" }` to `systemAuditActorDefinitions` in `packages/database/src/actors.ts` without reordering existing entries.
-  - [ ] Extend the database `users_no_system_executor_id_check` in `packages/database/src/schema.ts` and the migration so the new executor ID cannot become a `users` row.
-  - [ ] Align the duplicated `AuditActor` system union in `packages/domain/src/knowledge-lifecycle.ts`, or safely centralize it if that can be done without widening scope.
-  - [ ] Construct automated attribution only via `createSystemAuditActor("system-youtube-discovery")`. Never accept a free-form executor string from a controller, Worker input, or persisted JSON.
+- [x] Register and protect the Discovery automated identity (AC: 3, 4)
+  - [x] Add `{ id: "system-youtube-discovery", label: "Khám phá YouTube" }` to `systemAuditActorDefinitions` in `packages/database/src/actors.ts` without reordering existing entries.
+  - [x] Extend the database `users_no_system_executor_id_check` in `packages/database/src/schema.ts` and the migration so the new executor ID cannot become a `users` row.
+  - [x] Align the duplicated `AuditActor` system union in `packages/domain/src/knowledge-lifecycle.ts`, or safely centralize it if that can be done without widening scope.
+  - [x] Construct automated attribution only via `createSystemAuditActor("system-youtube-discovery")`. Never accept a free-form executor string from a controller, Worker input, or persisted JSON.
 
-- [ ] Reuse Audit-owned attribution safely (AC: 1, 3, 4)
-  - [ ] Use `recordAuditEvent` from `packages/database/src/audit-writers.ts`; do not directly insert `auditEvents`, `tripPlanChangeHistory`, or `aiUsageEvents`.
-  - [ ] Define Discovery audit target/action naming and produce summaries from explicit safe fields only. The writer truncates content but does not sanitize it; do not pass provider content, raw comments, URLs with secrets, prompts/responses, source material, evidence, traveler data, or arbitrary JSON into a summary.
-  - [ ] For an operator-initiated policy change, retain the authenticated user audit actor. Reserve `system-youtube-discovery` for automated execution attribution; do not create a fake user or attach a system executor to a user-owned relationship.
+- [x] Reuse Audit-owned attribution safely (AC: 1, 3, 4)
+  - [x] Use `recordAuditEvent` from `packages/database/src/audit-writers.ts`; do not directly insert `auditEvents`, `tripPlanChangeHistory`, or `aiUsageEvents`.
+  - [x] Define Discovery audit target/action naming and produce summaries from explicit safe fields only. The writer truncates content but does not sanitize it; do not pass provider content, raw comments, URLs with secrets, prompts/responses, source material, evidence, traveler data, or arbitrary JSON into a summary.
+  - [x] For an operator-initiated policy change, retain the authenticated user audit actor. Reserve `system-youtube-discovery` for automated execution attribution; do not create a fake user or attach a system executor to a user-owned relationship.
 
-- [ ] Add focused regression coverage (AC: 1-4)
-  - [ ] Update `tests/audit-actors.test.ts` for catalog order, the server-owned label, valid construction, and unknown executor rejection.
-  - [ ] Update `tests/story-8-6-actor-isolation.test.ts` so the clean migrated database proves every catalog executor, including Discovery, cannot be a user, account, session, or role principal, and that system audit rows retain the exclusive system actor shape.
-  - [ ] Add a serial integration test for the Discovery migration/schema. It must explicitly use `resetTestDatabase()` in its own setup where clean tables are required and prove policy singleton/version, allowed bounded configuration, policy-version run snapshot FK, and safe Discovery-only ownership.
-  - [ ] Add unit tests for policy input validation/defaults and audit construction. Assert invalid/unbounded configuration and missing/arbitrary executor IDs fail before persistence.
-  - [ ] Add a source-level ownership regression that prevents the Discovery repository/domain boundary from inserting into Knowledge-owned tables or protected Audit tables directly.
+- [x] Add focused regression coverage (AC: 1-4)
+  - [x] Update `tests/audit-actors.test.ts` for catalog order, the server-owned label, valid construction, and unknown executor rejection.
+  - [x] Update `tests/story-8-6-actor-isolation.test.ts` so the clean migrated database proves every catalog executor, including Discovery, cannot be a user, account, session, or role principal, and that system audit rows retain the exclusive system actor shape.
+  - [x] Add a serial integration test for the Discovery migration/schema. It must explicitly use `resetTestDatabase()` in its own setup where clean tables are required and prove policy singleton/version, allowed bounded configuration, policy-version run snapshot FK, and safe Discovery-only ownership.
+  - [x] Add unit tests for policy input validation/defaults and audit construction. Assert invalid/unbounded configuration and missing/arbitrary executor IDs fail before persistence.
+  - [x] Add a source-level ownership regression that prevents the Discovery repository/domain boundary from inserting into Knowledge-owned tables or protected Audit tables directly.
 
 ## Dev Notes
 
@@ -133,7 +133,26 @@ gpu4ai/gpt-5.6-terra
 ### Completion Notes List
 
 - Ultimate context engine analysis completed - comprehensive developer guide created.
+- Implemented Discovery-only policy-version, query-proposal, and run persistence with safe policy validation, registered system audit attribution, and Audit-owned writes.
+- Focused unit tests passed; typecheck, lint (warnings only), build, normal Drizzle migration, and diff whitespace verification passed. Integration migration setup remains blocked because its disposable `DATABASE_URL_TEST` target retains a partial earlier 0044 state and its Drizzle subprocess exits without emitting a database diagnostic.
 
 ### File List
 
 - _bmad-output/implementation-artifacts/18-1-establish-discovery-ownership-policy-and-audit-foundation.md
+- _bmad-output/implementation-artifacts/sprint-status.yaml
+- drizzle/migrations/0044_discovery_foundation.sql
+- drizzle/migrations/meta/_journal.json
+- packages/contracts/src/index.ts
+- packages/contracts/src/youtube-discovery/index.ts
+- packages/database/src/actors.ts
+- packages/database/src/index.ts
+- packages/database/src/schema.ts
+- packages/database/src/youtube-discovery/index.ts
+- packages/domain/src/index.ts
+- packages/domain/src/knowledge-lifecycle.ts
+- packages/domain/src/youtube-discovery/policy.ts
+- tests/audit-actors.test.ts
+- tests/youtube-discovery-foundation.integration.test.ts
+- tests/youtube-discovery-ownership.test.ts
+- tests/youtube-discovery-policy.test.ts
+- vitest.config.ts

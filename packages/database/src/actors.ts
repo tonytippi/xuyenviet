@@ -5,6 +5,7 @@ const systemAuditActorDefinitions = [
   { id: "system-facebook-capture", label: "Thu thập Facebook" },
   { id: "system-youtube-capture", label: "Thu thập YouTube" },
   { id: "system-admin-bootstrap", label: "Khởi tạo quản trị viên" },
+  { id: "system-youtube-discovery", label: "Khám phá YouTube" },
 ] as const;
 
 export type SystemAuditActorId = (typeof systemAuditActorDefinitions)[number]["id"];
