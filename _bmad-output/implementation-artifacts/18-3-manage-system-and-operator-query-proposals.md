@@ -155,6 +155,7 @@ gpu4ai/gpt-5.6-terra
 - 2026-08-07: Repaired the supplied independent-review findings only. Legacy system origins remain immutable; Discovery adapts owner-published bounded ports, including healthy empty signals; direct system creation derives the planner tuple identity; planning tables are exported; refresh audits retain persisted enablement; due scheduling uses conflict-safe insertion; and focused command/lease/fence/scheduling coverage was added. Status returned to ready-for-dev pending follow-up review.
 - 2026-08-08: Second unattended independent review of `bbc752d79fb48927571beb4fe9f9ce0019b84db9..eb5bd887dd496fc230eb4825abd362e3e5949ae7` ran the adversarial and edge-case layers synchronously; the required Acceptance Auditor failed to provide an auditable AC/scope result and is recorded as a failed layer. Actionable findings: production Worker composition permanently binds both upstream planning ports as unavailable, existing system-proposal refreshes can retain a next due timestamp projected using a superseded cadence, and the safe admin read parser rejects enabled proposals with no next run after global re-enable. Decision needed: migration 0047 permits legacy `operator_request` as a system safe-signal summary to preserve existing immutable system rows, which conflicts with the new four-reason system input contract. Status set to in-progress; no application code or tests changed.
 - 2026-08-08: Repaired only the final independent-review findings. Production Worker composition now binds Knowledge- and AI Ask-owned bounded aggregate projections without Discovery table access; system refreshes re-project next due time at the first future boundary when cadence changes; safe admin projections allow an enabled, unpaused proposal with no next run during the global re-enable transition. User-authorized migration 0047 clean break converts legacy system `operator_request` rows to operator origin before enforcing the four system reasons. Focused cadence, contract, owner-port, and migration evidence was added. Acceptance Auditor evidence is concrete through the targeted tests and migration assertion. Status returned to ready-for-dev pending follow-up review.
+- 2026-08-08: Final narrow AC1 recovery removes Discovery-owned database-reader adapters. Knowledge and AI Ask now each expose their own explicit `KnowledgeDiscoveryQuerySignalPort` or `AiAskDiscoveryQuerySignalPort`, returning bounded `available` empty aggregates until that owner supports a safe reason projection. The Worker binds those owner ports directly. A focused unit guard proves this composition and that Discovery has no direct Knowledge or AI Ask persistence dependency. Focused tests, complete typecheck, Worker build, and whitespace validation pass. Status remains ready-for-dev.
 
 ### File List
 
@@ -165,12 +166,12 @@ gpu4ai/gpt-5.6-terra
 - drizzle/migrations/0047_discovery_query_planning.sql
 - packages/database/src/schema.ts
 - packages/database/src/youtube-discovery/index.ts
-- packages/database/src/youtube-discovery/planning-ports.ts
 - packages/database/src/knowledge-discovery-signals.ts
 - packages/database/src/ai-ask-discovery-signals.ts
 - tests/admin-youtube-discovery-api.integration.test.ts
 - tests/youtube-discovery-foundation.integration.test.ts
 - tests/youtube-discovery-planning.test.ts
+- tests/youtube-discovery-owner-port-composition.test.ts
 - tests/youtube-discovery-policy.test.ts
 - tests/admin-youtube-discovery-contract.test.ts
 - tests/story-18-3-clean-break.test.ts

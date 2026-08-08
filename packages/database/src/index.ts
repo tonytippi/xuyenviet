@@ -53,7 +53,6 @@ export * from "./admin-knowledge-intake";
 export * from "./admin-facebook-capture";
 export * from "./admin-youtube-capture";
 export * from "./admin-youtube-discovery";
-export * from "./youtube-discovery/planning-ports";
 export * from "./admin-knowledge-review";
 export * from "./admin-knowledge-coverage";
 export * from "./trip-plan-commands";

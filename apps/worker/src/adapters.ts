@@ -1,6 +1,6 @@
 import { runWorkerAdapter } from "@xuyenviet/worker-domain/adapters";
 import { consoleOperationalTelemetrySink, type OperationalTelemetrySink } from "@xuyenviet/contracts";
-import { closeDatabaseClient, createAiAskDiscoveryQuerySignalPort, createKnowledgeDiscoveryQuerySignalPort, readAiAskDiscoveryQuerySignals, readKnowledgeDiscoveryQuerySignals } from "@xuyenviet/database";
+import { closeDatabaseClient, createAiAskDiscoveryQuerySignalPort, createKnowledgeDiscoveryQuerySignalPort } from "@xuyenviet/database";
 import { bindYoutubeDiscoveryPlanningPorts } from "@xuyenviet/worker-domain";
 import { closeSync, constants, openSync, writeSync } from "node:fs";
 import { extname, isAbsolute, normalize, resolve, sep } from "node:path";
@@ -25,8 +25,8 @@ function testTelemetryFileSink(environment = process.env): OperationalTelemetryS
 async function main() {
   try {
     bindYoutubeDiscoveryPlanningPorts(
-      createKnowledgeDiscoveryQuerySignalPort(readKnowledgeDiscoveryQuerySignals),
-      createAiAskDiscoveryQuerySignalPort(readAiAskDiscoveryQuerySignals),
+      createKnowledgeDiscoveryQuerySignalPort(),
+      createAiAskDiscoveryQuerySignalPort(),
     );
     await runWorkerAdapter(process.argv.slice(2), { telemetry: testTelemetryFileSink() ?? consoleOperationalTelemetrySink });
   } catch {

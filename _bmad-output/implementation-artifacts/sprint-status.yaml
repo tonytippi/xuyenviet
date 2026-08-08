@@ -1,5 +1,5 @@
 # generated: 2026-07-25
-# last_updated: 2026-08-08 (Story 18.3 final independent-review findings repaired; ready for follow-up review.)
+# last_updated: 2026-08-08 (Story 18.3 AC1 owner-port recovery repaired; ready for follow-up review.)
 # project: xuyenviet
 # project_key: NOKEY
 # tracking_system: file-system
@@ -33,7 +33,7 @@
 #   - done: Completed
 
 generated: 2026-07-25
-last_updated: 2026-08-08 (Story 18.3 final independent-review findings repaired; ready for follow-up review.)
+last_updated: 2026-08-08 (Story 18.3 AC1 owner-port recovery repaired; ready for follow-up review.)
 project: xuyenviet
 project_key: NOKEY
 tracking_system: file-system
@@ -414,6 +414,7 @@ development_status:
   # 2026-08-07: Repaired only the independent-review findings: immutable legacy system origin, aggregate-owned safe port adapters and empty availability, shared tuple identity, schema export, preserved-enabled audit, conflict-safe due admission, and focused command/lease/fence/scheduling coverage. Status restored to ready-for-dev pending follow-up review.
   # 2026-08-08: Second unattended independent review of bbc752d79fb48927571beb4fe9f9ce0019b84db9..eb5bd887dd496fc230eb4825abd362e3e5949ae7 ran adversarial and edge-case layers synchronously; the Acceptance Auditor failed without an auditable AC/scope result. Actionable patches: Worker composition binds both owner signal ports permanently unavailable; cadence refresh retains a stale next_due_at projection; safe admin list parsing rejects globally re-enabled enabled rows until scheduling projects a next run. Decision needed: migration 0047's legacy system operator_request safe-signal allowance conflicts with the strict four-reason system contract. No application code or tests changed.
   # 2026-08-08: Final repair binds owner-published bounded ports, re-projects changed system cadence at the next future boundary, permits the safe global re-enable list transition, and applies the user-authorized 0047 clean break for legacy system operator_request rows. Targeted unit/integration evidence, typecheck, and build passed; follow-up review remains required.
+  # 2026-08-08: Mandatory AC1 recovery removes Discovery-owned database-reader adapters. Knowledge and AI Ask each publish a direct bounded aggregate port and return owner-owned available-empty when no safe aggregate is supported. Worker composition binds both directly; focused composition and Discovery persistence-isolation tests pass alongside full typecheck, Worker build, and diff validation. Status remains ready-for-dev.
   18-3-manage-system-and-operator-query-proposals: ready-for-dev
   18-4-discover-canonical-youtube-candidates-safely: backlog
   18-5-enrich-candidates-with-safe-derived-signals-and-retention: backlog

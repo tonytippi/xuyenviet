@@ -28,15 +28,8 @@ describe("YouTube Discovery safe planning signals", () => {
     expect(parseAdminYoutubeDiscoveryQueryList({ items: Array.from({ length: 201 }, () => item) })).toBeNull();
   });
 
-  test("adapts owner-published aggregate ports without persistence access", async () => {
-    const empty = createKnowledgeDiscoveryQuerySignalPort(async () => ({ status: "available", signals: [] }));
-    const allReasons = createAiAskDiscoveryQuerySignalPort(async () => ({ status: "available", signals: [
-      { reason: "coverage_gap", geography: "Da Lat", taxonomy: "route", priority: 10 },
-      { reason: "freshness_risk", geography: "Da Nang", taxonomy: "coast", priority: 20 },
-      { reason: "unresolved_conflict", geography: "Hue", taxonomy: "heritage", priority: 30 },
-      { reason: "anonymized_demand", geography: "Ha Noi", taxonomy: "food", priority: 40 },
-    ] }));
-    await expect(empty.readSignals()).resolves.toEqual({ status: "available", signals: [] });
-    await expect(allReasons.readSignals()).resolves.toMatchObject({ status: "available", signals: expect.arrayContaining([expect.objectContaining({ reason: "coverage_gap" }), expect.objectContaining({ reason: "freshness_risk" }), expect.objectContaining({ reason: "unresolved_conflict" }), expect.objectContaining({ reason: "anonymized_demand" })]) });
+  test("publishes explicit owner aggregate ports when no safe aggregate is available", async () => {
+    await expect(createKnowledgeDiscoveryQuerySignalPort().readSignals()).resolves.toEqual({ status: "available", signals: [] });
+    await expect(createAiAskDiscoveryQuerySignalPort().readSignals()).resolves.toEqual({ status: "available", signals: [] });
   });
 });

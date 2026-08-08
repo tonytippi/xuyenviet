@@ -4,7 +4,7 @@ type: 'feature'
 created: '2026-08-07'
 status: 'ready-for-dev'
 baseline_revision: 'bbc752d'
-review_loop_iteration: 2
+review_loop_iteration: 3
 followup_review_recommended: true
 final_revision: null
 context: []
@@ -14,6 +14,6 @@ warnings: []
 ## Auto Run Result
 
 - Status: ready-for-dev
-- Summary: The final independent-review findings were repaired, including the user-authorized migration 0047 clean break; a follow-up independent review remains required.
-- Verification: Targeted owner-port, safe-admin-projection, cadence-reprojection, and migration-contract evidence passed. Type checking and whitespace validation passed. The configured full unit and integration project commands still report unrelated pre-existing failures.
-- Commit: e99e74b `fix(discovery): repair final story 18.3 findings`.
+- Summary: The mandatory AC1 owner-port blocker is repaired. Knowledge and AI Ask each publish their own bounded aggregate port; the Worker binds both directly, and Discovery no longer owns database-created port readers.
+- Verification: Targeted owner-port composition/isolation tests pass (2 files, 6 tests), complete `pnpm typecheck`, Worker build, and `git diff --check` pass. Owners without a supported safe aggregate signal return explicit bounded `available` empty through their own port; no permanent Worker fallback is used.
+- Commit: repair-only `fix(discovery): bind owner aggregate ports`.
