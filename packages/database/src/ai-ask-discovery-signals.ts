@@ -15,7 +15,7 @@ export function createAiAskDiscoveryQuerySignalPort(database: AiAskSignalReader 
       const [row] = await database.transaction(async (transaction) => {
         await transaction.execute(sql.raw(`set local statement_timeout = ${planningSignalStatementTimeoutMs}`));
         if (signal?.aborted) throw new Error("Planning signal read aborted.");
-        return transaction.select({ count: sql<number>`count(*)::int` }).from(assistantRetrievalDecisions).where(sql`${assistantRetrievalDecisions.webSearchTriggered} and ${assistantRetrievalDecisions.approvedKnowledgeSelectedCount} = 0`);
+        return transaction.select({ count: sql<number>`count(distinct ${assistantRetrievalDecisions.userId})::int` }).from(assistantRetrievalDecisions).where(sql`${assistantRetrievalDecisions.webSearchTriggered} and ${assistantRetrievalDecisions.approvedKnowledgeSelectedCount} = 0`);
       });
       if (signal?.aborted) return { status: "unavailable", code: "source_timeout" };
       const count = row?.count ?? 0;

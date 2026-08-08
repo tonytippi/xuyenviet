@@ -41,6 +41,9 @@ async function mutate(principal: RequestPrincipal, id: string, values: Record<st
   if (!valid || !id.trim() || id.length > 128) throw new Error("Invalid YouTube Discovery query proposal.");
   const db = getDb(); const actor = actorFor(principal);
   return db.transaction(async (transaction) => {
+    // Policy transitions lock this row before proposal rows. Keep operator
+    // commands in the same order to prevent a transition/command lock cycle.
+    const [policy] = await transaction.select({ enabled: youtubeDiscoveryPolicyVersions.enabled }).from(youtubeDiscoveryPolicyVersions).where(eq(youtubeDiscoveryPolicyVersions.isCurrent, true)).limit(1).for("update");
     if (origin) {
       const [existing] = await transaction.select({ id: youtubeDiscoveryQueryProposals.id, origin: youtubeDiscoveryQueryProposals.origin }).from(youtubeDiscoveryQueryProposals).where(eq(youtubeDiscoveryQueryProposals.id, id)).limit(1).for("update");
       if (existing?.origin === "system") {
@@ -51,7 +54,6 @@ async function mutate(principal: RequestPrincipal, id: string, values: Record<st
     const [row] = await transaction.update(youtubeDiscoveryQueryProposals).set(values).where(origin ? sql`${youtubeDiscoveryQueryProposals.id} = ${id} and ${youtubeDiscoveryQueryProposals.origin} = ${origin}` : eq(youtubeDiscoveryQueryProposals.id, id)).returning();
     if (!row) return null;
     await audit(transaction, actor, "update", row.id, row);
-    const [policy] = await transaction.select({ enabled: youtubeDiscoveryPolicyVersions.enabled }).from(youtubeDiscoveryPolicyVersions).where(eq(youtubeDiscoveryPolicyVersions.isCurrent, true)).limit(1);
     return projection(row, policy?.enabled ?? false);
   });
 }

@@ -110,6 +110,35 @@ describe.sequential("YouTube Discovery foundation persistence", () => {
     await expect(testDb.select({ queryText: youtubeDiscoveryQueryProposals.queryText, targetDigest: youtubeDiscoveryQueryProposals.targetDigest, safeSignalSummary: youtubeDiscoveryQueryProposals.safeSignalSummary }).from(youtubeDiscoveryQueryProposals)).resolves.toEqual([{ queryText: "Da Lat route note", targetDigest: expect.stringMatching(/^[a-f0-9]{64}$/), safeSignalSummary: "coverage_gap" }]);
   });
 
+  test("limits Knowledge signals after excluding ineligible recommendation rows", async () => {
+    await seedTestOperator();
+    await testDb.insert(knowledgeCards).values(Array.from({ length: 100 }, (_, index) => ({ id: `stale-risk-card-${index}`, lifecycleState: "pending_operator" as const, knowledgeState: "community_observation" as const, verificationRequirement: "operator_required" as const, type: "route_note" as const, title: `Risk ${index}`, locationName: "Da Lat", summary: "Safe test summary", aiPromptVersion: "test", createdByUserId: "operator", freshnessSensitive: false })));
+    await testDb.insert(knowledgeRecommendations).values(Array.from({ length: 100 }, (_, index) => ({ knowledgeCardId: `stale-risk-card-${index}`, contentVersion: 1, evidenceSetRevision: 1, status: "open" as const, workType: "risk" as const, priority: 20 })));
+    await testDb.insert(knowledgeCards).values({ id: "valid-gap-card", lifecycleState: "pending_operator", knowledgeState: "community_observation", verificationRequirement: "operator_required", type: "route_note", title: "Valid gap", locationName: "Da Lat", summary: "Safe test summary", aiPromptVersion: "test", createdByUserId: "operator" });
+    await testDb.insert(knowledgeRecommendations).values({ knowledgeCardId: "valid-gap-card", contentVersion: 1, evidenceSetRevision: 1, status: "open", workType: "missing_context", priority: 70 });
+
+    await expect(createKnowledgeDiscoveryQuerySignalPort(testDb).readSignals()).resolves.toEqual({ status: "available", signals: [{ reason: "coverage_gap", geography: "Da Lat", taxonomy: "route note", priority: 70 }] });
+  });
+
+  test("excludes stale Knowledge recommendation versions and orders the bounded eligible set by priority", async () => {
+    await seedTestOperator();
+    await testDb.insert(knowledgeCards).values([
+      { id: "stale-gap-card", lifecycleState: "pending_operator", knowledgeState: "community_observation", verificationRequirement: "operator_required", type: "route_note", title: "Stale gap", locationName: "Da Lat", summary: "Safe test summary", aiPromptVersion: "test", createdByUserId: "operator", contentVersion: 2, evidenceSetRevision: 2 },
+      { id: "low-gap-card", lifecycleState: "pending_operator", knowledgeState: "community_observation", verificationRequirement: "operator_required", type: "route_note", title: "Low gap", locationName: "Da Lat", summary: "Safe test summary", aiPromptVersion: "test", createdByUserId: "operator" },
+      { id: "high-gap-card", lifecycleState: "pending_operator", knowledgeState: "community_observation", verificationRequirement: "operator_required", type: "route_note", title: "High gap", locationName: "Da Lat", summary: "Safe test summary", aiPromptVersion: "test", createdByUserId: "operator" },
+    ]);
+    await testDb.insert(knowledgeRecommendations).values([
+      { knowledgeCardId: "stale-gap-card", contentVersion: 1, evidenceSetRevision: 1, status: "open", workType: "missing_context", priority: 100 },
+      { knowledgeCardId: "low-gap-card", contentVersion: 1, evidenceSetRevision: 1, status: "open", workType: "missing_context", priority: 20 },
+      { knowledgeCardId: "high-gap-card", contentVersion: 1, evidenceSetRevision: 1, status: "open", workType: "missing_context", priority: 80 },
+    ]);
+
+    await expect(createKnowledgeDiscoveryQuerySignalPort(testDb).readSignals()).resolves.toEqual({ status: "available", signals: [
+      { reason: "coverage_gap", geography: "Da Lat", taxonomy: "route note", priority: 80 },
+      { reason: "coverage_gap", geography: "Da Lat", taxonomy: "route note", priority: 20 },
+    ] });
+  });
+
   test("atomically re-projects every enabled system proposal at the first future cadence boundary", async () => {
     await createYoutubeDiscoveryPolicyVersion({ version: 1, isCurrent: true, policy: { cadenceMinutes: 15 }, actor: createSystemAuditActor("system-youtube-discovery") }, testDb);
     const first = await claimYoutubeDiscoveryPlanning("discovery-a", testDb);
@@ -124,6 +153,9 @@ describe.sequential("YouTube Discovery foundation persistence", () => {
       { id: secondProposal.id, cadenceMinutes: 60, nextDueAt: expect.any(Date) },
     ]));
     expect(after.every((proposal) => proposal.nextDueAt!.getTime() > Date.now())).toBe(true);
+    const [planning] = await testDb.select({ policyVersionId: youtubeDiscoveryPlanningLeases.policyVersionId, state: youtubeDiscoveryPlanningLeases.state, nextRunAt: youtubeDiscoveryPlanningLeases.nextRunAt }).from(youtubeDiscoveryPlanningLeases);
+    expect(planning).toMatchObject({ policyVersionId: expect.any(String), state: "queued", nextRunAt: expect.any(Date) });
+    expect(planning!.nextRunAt.getTime()).toBeGreaterThan(Date.now() + 58 * 60_000);
   });
 
   test("does not re-project an operator-paused system proposal when cadence changes", async () => {
@@ -262,5 +294,14 @@ describe.sequential("YouTube Discovery foundation persistence", () => {
     expect(runs).toHaveLength(1);
     expect((await testDb.select({ nextDueAt: youtubeDiscoveryQueryProposals.nextDueAt }).from(youtubeDiscoveryQueryProposals).where(eq(youtubeDiscoveryQueryProposals.id, proposal.id)))[0]!.nextDueAt!.getTime()).toBeGreaterThan(Date.now());
     await expect(createYoutubeDiscoveryRun({ policyVersionId: policy.id, queryProposalId: proposal.id, scheduleIntervalAt: runs[0]!.scheduleIntervalAt! }, testDb)).resolves.toBeNull();
+  });
+
+  test("bounds each due scheduling transaction to twenty proposals", async () => {
+    await seedTestOperator();
+    await createYoutubeDiscoveryPolicyVersion({ version: 1, isCurrent: true, actor: createSystemAuditActor("system-youtube-discovery") }, testDb);
+    const proposals = await Promise.all(Array.from({ length: 21 }, (_, index) => createYoutubeDiscoveryQueryProposal({ origin: "operator", reason: "operator_request", priority: 50, queryText: `Da Lat route ${index}`, cadenceMinutes: 15, actor: createUserAuditActor({ userId: "operator", email: "operator@example.com" }) }, testDb)));
+    await testDb.update(youtubeDiscoveryQueryProposals).set({ scheduleAnchorAt: new Date(0), nextDueAt: new Date(1) }).where(sql`${youtubeDiscoveryQueryProposals.id} in (${sql.join(proposals.map((proposal) => sql`${proposal.id}`), sql`, `)})`);
+    expect(await scheduleYoutubeDiscoveryDueRuns(testDb)).toBe(20);
+    expect(await scheduleYoutubeDiscoveryDueRuns(testDb)).toBe(1);
   });
 });

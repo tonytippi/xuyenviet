@@ -8,16 +8,8 @@ ALTER TABLE "youtube_discovery_query_proposals" ADD COLUMN IF NOT EXISTS "schedu
 --> statement-breakpoint
 ALTER TABLE "youtube_discovery_query_proposals" ADD COLUMN IF NOT EXISTS "next_due_at" timestamp;
 --> statement-breakpoint
--- Clean break: legacy system operator requests are operator-owned requests,
--- not valid system signals under the new bounded four-reason contract.
-UPDATE "youtube_discovery_query_proposals" SET "origin" = 'operator', "enabled" = false, "schedule_anchor_at" = NULL, "next_due_at" = NULL WHERE "origin" = 'system' AND "reason" = 'operator_request';
---> statement-breakpoint
--- Remaining system proposals predate safe upstream tuples. Preserve their
--- immutable system origin while assigning a stable legacy identity.
-UPDATE "youtube_discovery_query_proposals" SET "target_digest" = encode(digest("reason" || chr(31) || "query_text" || chr(31) || "id", 'sha256'), 'hex'), "safe_signal_summary" = "reason", "schedule_anchor_at" = CASE WHEN "enabled" AND EXISTS (SELECT 1 FROM "youtube_discovery_policy_versions" WHERE "is_current" = true AND "enabled" = true) THEN clock_timestamp() ELSE NULL END, "next_due_at" = CASE WHEN "enabled" AND EXISTS (SELECT 1 FROM "youtube_discovery_policy_versions" WHERE "is_current" = true AND "enabled" = true) THEN clock_timestamp() + "cadence_minutes" * interval '1 minute' ELSE NULL END WHERE "origin" = 'system';
---> statement-breakpoint
-UPDATE "youtube_discovery_query_proposals" SET "schedule_anchor_at" = CASE WHEN "enabled" AND EXISTS (SELECT 1 FROM "youtube_discovery_policy_versions" WHERE "is_current" = true AND "enabled" = true) THEN clock_timestamp() ELSE NULL END, "next_due_at" = CASE WHEN "enabled" AND EXISTS (SELECT 1 FROM "youtube_discovery_policy_versions" WHERE "is_current" = true AND "enabled" = true) THEN clock_timestamp() + "cadence_minutes" * interval '1 minute' ELSE NULL END WHERE "origin" = 'operator';
---> statement-breakpoint
+-- Story 18.3 is an unapplied clean break. This migration deliberately changes
+-- schema only; it neither transforms nor backfills pre-18.3 proposal rows.
 DO $$ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'youtube_discovery_query_proposals'::regclass AND conname = 'youtube_discovery_query_proposals_target_check') THEN
     ALTER TABLE "youtube_discovery_query_proposals" ADD CONSTRAINT "youtube_discovery_query_proposals_target_check" CHECK (("origin" = 'system' AND "reason" IN ('coverage_gap', 'freshness_risk', 'unresolved_conflict', 'anonymized_demand') AND "target_digest" ~ '^[a-f0-9]{64}$' AND "safe_signal_summary" = "reason") OR ("origin" = 'operator' AND "target_digest" IS NULL AND "safe_signal_summary" IS NULL));

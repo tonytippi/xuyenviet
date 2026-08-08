@@ -3,8 +3,8 @@ import { and, eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 
-import { auditEvents, cancelYoutubeDiscoveryRunIfDisabled, claimNextYoutubeDiscoveryRun, claimYoutubeDiscoveryPlanning, createAiAskDiscoveryQuerySignalPort, createKnowledgeDiscoveryQuerySignalPort, createSystemAuditActor, createYoutubeDiscoveryPolicyVersion, createYoutubeDiscoveryRun, finishYoutubeDiscoveryRun, refreshYoutubeDiscoverySystemProposals, retryYoutubeDiscoveryRun, schema, youtubeDiscoveryPlanningLeases, youtubeDiscoveryPlanningOutcomes, youtubeDiscoveryQueryProposals, youtubeDiscoveryRuns } from "@xuyenviet/database";
-import { resetTestDatabase, testDb } from "./helpers/db";
+import { auditEvents, cancelYoutubeDiscoveryRunIfDisabled, claimNextYoutubeDiscoveryRun, claimYoutubeDiscoveryPlanning, createAiAskDiscoveryQuerySignalPort, createKnowledgeDiscoveryQuerySignalPort, createSystemAuditActor, createUserAuditActor, createYoutubeDiscoveryPolicyVersion, createYoutubeDiscoveryQueryProposal, createYoutubeDiscoveryRun, finishYoutubeDiscoveryRun, refreshYoutubeDiscoverySystemProposals, retryYoutubeDiscoveryRun, schema, youtubeDiscoveryPlanningLeases, youtubeDiscoveryPlanningOutcomes, youtubeDiscoveryQueryProposals, youtubeDiscoveryRuns } from "@xuyenviet/database";
+import { resetTestDatabase, seedTestOperator, testDb } from "./helpers/db";
 import { runYoutubeDiscoveryPoll, setYoutubeDiscoveryExecutionStageForTest, setYoutubeDiscoveryPlanningPortsForTest } from "../packages/worker-domain/src/features/youtube-discovery/execution";
 
 let firstWorker: ReturnType<typeof drizzle<typeof schema>>;
@@ -212,6 +212,20 @@ describe.sequential("YouTube Discovery run execution", () => {
     await createYoutubeDiscoveryPolicyVersion({ version: 2, isCurrent: true, policy: { enabled: false }, actor: createSystemAuditActor("system-youtube-discovery") }, testDb);
     expect(await finishYoutubeDiscoveryRun(claim!, testDb)).toBe("cancelled");
     await expect(testDb.execute(sql`select state, safe_error_code from youtube_discovery_runs where id = ${run.id}`)).resolves.toMatchObject([{ state: "cancelled", safe_error_code: "policy_revoked" }]);
+  });
+
+  test("does not claim or continue a due run after its proposal is paused", async () => {
+    await seedTestOperator();
+    const policy = await createYoutubeDiscoveryPolicyVersion({ version: 1, isCurrent: true, actor: createSystemAuditActor("system-youtube-discovery") }, testDb);
+    const proposal = await createYoutubeDiscoveryQueryProposal({ origin: "operator", reason: "operator_request", priority: 50, queryText: "Da Lat route", cadenceMinutes: 15, actor: createUserAuditActor({ userId: "operator", email: "operator@example.com" }) }, testDb);
+    const queued = await createYoutubeDiscoveryRun({ policyVersionId: policy.id, queryProposalId: proposal.id }, testDb);
+    await testDb.update(youtubeDiscoveryQueryProposals).set({ enabled: false, nextDueAt: null }).where(eq(youtubeDiscoveryQueryProposals.id, proposal.id));
+    expect((await claimNextYoutubeDiscoveryRun({ workerId: "discovery-a" }, testDb)).claim).toBeNull();
+    await testDb.update(youtubeDiscoveryQueryProposals).set({ enabled: true }).where(eq(youtubeDiscoveryQueryProposals.id, proposal.id));
+    const claim = (await claimNextYoutubeDiscoveryRun({ workerId: "discovery-b" }, testDb)).claim;
+    await testDb.update(youtubeDiscoveryQueryProposals).set({ enabled: false, nextDueAt: null }).where(eq(youtubeDiscoveryQueryProposals.id, proposal.id));
+    expect(await cancelYoutubeDiscoveryRunIfDisabled(claim!, testDb)).toBe("cancelled");
+    await expect(testDb.select({ state: youtubeDiscoveryRuns.state, safeErrorCode: youtubeDiscoveryRuns.safeErrorCode }).from(youtubeDiscoveryRuns).where(eq(youtubeDiscoveryRuns.id, queued.id))).resolves.toEqual([{ state: "cancelled", safeErrorCode: "policy_revoked" }]);
   });
 
   test("cancels before an injected stage without continuation", async () => {

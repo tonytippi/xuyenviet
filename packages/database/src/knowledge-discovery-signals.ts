@@ -1,4 +1,4 @@
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, or, sql } from "drizzle-orm";
 import type { DiscoveryQuerySignalPortResult, KnowledgeDiscoveryQuerySignalPort, SafeDiscoveryQueryReason } from "@xuyenviet/domain";
 import { getDb } from "./client";
 import { knowledgeCards, knowledgeRecommendations } from "./schema";
@@ -15,7 +15,17 @@ export function createKnowledgeDiscoveryQuerySignalPort(database: KnowledgeSigna
       const rows = await database.transaction(async (transaction) => {
         await transaction.execute(sql.raw(`set local statement_timeout = ${planningSignalStatementTimeoutMs}`));
         if (signal?.aborted) throw new Error("Planning signal read aborted.");
-        return transaction.select({ workType: knowledgeRecommendations.workType, priority: knowledgeRecommendations.priority, knowledgeState: knowledgeCards.knowledgeState, freshnessSensitive: knowledgeCards.freshnessSensitive, locationName: knowledgeCards.locationName, routeSegment: knowledgeCards.routeSegment, taxonomy: knowledgeCards.type }).from(knowledgeRecommendations).innerJoin(knowledgeCards, eq(knowledgeCards.id, knowledgeRecommendations.knowledgeCardId)).where(and(eq(knowledgeRecommendations.status, "open"), inArray(knowledgeRecommendations.workType, ["missing_context", "risk", "relation"]))).limit(100);
+        return transaction.select({ workType: knowledgeRecommendations.workType, priority: knowledgeRecommendations.priority, knowledgeState: knowledgeCards.knowledgeState, freshnessSensitive: knowledgeCards.freshnessSensitive, locationName: knowledgeCards.locationName, routeSegment: knowledgeCards.routeSegment, taxonomy: knowledgeCards.type }).from(knowledgeRecommendations).innerJoin(knowledgeCards, eq(knowledgeCards.id, knowledgeRecommendations.knowledgeCardId)).where(and(
+          eq(knowledgeRecommendations.status, "open"),
+          eq(knowledgeRecommendations.contentVersion, knowledgeCards.contentVersion),
+          eq(knowledgeRecommendations.evidenceSetRevision, knowledgeCards.evidenceSetRevision),
+          or(
+            eq(knowledgeRecommendations.workType, "missing_context"),
+            and(eq(knowledgeRecommendations.workType, "risk"), eq(knowledgeCards.freshnessSensitive, true)),
+            eq(knowledgeRecommendations.workType, "relation"),
+            eq(knowledgeCards.knowledgeState, "conflicted"),
+          ),
+        )).orderBy(desc(knowledgeRecommendations.priority), knowledgeRecommendations.id).limit(100);
       });
       if (signal?.aborted) return { status: "unavailable", code: "source_timeout" };
       const signals = rows.flatMap((row) => {

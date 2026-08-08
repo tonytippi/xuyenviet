@@ -18,4 +18,10 @@ describe("YouTube Discovery owner-port composition", () => {
     expect(discovery).not.toMatch(/(?:knowledgeCards|knowledgeIngestion|messages|conversations|answerUsefulness|assistantResponseProvenance)/);
     expect(discovery).not.toMatch(/(?:knowledge-discovery-signals|ai-ask-discovery-signals)/);
   });
+
+  test("AI Ask demand threshold counts distinct travelers, not repeated decisions", async () => {
+    const port = await readFile(resolve(root, "packages/database/src/ai-ask-discovery-signals.ts"), "utf8");
+    expect(port).toContain("count(distinct ${assistantRetrievalDecisions.userId})::int");
+    expect(port).not.toContain("count(*)::int");
+  });
 });
