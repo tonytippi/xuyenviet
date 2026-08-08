@@ -61,6 +61,16 @@ describe("admin YouTube Discovery direct API", () => {
     expect(query.origin).toBe("operator");
   });
 
+  test("admits an authorized text edit for a system-origin proposal", async () => {
+    const operator = await browserSession("operator", "operator");
+    const headers = { Cookie: operator.cookie, Origin: "https://admin.xuyenviet.app", "x-xuyenviet-csrf": operator.csrf };
+    port.edit.mockResolvedValueOnce({ ...query, origin: "system", reason: "coverage_gap" });
+
+    await request(app.getHttpServer()).post("/v1/admin/knowledge/youtube-discovery/proposal-1/text").set(headers).send({ queryText: "Da Lat pass route" }).expect(201);
+
+    expect(port.edit).toHaveBeenCalledWith(expect.objectContaining({ userId: "operator", email: "operator@example.com" }), "proposal-1", "Da Lat pass route");
+  });
+
   test("rejects non-empty pause and resume bodies before port admission", async () => {
     const operator = await browserSession("operator", "operator");
     const headers = { Cookie: operator.cookie, Origin: "https://admin.xuyenviet.app", "x-xuyenviet-csrf": operator.csrf };
