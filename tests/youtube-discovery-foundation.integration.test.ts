@@ -153,6 +153,23 @@ describe.sequential("YouTube Discovery foundation persistence", () => {
     expect(enabled.id).toBeTruthy();
   });
 
+  test("re-enables a 10:00-anchored 15-minute proposal at the 10:15 boundary when resumed at 10:11", async () => {
+    await seedTestOperator();
+    await createYoutubeDiscoveryPolicyVersion({ version: 1, isCurrent: true, policy: { cadenceMinutes: 15 }, actor: createSystemAuditActor("system-youtube-discovery") }, testDb);
+    const proposal = await createYoutubeDiscoveryQueryProposal({ origin: "operator", reason: "operator_request", priority: 50, queryText: "Da Lat route", cadenceMinutes: 15, actor: createUserAuditActor({ userId: "operator", email: "operator@example.com" }) }, testDb);
+    // Model 10:11 as eleven minutes after the anchor without relying on the host timezone.
+    await testDb.update(youtubeDiscoveryQueryProposals).set({ scheduleAnchorAt: sql`clock_timestamp() - interval '11 minutes'`, nextDueAt: sql`clock_timestamp() + interval '4 minutes'` }).where(eq(youtubeDiscoveryQueryProposals.id, proposal.id));
+    const [before] = await testDb.select({ scheduleAnchorAt: youtubeDiscoveryQueryProposals.scheduleAnchorAt }).from(youtubeDiscoveryQueryProposals).where(eq(youtubeDiscoveryQueryProposals.id, proposal.id));
+
+    await createYoutubeDiscoveryPolicyVersion({ version: 2, isCurrent: true, policy: { enabled: false, cadenceMinutes: 15 }, actor: createSystemAuditActor("system-youtube-discovery") }, testDb);
+    await createYoutubeDiscoveryPolicyVersion({ version: 3, isCurrent: true, policy: { cadenceMinutes: 15 }, actor: createSystemAuditActor("system-youtube-discovery") }, testDb);
+
+    const [resumed] = await testDb.select({ scheduleAnchorAt: youtubeDiscoveryQueryProposals.scheduleAnchorAt, nextDueAt: youtubeDiscoveryQueryProposals.nextDueAt }).from(youtubeDiscoveryQueryProposals).where(eq(youtubeDiscoveryQueryProposals.id, proposal.id));
+    expect(resumed!.scheduleAnchorAt).toEqual(before!.scheduleAnchorAt);
+    expect(resumed!.nextDueAt!.getTime() - resumed!.scheduleAnchorAt!.getTime()).toBe(15 * 60_000);
+    expect(resumed!.nextDueAt!.getTime()).toBeGreaterThan(Date.now());
+  });
+
   test("preserves origin and attributes every operator command to the authenticated user", async () => {
     await seedTestOperator();
     await createYoutubeDiscoveryPolicyVersion({ version: 1, isCurrent: true, actor: createSystemAuditActor("system-youtube-discovery") }, testDb);

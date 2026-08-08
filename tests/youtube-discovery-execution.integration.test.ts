@@ -138,6 +138,18 @@ describe.sequential("YouTube Discovery run execution", () => {
     await expect(testDb.select().from(youtubeDiscoveryQueryProposals)).resolves.toHaveLength(1);
   });
 
+  test("does not deadlock a policy transition racing a planning refresh", async () => {
+    await createYoutubeDiscoveryPolicyVersion({ version: 1, isCurrent: true, actor: createSystemAuditActor("system-youtube-discovery") }, testDb);
+    const claim = await claimYoutubeDiscoveryPlanning("discovery-a", testDb);
+    const results = await Promise.allSettled([
+      createYoutubeDiscoveryPolicyVersion({ version: 2, isCurrent: true, policy: { enabled: false }, actor: createSystemAuditActor("system-youtube-discovery") }, firstWorker),
+      refreshYoutubeDiscoverySystemProposals(claim!, [{ status: "available", signals: [{ reason: "coverage_gap", geography: "Da Lat", taxonomy: "route", priority: 70 }] }], secondWorker),
+    ]);
+
+    expect(results.map((result) => result.status)).toEqual(["fulfilled", "fulfilled"]);
+    expect(results[1]).toMatchObject({ status: "fulfilled", value: expect.stringMatching(/^(completed|cancelled|contended)$/) });
+  });
+
   test("recovers an expired lease and fences its stale claimant", async () => {
     const policy = await createYoutubeDiscoveryPolicyVersion({ version: 1, isCurrent: true, actor: createSystemAuditActor("system-youtube-discovery") }, testDb);
     const run = await createYoutubeDiscoveryRun({ policyVersionId: policy.id }, testDb);
