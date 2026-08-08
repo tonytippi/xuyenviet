@@ -102,6 +102,22 @@ describe.sequential("YouTube Discovery foundation persistence", () => {
     expect(after!.nextDueAt!.getTime()).toBeGreaterThan(Date.now());
   });
 
+  test("does not re-project an operator-paused system proposal when cadence changes", async () => {
+    await seedTestOperator();
+    await createYoutubeDiscoveryPolicyVersion({ version: 1, isCurrent: true, policy: { cadenceMinutes: 15 }, actor: createSystemAuditActor("system-youtube-discovery") }, testDb);
+    const signal = { status: "available" as const, signals: [{ reason: "coverage_gap" as const, geography: "Da Lat", taxonomy: "route", priority: 70 }] };
+    const first = await claimYoutubeDiscoveryPlanning("discovery-a", testDb);
+    await refreshYoutubeDiscoverySystemProposals(first!, [signal], testDb);
+    const [proposal] = await testDb.select().from(youtubeDiscoveryQueryProposals);
+    const principal: RequestPrincipal = { userId: "operator", email: "operator@example.com", roles: ["operator"], authorizationVersion: 1, sessionId: "operator-session" };
+    await createPostgresAdminYoutubeDiscoveryPort().pause(principal, proposal!.id);
+    await createYoutubeDiscoveryPolicyVersion({ version: 2, isCurrent: true, policy: { cadenceMinutes: 60 }, actor: createSystemAuditActor("system-youtube-discovery") }, testDb);
+    await testDb.update(youtubeDiscoveryPlanningLeases).set({ nextRunAt: new Date(0) }).where(eq(youtubeDiscoveryPlanningLeases.id, "youtube-discovery-planning"));
+    const second = await claimYoutubeDiscoveryPlanning("discovery-b", testDb);
+    await refreshYoutubeDiscoverySystemProposals(second!, [signal], testDb);
+    await expect(testDb.select({ enabled: youtubeDiscoveryQueryProposals.enabled, nextDueAt: youtubeDiscoveryQueryProposals.nextDueAt }).from(youtubeDiscoveryQueryProposals).where(eq(youtubeDiscoveryQueryProposals.id, proposal!.id))).resolves.toEqual([{ enabled: false, nextDueAt: null }]);
+  });
+
   test("does not catch up planning or proposal intervals after global disable", async () => {
     const enabled = await createYoutubeDiscoveryPolicyVersion({ version: 1, isCurrent: true, policy: { cadenceMinutes: 15 }, actor: createSystemAuditActor("system-youtube-discovery") }, testDb);
     await seedTestOperator();

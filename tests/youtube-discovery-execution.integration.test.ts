@@ -3,7 +3,7 @@ import { and, eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 
-import { auditEvents, cancelYoutubeDiscoveryRunIfDisabled, claimNextYoutubeDiscoveryRun, claimYoutubeDiscoveryPlanning, createSystemAuditActor, createYoutubeDiscoveryPolicyVersion, createYoutubeDiscoveryRun, finishYoutubeDiscoveryRun, refreshYoutubeDiscoverySystemProposals, retryYoutubeDiscoveryRun, schema, youtubeDiscoveryRuns } from "@xuyenviet/database";
+import { auditEvents, cancelYoutubeDiscoveryRunIfDisabled, claimNextYoutubeDiscoveryRun, claimYoutubeDiscoveryPlanning, createSystemAuditActor, createYoutubeDiscoveryPolicyVersion, createYoutubeDiscoveryRun, finishYoutubeDiscoveryRun, refreshYoutubeDiscoverySystemProposals, retryYoutubeDiscoveryRun, schema, youtubeDiscoveryPlanningLeases, youtubeDiscoveryRuns } from "@xuyenviet/database";
 import { resetTestDatabase, testDb } from "./helpers/db";
 import { runYoutubeDiscoveryPoll, setYoutubeDiscoveryExecutionStageForTest, setYoutubeDiscoveryPlanningPortsForTest } from "../packages/worker-domain/src/features/youtube-discovery/execution";
 
@@ -14,7 +14,11 @@ let secondWorkerSql: ReturnType<typeof postgres>;
 
 async function completeDuePlanning() {
   const claim = await claimYoutubeDiscoveryPlanning("discovery-planning-fixture", testDb);
-  if (claim) await refreshYoutubeDiscoverySystemProposals(claim, [], testDb);
+  expect(claim).not.toBeNull();
+  expect(await refreshYoutubeDiscoverySystemProposals(claim!, [], testDb)).toBe("completed");
+  const [lease] = await testDb.select({ state: youtubeDiscoveryPlanningLeases.state, nextRunAt: youtubeDiscoveryPlanningLeases.nextRunAt }).from(youtubeDiscoveryPlanningLeases).where(eq(youtubeDiscoveryPlanningLeases.id, "youtube-discovery-planning"));
+  expect(lease).toMatchObject({ state: "queued", nextRunAt: expect.any(Date) });
+  expect(lease!.nextRunAt.getTime()).toBeGreaterThan(Date.now());
 }
 
 describe.sequential("YouTube Discovery run execution", () => {
