@@ -126,6 +126,23 @@ describe.sequential("YouTube Discovery run execution", () => {
     await expect(testDb.select({ actorSystem: auditEvents.actorSystem, afterSummary: auditEvents.afterSummary }).from(auditEvents).where(eq(auditEvents.targetType, "youtube_discovery_planning"))).resolves.toEqual([{ actorSystem: "system-youtube-discovery", afterSummary: JSON.stringify({ action: "cancel", reason: "policy_disabled", policyVersionId: disabled.id }) }]);
   });
 
+  test("does not re-claim the singleton on repeated polls before its next boundary", async () => {
+    await createYoutubeDiscoveryPolicyVersion({ version: 1, isCurrent: true, actor: createSystemAuditActor("system-youtube-discovery") }, testDb);
+    await completeDuePlanning();
+    expect(await claimYoutubeDiscoveryPlanning("discovery-a", testDb)).toBeNull();
+    expect(await claimYoutubeDiscoveryPlanning("discovery-b", testDb)).toBeNull();
+    await expect(testDb.select().from(youtubeDiscoveryPlanningOutcomes)).resolves.toHaveLength(1);
+  });
+
+  test("persists one bounded unavailable outcome for a completed planning claim", async () => {
+    const policy = await createYoutubeDiscoveryPolicyVersion({ version: 1, isCurrent: true, actor: createSystemAuditActor("system-youtube-discovery") }, testDb);
+    const claim = await claimYoutubeDiscoveryPlanning("discovery-a", testDb);
+    expect(await refreshYoutubeDiscoverySystemProposals(claim!, [{ status: "unavailable", code: "source_timeout" }], testDb)).toBe("completed");
+    await expect(testDb.select({ planningId: youtubeDiscoveryPlanningOutcomes.planningId, policyVersionId: youtubeDiscoveryPlanningOutcomes.policyVersionId, outcome: youtubeDiscoveryPlanningOutcomes.outcome, createdOrRefreshedCount: youtubeDiscoveryPlanningOutcomes.createdOrRefreshedCount, unavailableCodes: youtubeDiscoveryPlanningOutcomes.unavailableCodes }).from(youtubeDiscoveryPlanningOutcomes)).resolves.toEqual([{
+      planningId: "youtube-discovery-planning", policyVersionId: policy.id, outcome: "unavailable", createdOrRefreshedCount: 0, unavailableCodes: ["source_timeout"],
+    }]);
+  });
+
   test("creates one proposal when two physical connections refresh the same planning claim", async () => {
     await createYoutubeDiscoveryPolicyVersion({ version: 1, isCurrent: true, actor: createSystemAuditActor("system-youtube-discovery") }, testDb);
     const claim = await claimYoutubeDiscoveryPlanning("discovery-a", testDb);

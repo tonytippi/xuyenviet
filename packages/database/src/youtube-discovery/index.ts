@@ -24,11 +24,11 @@ export async function createYoutubeDiscoveryPolicyVersion(input: CreateYoutubeDi
   const policy = parseYoutubeDiscoveryPolicy(input.policy === undefined ? {} : input.policy);
   assertDiscoveryPolicyActor(input.actor);
   return database.transaction(async (transaction) => {
-    const [previous] = input.isCurrent ? await transaction.select({ enabled: youtubeDiscoveryPolicyVersions.enabled }).from(youtubeDiscoveryPolicyVersions).where(eq(youtubeDiscoveryPolicyVersions.isCurrent, true)).limit(1).for("update") : [];
+    const [previous] = input.isCurrent ? await transaction.select({ enabled: youtubeDiscoveryPolicyVersions.enabled, cadenceMinutes: youtubeDiscoveryPolicyVersions.cadenceMinutes }).from(youtubeDiscoveryPolicyVersions).where(eq(youtubeDiscoveryPolicyVersions.isCurrent, true)).limit(1).for("update") : [];
     if (input.isCurrent) await transaction.update(youtubeDiscoveryPolicyVersions).set({ isCurrent: false }).where(eq(youtubeDiscoveryPolicyVersions.isCurrent, true));
     const [created] = await transaction.insert(youtubeDiscoveryPolicyVersions).values({ version: input.version, isCurrent: input.isCurrent, ...policy }).returning();
     if (!created) throw new Error("YouTube Discovery policy creation failed.");
-    if (input.isCurrent && previous && previous.enabled !== created.enabled) await lockPlanningLease(transaction);
+    if (input.isCurrent && previous && (previous.enabled !== created.enabled || previous.cadenceMinutes !== created.cadenceMinutes)) await lockPlanningLease(transaction);
     if (input.isCurrent && previous?.enabled && !created.enabled) {
       await transaction.update(youtubeDiscoveryQueryProposals).set({ nextDueAt: null }).where(and(eq(youtubeDiscoveryQueryProposals.enabled, true), sql`${youtubeDiscoveryQueryProposals.scheduleAnchorAt} is not null`));
       await transaction.execute(sql`insert into youtube_discovery_planning_leases (id, policy_version_id, state, next_run_at, terminal_at, outcome) values ('youtube-discovery-planning', ${created.id}, 'cancelled', ${nextBoundarySql(sql`clock_timestamp()`, sql`clock_timestamp()`, created.cadenceMinutes)}, clock_timestamp(), 'cancelled') on conflict (id) do update set policy_version_id = excluded.policy_version_id, state = 'cancelled', next_run_at = excluded.next_run_at, claimed_by = null, claimed_at = null, lease_expires_at = null, fencing_token = null, terminal_at = excluded.terminal_at, outcome = 'cancelled', created_or_refreshed_count = 0, unavailable_codes = '{}'`);
@@ -37,6 +37,9 @@ export async function createYoutubeDiscoveryPolicyVersion(input: CreateYoutubeDi
     if (input.isCurrent && previous && !previous.enabled && created.enabled) {
       await transaction.update(youtubeDiscoveryQueryProposals).set({ nextDueAt: nextBoundarySql(sql`${youtubeDiscoveryQueryProposals.scheduleAnchorAt}`, sql`clock_timestamp()`, sql`${youtubeDiscoveryQueryProposals.cadenceMinutes}`) }).where(and(eq(youtubeDiscoveryQueryProposals.enabled, true), sql`${youtubeDiscoveryQueryProposals.scheduleAnchorAt} is not null`));
       await transaction.execute(sql`insert into youtube_discovery_planning_leases (id, policy_version_id, state, next_run_at) values ('youtube-discovery-planning', ${created.id}, 'queued', ${nextBoundarySql(sql`clock_timestamp()`, sql`clock_timestamp()`, created.cadenceMinutes)}) on conflict (id) do update set policy_version_id = excluded.policy_version_id, state = 'queued', next_run_at = excluded.next_run_at, claimed_by = null, claimed_at = null, lease_expires_at = null, fencing_token = null, terminal_at = null, outcome = null, created_or_refreshed_count = 0, unavailable_codes = '{}'`);
+    }
+    if (input.isCurrent && previous?.enabled && created.enabled && previous.cadenceMinutes !== created.cadenceMinutes) {
+      await transaction.execute(sql`update youtube_discovery_query_proposals set cadence_minutes = ${created.cadenceMinutes}, next_due_at = case when schedule_anchor_at is null then next_due_at else schedule_anchor_at + (floor(extract(epoch from (clock_timestamp() - schedule_anchor_at)) / 60 / ${created.cadenceMinutes})::integer + 1) * ${created.cadenceMinutes} * interval '1 minute' end where origin = 'system' and enabled = true`);
     }
     await recordAuditEvent({ actor: input.actor, operation: "create", targetType: "youtube_discovery_policy_version", targetId: created.id, afterSummary: JSON.stringify(policyAuditSummary(created)) }, transaction);
     return created;
@@ -50,7 +53,7 @@ export async function createYoutubeDiscoveryQueryProposal(input: CreateYoutubeDi
     const { actor, ...proposal } = input;
     const systemFields = input.origin === "system" ? systemProposalFields(input.systemSignal!) : null;
     const [policy] = systemFields ? await transaction.select({ cadenceMinutes: youtubeDiscoveryPolicyVersions.cadenceMinutes, enabled: youtubeDiscoveryPolicyVersions.enabled }).from(youtubeDiscoveryPolicyVersions).where(eq(youtubeDiscoveryPolicyVersions.isCurrent, true)).limit(1).for("update") : [];
-    if (systemFields && !policy) throw new Error("YouTube Discovery system query proposals require the current policy version.");
+    if (systemFields && !policy?.enabled) throw new Error("YouTube Discovery system query proposals require an enabled current policy version.");
     const enabled = input.enabled ?? true;
     const [created] = await transaction.insert(youtubeDiscoveryQueryProposals).values(systemFields ? { ...proposal, ...systemFields, priority: systemFields.priority, cadenceMinutes: policy!.cadenceMinutes, enabled, scheduleAnchorAt: enabled ? sql`clock_timestamp()` : undefined, nextDueAt: enabled && policy!.enabled ? sql`clock_timestamp() + ${policy!.cadenceMinutes} * interval '1 minute'` : undefined } : { ...proposal, enabled }).returning();
     if (!created) throw new Error("YouTube Discovery query proposal creation failed.");

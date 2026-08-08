@@ -12,6 +12,17 @@ describe("YouTube Discovery safe planning signals", () => {
     expect(parseDiscoveryQuerySignalPortResult({ status: "available", signals: [{ reason: "coverage_gap", geography: "x".repeat(81), taxonomy: "route", priority: 1 }] })).toBeNull();
   });
 
+  test.each([
+    null, [], {}, { status: "available" }, { status: "available", signals: "invalid" },
+    { status: "available", signals: Array.from({ length: 101 }, () => ({ reason: "coverage_gap", geography: "Da Lat", taxonomy: "route", priority: 1 })) },
+    { status: "available", signals: [{ reason: "unknown", geography: "Da Lat", taxonomy: "route", priority: 1 }] },
+    { status: "available", signals: [{ reason: "coverage_gap", geography: "", taxonomy: "route", priority: 1 }] },
+    { status: "available", signals: [{ reason: "coverage_gap", geography: "Da Lat", taxonomy: "route", priority: 1.5 }] },
+    { status: "unavailable" }, { status: "unavailable", code: "unsafe" }, { status: "unavailable", code: "source_timeout", extra: true },
+  ])("rejects invalid safe-port input %#", (value) => {
+    expect(parseDiscoveryQuerySignalPortResult(value)).toBeNull();
+  });
+
   test("normalizes, deduplicates, derives stable opaque targets, and reports invalid inputs", () => {
     const result = deriveDiscoveryQueries([{ status: "available", signals: [
       { reason: "coverage_gap", geography: " Da Lat ", taxonomy: "route", priority: 30 },

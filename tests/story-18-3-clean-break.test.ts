@@ -27,4 +27,15 @@ describe("Story 18.3 migration 0047 clean break", () => {
       await sql.end();
     }
   });
+
+  test("guards every legacy planning artifact that may already exist after an interrupted deployment", () => {
+    const migration = readFileSync(resolve(import.meta.dirname, "../drizzle/migrations/0047_discovery_query_planning.sql"), "utf8");
+    for (const column of ["target_digest", "safe_signal_summary", "schedule_anchor_at", "next_due_at"]) {
+      expect(migration).toContain(`ADD COLUMN IF NOT EXISTS "${column}"`);
+    }
+    expect(migration).toContain('CREATE UNIQUE INDEX IF NOT EXISTS "youtube_discovery_system_query_target_idx"');
+    expect(migration).toContain('CREATE UNIQUE INDEX IF NOT EXISTS "youtube_discovery_runs_proposal_interval_idx"');
+    expect(migration).toContain('CREATE INDEX IF NOT EXISTS "youtube_discovery_planning_outcomes_planning_idx"');
+    expect(migration).toContain("FROM pg_constraint WHERE conrelid = 'youtube_discovery_query_proposals'::regclass");
+  });
 });

@@ -77,6 +77,12 @@ describe.sequential("YouTube Discovery foundation persistence", () => {
     await expect(testDb.execute(sql`insert into youtube_discovery_query_proposals (id, origin, reason, priority, query_text, enabled, cadence_minutes, target_digest, safe_signal_summary) values ('prohibited-operator', 'operator', 'operator_request', 50, 'Da Lat route', true, 60, ${"a".repeat(64)}, 'coverage_gap')`)).rejects.toThrow();
   });
 
+  test("rejects direct system creation when the current policy is disabled", async () => {
+    await createYoutubeDiscoveryPolicyVersion({ version: 1, isCurrent: true, policy: { enabled: false }, actor: createSystemAuditActor("system-youtube-discovery") }, testDb);
+    await expect(createYoutubeDiscoveryQueryProposal({ origin: "system", reason: "coverage_gap", priority: 1, queryText: "Da Lat route", cadenceMinutes: 15, actor: createSystemAuditActor("system-youtube-discovery"), systemSignal: { reason: "coverage_gap", geography: "Da Lat", taxonomy: "route", priority: 50 } }, testDb)).rejects.toThrow("enabled current policy version");
+    await expect(testDb.select().from(youtubeDiscoveryQueryProposals)).resolves.toEqual([]);
+  });
+
   test("audits each fenced system proposal upsert without storing signal values", async () => {
     await createYoutubeDiscoveryPolicyVersion({ version: 1, isCurrent: true, policy: { cadenceMinutes: 15 }, actor: createSystemAuditActor("system-youtube-discovery") }, testDb);
     const claim = await claimYoutubeDiscoveryPlanning("discovery-a", testDb);
@@ -104,19 +110,20 @@ describe.sequential("YouTube Discovery foundation persistence", () => {
     await expect(testDb.select({ queryText: youtubeDiscoveryQueryProposals.queryText, targetDigest: youtubeDiscoveryQueryProposals.targetDigest, safeSignalSummary: youtubeDiscoveryQueryProposals.safeSignalSummary }).from(youtubeDiscoveryQueryProposals)).resolves.toEqual([{ queryText: "Da Lat route note", targetDigest: expect.stringMatching(/^[a-f0-9]{64}$/), safeSignalSummary: "coverage_gap" }]);
   });
 
-  test("re-projects a system proposal at the first future boundary when cadence changes", async () => {
+  test("atomically re-projects every enabled system proposal at the first future cadence boundary", async () => {
     await createYoutubeDiscoveryPolicyVersion({ version: 1, isCurrent: true, policy: { cadenceMinutes: 15 }, actor: createSystemAuditActor("system-youtube-discovery") }, testDb);
     const first = await claimYoutubeDiscoveryPlanning("discovery-a", testDb);
     await refreshYoutubeDiscoverySystemProposals(first!, [{ status: "available", signals: [{ reason: "coverage_gap", geography: "Da Lat", taxonomy: "route", priority: 70 }] }], testDb);
     const [before] = await testDb.select().from(youtubeDiscoveryQueryProposals);
-    await testDb.update(youtubeDiscoveryQueryProposals).set({ scheduleAnchorAt: new Date(0), nextDueAt: new Date(1) }).where(eq(youtubeDiscoveryQueryProposals.id, before!.id));
+    const secondProposal = await createYoutubeDiscoveryQueryProposal({ origin: "system", reason: "freshness_risk", priority: 1, queryText: "Da Lat weather", cadenceMinutes: 15, actor: createSystemAuditActor("system-youtube-discovery"), systemSignal: { reason: "freshness_risk", geography: "Da Lat", taxonomy: "weather", priority: 60 } }, testDb);
+    await testDb.update(youtubeDiscoveryQueryProposals).set({ scheduleAnchorAt: new Date(0), nextDueAt: new Date(1) }).where(sql`${youtubeDiscoveryQueryProposals.origin} = 'system'`);
     await createYoutubeDiscoveryPolicyVersion({ version: 2, isCurrent: true, policy: { cadenceMinutes: 60 }, actor: createSystemAuditActor("system-youtube-discovery") }, testDb);
-    await testDb.update(youtubeDiscoveryPlanningLeases).set({ nextRunAt: new Date(0) }).where(eq(youtubeDiscoveryPlanningLeases.id, "youtube-discovery-planning"));
-    const second = await claimYoutubeDiscoveryPlanning("discovery-b", testDb);
-    await refreshYoutubeDiscoverySystemProposals(second!, [{ status: "available", signals: [{ reason: "coverage_gap", geography: "Da Lat", taxonomy: "route", priority: 70 }] }], testDb);
-    const [after] = await testDb.select({ nextDueAt: youtubeDiscoveryQueryProposals.nextDueAt }).from(youtubeDiscoveryQueryProposals).where(eq(youtubeDiscoveryQueryProposals.id, before!.id));
-    expect(after!.nextDueAt).toBeInstanceOf(Date);
-    expect(after!.nextDueAt!.getTime()).toBeGreaterThan(Date.now());
+    const after = await testDb.select({ id: youtubeDiscoveryQueryProposals.id, cadenceMinutes: youtubeDiscoveryQueryProposals.cadenceMinutes, nextDueAt: youtubeDiscoveryQueryProposals.nextDueAt }).from(youtubeDiscoveryQueryProposals).where(sql`${youtubeDiscoveryQueryProposals.id} in (${before!.id}, ${secondProposal.id})`);
+    expect(after).toEqual(expect.arrayContaining([
+      { id: before!.id, cadenceMinutes: 60, nextDueAt: expect.any(Date) },
+      { id: secondProposal.id, cadenceMinutes: 60, nextDueAt: expect.any(Date) },
+    ]));
+    expect(after.every((proposal) => proposal.nextDueAt!.getTime() > Date.now())).toBe(true);
   });
 
   test("does not re-project an operator-paused system proposal when cadence changes", async () => {
