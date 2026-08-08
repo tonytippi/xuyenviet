@@ -66,6 +66,15 @@ describe.sequential("YouTube Discovery foundation persistence", () => {
     await expect(testDb.execute(sql`insert into youtube_discovery_query_proposals (id, origin, reason, priority, query_text, enabled, cadence_minutes) values ('unsafe-query', 'system', 'not_a_safe_reason', 50, 'https://example.com/?token=secret', true, 1440)`)).rejects.toThrow();
   });
 
+  test("anchors direct enabled system proposals and rejects prohibited persistence shapes", async () => {
+    const policy = await createYoutubeDiscoveryPolicyVersion({ version: 1, isCurrent: true, policy: { cadenceMinutes: 15 }, actor: createSystemAuditActor("system-youtube-discovery") }, testDb);
+    const proposal = await createYoutubeDiscoveryQueryProposal({ origin: "system", reason: "coverage_gap", priority: 1, queryText: "Da Lat route", cadenceMinutes: 15, actor: createSystemAuditActor("system-youtube-discovery"), systemSignal: { reason: "coverage_gap", geography: "Da Lat", taxonomy: "route", priority: 50 } }, testDb);
+    expect(proposal).toMatchObject({ enabled: true, cadenceMinutes: policy.cadenceMinutes, scheduleAnchorAt: expect.any(Date), nextDueAt: expect.any(Date) });
+    expect(proposal.nextDueAt!.getTime()).toBeGreaterThan(proposal.scheduleAnchorAt!.getTime());
+    await expect(testDb.execute(sql`insert into youtube_discovery_query_proposals (id, origin, reason, priority, query_text, enabled, cadence_minutes, target_digest, safe_signal_summary) values ('prohibited-system', 'system', 'coverage_gap', 50, 'https://source.example/?token=secret', true, 60, ${"a".repeat(64)}, 'coverage_gap')`)).rejects.toThrow();
+    await expect(testDb.execute(sql`insert into youtube_discovery_query_proposals (id, origin, reason, priority, query_text, enabled, cadence_minutes, target_digest, safe_signal_summary) values ('prohibited-operator', 'operator', 'operator_request', 50, 'Da Lat route', true, 60, ${"a".repeat(64)}, 'coverage_gap')`)).rejects.toThrow();
+  });
+
   test("audits each fenced system proposal upsert without storing signal values", async () => {
     await createYoutubeDiscoveryPolicyVersion({ version: 1, isCurrent: true, policy: { cadenceMinutes: 15 }, actor: createSystemAuditActor("system-youtube-discovery") }, testDb);
     const claim = await claimYoutubeDiscoveryPlanning("discovery-a", testDb);
@@ -125,6 +134,16 @@ describe.sequential("YouTube Discovery foundation persistence", () => {
     expect(resumed).toMatchObject({ origin: "operator", enabled: true, priority: 70, queryText: "Da Lat pass route" });
     await expect(testDb.select({ origin: youtubeDiscoveryQueryProposals.origin }).from(youtubeDiscoveryQueryProposals).where(eq(youtubeDiscoveryQueryProposals.id, created.id))).resolves.toEqual([{ origin: "operator" }]);
     await expect(testDb.select({ actorUserId: auditEvents.actorUserId, actorSystem: auditEvents.actorSystem }).from(auditEvents).where(eq(auditEvents.targetId, created.id))).resolves.toEqual(Array.from({ length: 5 }, () => ({ actorUserId: "operator", actorSystem: null })));
+  });
+
+  test("allows text edits only for operator-origin proposals", async () => {
+    await seedTestOperator();
+    await createYoutubeDiscoveryPolicyVersion({ version: 1, isCurrent: true, actor: createSystemAuditActor("system-youtube-discovery") }, testDb);
+    const system = await createYoutubeDiscoveryQueryProposal({ origin: "system", reason: "coverage_gap", priority: 1, queryText: "Da Lat route", cadenceMinutes: 15, actor: createSystemAuditActor("system-youtube-discovery"), systemSignal: { reason: "coverage_gap", geography: "Da Lat", taxonomy: "route", priority: 50 } }, testDb);
+    const port = createPostgresAdminYoutubeDiscoveryPort();
+    const principal: RequestPrincipal = { userId: "operator", email: "operator@example.com", roles: ["operator"], authorizationVersion: 1, sessionId: "operator-session" };
+    await expect(port.edit(principal, system.id, "Changed target text")).resolves.toBeNull();
+    await expect(testDb.select({ queryText: youtubeDiscoveryQueryProposals.queryText, targetDigest: youtubeDiscoveryQueryProposals.targetDigest }).from(youtubeDiscoveryQueryProposals).where(eq(youtubeDiscoveryQueryProposals.id, system.id))).resolves.toEqual([{ queryText: "Da Lat route", targetDigest: system.targetDigest }]);
   });
 
   test("uses one singleton planning lease and fences a stale planner", async () => {

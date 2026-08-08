@@ -36,9 +36,10 @@ export async function createYoutubeDiscoveryQueryProposal(input: CreateYoutubeDi
   return database.transaction(async (transaction) => {
     const { actor, ...proposal } = input;
     const systemFields = input.origin === "system" ? systemProposalFields(input.systemSignal!) : null;
-    const [policy] = systemFields ? await transaction.select({ cadenceMinutes: youtubeDiscoveryPolicyVersions.cadenceMinutes }).from(youtubeDiscoveryPolicyVersions).where(eq(youtubeDiscoveryPolicyVersions.isCurrent, true)).limit(1).for("update") : [];
+    const [policy] = systemFields ? await transaction.select({ cadenceMinutes: youtubeDiscoveryPolicyVersions.cadenceMinutes, enabled: youtubeDiscoveryPolicyVersions.enabled }).from(youtubeDiscoveryPolicyVersions).where(eq(youtubeDiscoveryPolicyVersions.isCurrent, true)).limit(1).for("update") : [];
     if (systemFields && !policy) throw new Error("YouTube Discovery system query proposals require the current policy version.");
-    const [created] = await transaction.insert(youtubeDiscoveryQueryProposals).values(systemFields ? { ...proposal, ...systemFields, priority: systemFields.priority, cadenceMinutes: policy!.cadenceMinutes, enabled: input.enabled ?? true } : { ...proposal, enabled: input.enabled ?? true }).returning();
+    const enabled = input.enabled ?? true;
+    const [created] = await transaction.insert(youtubeDiscoveryQueryProposals).values(systemFields ? { ...proposal, ...systemFields, priority: systemFields.priority, cadenceMinutes: policy!.cadenceMinutes, enabled, scheduleAnchorAt: enabled ? sql`clock_timestamp()` : undefined, nextDueAt: enabled && policy!.enabled ? sql`clock_timestamp() + ${policy!.cadenceMinutes} * interval '1 minute'` : undefined } : { ...proposal, enabled }).returning();
     if (!created) throw new Error("YouTube Discovery query proposal creation failed.");
     await recordAuditEvent({ actor, operation: "create", targetType: "youtube_discovery_query_proposal", targetId: created.id, afterSummary: JSON.stringify(queryProposalAuditSummary(created)) }, transaction);
     return created;

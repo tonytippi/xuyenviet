@@ -29,17 +29,18 @@ export function createPostgresAdminYoutubeDiscoveryPort(): AdminYoutubeDiscovery
         return projection(row, policy.enabled);
       });
     },
-    async edit(principal, id, queryText) { return mutate(principal, id, { queryText }, validText(queryText)); },
+    // System query text is derived solely from its bounded planning signal.
+    async edit(principal, id, queryText) { return mutate(principal, id, { queryText }, validText(queryText), "operator"); },
     async reprioritize(principal, id, priority) { return mutate(principal, id, { priority }, validPriority(priority)); },
     async pause(principal, id) { return mutate(principal, id, { enabled: false, nextDueAt: null }, true); },
     async resume(principal, id) { return mutate(principal, id, { enabled: true, scheduleAnchorAt: sql`coalesce(${youtubeDiscoveryQueryProposals.scheduleAnchorAt}, clock_timestamp())`, nextDueAt: sql`case when (select enabled from youtube_discovery_policy_versions where is_current = true) then coalesce(${youtubeDiscoveryQueryProposals.scheduleAnchorAt}, clock_timestamp()) + (floor(extract(epoch from (clock_timestamp() - coalesce(${youtubeDiscoveryQueryProposals.scheduleAnchorAt}, clock_timestamp()))) / 60 / ${youtubeDiscoveryQueryProposals.cadenceMinutes})::integer + 1) * ${youtubeDiscoveryQueryProposals.cadenceMinutes} * interval '1 minute' else null end` }, true); },
   };
 }
-async function mutate(principal: RequestPrincipal, id: string, values: Record<string, unknown>, valid: boolean) {
+async function mutate(principal: RequestPrincipal, id: string, values: Record<string, unknown>, valid: boolean, origin?: "operator") {
   if (!valid || !id.trim() || id.length > 128) throw new Error("Invalid YouTube Discovery query proposal.");
   const db = getDb(); const actor = actorFor(principal);
   return db.transaction(async (transaction) => {
-    const [row] = await transaction.update(youtubeDiscoveryQueryProposals).set(values).where(eq(youtubeDiscoveryQueryProposals.id, id)).returning();
+    const [row] = await transaction.update(youtubeDiscoveryQueryProposals).set(values).where(origin ? sql`${youtubeDiscoveryQueryProposals.id} = ${id} and ${youtubeDiscoveryQueryProposals.origin} = ${origin}` : eq(youtubeDiscoveryQueryProposals.id, id)).returning();
     if (!row) return null;
     await audit(transaction, actor, "update", row.id, row);
     const [policy] = await transaction.select({ enabled: youtubeDiscoveryPolicyVersions.enabled }).from(youtubeDiscoveryPolicyVersions).where(eq(youtubeDiscoveryPolicyVersions.isCurrent, true)).limit(1);

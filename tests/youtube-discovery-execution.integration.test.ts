@@ -5,7 +5,7 @@ import postgres from "postgres";
 
 import { auditEvents, cancelYoutubeDiscoveryRunIfDisabled, claimNextYoutubeDiscoveryRun, claimYoutubeDiscoveryPlanning, createSystemAuditActor, createYoutubeDiscoveryPolicyVersion, createYoutubeDiscoveryRun, finishYoutubeDiscoveryRun, refreshYoutubeDiscoverySystemProposals, retryYoutubeDiscoveryRun, schema, youtubeDiscoveryRuns } from "@xuyenviet/database";
 import { resetTestDatabase, testDb } from "./helpers/db";
-import { runYoutubeDiscoveryPoll, setYoutubeDiscoveryExecutionStageForTest } from "../packages/worker-domain/src/features/youtube-discovery/execution";
+import { runYoutubeDiscoveryPoll, setYoutubeDiscoveryExecutionStageForTest, setYoutubeDiscoveryPlanningPortsForTest } from "../packages/worker-domain/src/features/youtube-discovery/execution";
 
 let firstWorker: ReturnType<typeof drizzle<typeof schema>>;
 let secondWorker: ReturnType<typeof drizzle<typeof schema>>;
@@ -34,7 +34,7 @@ describe.sequential("YouTube Discovery run execution", () => {
 
   beforeEach(async () => { await resetTestDatabase(); });
 
-  afterEach(() => { setYoutubeDiscoveryExecutionStageForTest(undefined); });
+  afterEach(() => { setYoutubeDiscoveryExecutionStageForTest(undefined); setYoutubeDiscoveryPlanningPortsForTest(undefined, undefined); });
 
   test("claims one due run and persists an atomic fenced terminal audit", async () => {
     const policy = await createYoutubeDiscoveryPolicyVersion({ version: 1, isCurrent: true, actor: createSystemAuditActor("system-youtube-discovery") }, testDb);
@@ -176,6 +176,12 @@ describe.sequential("YouTube Discovery run execution", () => {
     await expect(testDb.select().from(youtubeDiscoveryRuns).where(eq(youtubeDiscoveryRuns.id, run.id))).resolves.toMatchObject([{ state: "retrying", safeErrorCode: "stage_transient", claimedBy: null }]);
     setYoutubeDiscoveryExecutionStageForTest(undefined);
   });
+
+  test("bounds a never-settling planning port as a safe unavailable outcome", async () => {
+    await createYoutubeDiscoveryPolicyVersion({ version: 1, isCurrent: true, actor: createSystemAuditActor("system-youtube-discovery") }, testDb);
+    setYoutubeDiscoveryPlanningPortsForTest(() => new Promise(() => undefined), async () => ({ status: "available", signals: [] }));
+    await expect(runYoutubeDiscoveryPoll("discovery-a")).resolves.toMatchObject({ capability: "youtube.discovery", resultCode: "success", durableId: "youtube-discovery-planning" });
+  }, 3_000);
 
   test("observes recovery-only terminal maintenance safely", async () => {
     const policy = await createYoutubeDiscoveryPolicyVersion({ version: 1, isCurrent: true, policy: { maxRetryAttempts: 0 }, actor: createSystemAuditActor("system-youtube-discovery") }, testDb);

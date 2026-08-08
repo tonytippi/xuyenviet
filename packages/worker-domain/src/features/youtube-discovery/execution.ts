@@ -3,6 +3,7 @@ import type { WorkerPollObservation } from "@xuyenviet/contracts";
 import { createUnavailableAiAskDiscoveryQuerySignalPort, createUnavailableKnowledgeDiscoveryQuerySignalPort, type AiAskDiscoveryQuerySignalPort, type DiscoveryQuerySignalPortResult, type KnowledgeDiscoveryQuerySignalPort } from "@xuyenviet/domain";
 
 type DiscoveryStageResult = "complete" | "stage_transient";
+const planningPortTimeoutMs = 1_000;
 
 // This is deliberately private and finite; Story 18.4 replaces the no-provider stage.
 let executionStage: (() => Promise<DiscoveryStageResult>) | undefined;
@@ -49,7 +50,14 @@ export function setYoutubeDiscoveryExecutionStageForTest(stage: (() => Promise<D
 }
 
 async function readPlanningPort(port: KnowledgeDiscoveryQuerySignalPort | AiAskDiscoveryQuerySignalPort): Promise<DiscoveryQuerySignalPortResult> {
-  try { return await port.readSignals(); } catch { return { status: "unavailable", code: "source_unavailable" }; }
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    // A finite poll must not be held by an owner port that never settles.
+    return await Promise.race([
+      Promise.resolve().then(() => port.readSignals()).catch(() => ({ status: "unavailable", code: "source_unavailable" } as const)),
+      new Promise<DiscoveryQuerySignalPortResult>((resolve) => { timeout = setTimeout(() => resolve({ status: "unavailable", code: "source_timeout" }), planningPortTimeoutMs); }),
+    ]);
+  } finally { if (timeout) clearTimeout(timeout); }
 }
 
 /** Public composition seam. Owners bind their explicit aggregate-only ports here. */

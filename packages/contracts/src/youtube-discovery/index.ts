@@ -47,7 +47,7 @@ export function parseAdminYoutubeDiscoveryQuery(value: unknown): AdminYoutubeDis
     && Number.isSafeInteger(value.priority) && (value.priority as number) >= 1 && (value.priority as number) <= 100
     && typeof value.enabled === "boolean" && Number.isSafeInteger(value.cadenceMinutes) && (value.cadenceMinutes as number) >= 15 && (value.cadenceMinutes as number) <= 10_080
     && (value.nextRunAt === null || isoTimestamp(value.nextRunAt)) && (value.pausedReason === null || value.pausedReason === "operator" || value.pausedReason === "global")
-    && (value.pausedReason === null ? value.enabled : value.nextRunAt === null)
+    && (value.pausedReason === null ? value.enabled : value.pausedReason === "operator" ? !value.enabled && value.nextRunAt === null : value.enabled && value.nextRunAt === null)
     ? value as AdminYoutubeDiscoveryQuery : null;
 }
 
@@ -59,4 +59,4 @@ function record(value: unknown): value is Record<string, unknown> { return typeo
 function exactKeys(value: Record<string, unknown>, keys: string[]) { return Object.keys(value).length === keys.length && keys.every((key) => key in value); }
 function identifier(value: unknown): value is string { return typeof value === "string" && value.trim() === value && value.length > 0 && value.length <= 128; }
 function safeQueryText(value: unknown): value is string { return typeof value === "string" && value.trim() === value && /^[\p{L}\p{N} '-]{1,240}$/u.test(value); }
-function isoTimestamp(value: unknown): value is string { return typeof value === "string" && value.length <= 100 && !Number.isNaN(Date.parse(value)); }
+function isoTimestamp(value: unknown): value is string { return typeof value === "string" && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value) && !Number.isNaN(Date.parse(value)) && new Date(value).toISOString() === value; }
