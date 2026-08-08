@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { beforeEach, describe, expect, test } from "vitest";
 import { eq, sql } from "drizzle-orm";
 import type { RequestPrincipal } from "@xuyenviet/contracts";
@@ -170,20 +169,34 @@ describe.sequential("YouTube Discovery foundation persistence", () => {
     await expect(testDb.select({ actorUserId: auditEvents.actorUserId, actorSystem: auditEvents.actorSystem }).from(auditEvents).where(eq(auditEvents.targetId, created.id))).resolves.toEqual(Array.from({ length: 5 }, () => ({ actorUserId: "operator", actorSystem: null })));
   });
 
-  test("allows text edits for both origins while preserving safe system identity", async () => {
+  test("refreshes the canonical system proposal after its text is edited", async () => {
     await seedTestOperator();
     await createYoutubeDiscoveryPolicyVersion({ version: 1, isCurrent: true, actor: createSystemAuditActor("system-youtube-discovery") }, testDb);
-    const system = await createYoutubeDiscoveryQueryProposal({ origin: "system", reason: "coverage_gap", priority: 1, queryText: "Da Lat route", cadenceMinutes: 15, actor: createSystemAuditActor("system-youtube-discovery"), systemSignal: { reason: "coverage_gap", geography: "Da Lat", taxonomy: "route", priority: 50 } }, testDb);
+    const signal = { status: "available" as const, signals: [{ reason: "coverage_gap" as const, geography: "Da Lat", taxonomy: "route", priority: 50 }] };
+    const first = await claimYoutubeDiscoveryPlanning("discovery-a", testDb);
+    await refreshYoutubeDiscoverySystemProposals(first!, [signal], testDb);
+    const [system] = await testDb.select().from(youtubeDiscoveryQueryProposals);
     const port = createPostgresAdminYoutubeDiscoveryPort();
     const principal: RequestPrincipal = { userId: "operator", email: "operator@example.com", roles: ["operator"], authorizationVersion: 1, sessionId: "operator-session" };
-    await expect(port.edit(principal, system.id, "Changed target text")).resolves.toMatchObject({ origin: "system", queryText: "Changed target text" });
-    await expect(testDb.select({ origin: youtubeDiscoveryQueryProposals.origin, reason: youtubeDiscoveryQueryProposals.reason, queryText: youtubeDiscoveryQueryProposals.queryText, targetDigest: youtubeDiscoveryQueryProposals.targetDigest, safeSignalSummary: youtubeDiscoveryQueryProposals.safeSignalSummary }).from(youtubeDiscoveryQueryProposals).where(eq(youtubeDiscoveryQueryProposals.id, system.id))).resolves.toEqual([{
+    await expect(port.edit(principal, system!.id, "Changed target text")).resolves.toMatchObject({ origin: "system", queryText: "Changed target text" });
+    await expect(testDb.select({ origin: youtubeDiscoveryQueryProposals.origin, reason: youtubeDiscoveryQueryProposals.reason, queryText: youtubeDiscoveryQueryProposals.queryText, targetDigest: youtubeDiscoveryQueryProposals.targetDigest, safeSignalSummary: youtubeDiscoveryQueryProposals.safeSignalSummary }).from(youtubeDiscoveryQueryProposals).where(eq(youtubeDiscoveryQueryProposals.id, system!.id))).resolves.toEqual([{
+      origin: system!.origin,
+      reason: system!.reason,
+      queryText: "Changed target text",
+      targetDigest: system!.targetDigest,
+      safeSignalSummary: system!.safeSignalSummary,
+    }]);
+    await testDb.update(youtubeDiscoveryPlanningLeases).set({ nextRunAt: new Date(0) }).where(eq(youtubeDiscoveryPlanningLeases.id, "youtube-discovery-planning"));
+    const second = await claimYoutubeDiscoveryPlanning("discovery-b", testDb);
+    await refreshYoutubeDiscoverySystemProposals(second!, [signal], testDb);
+    await expect(testDb.select({ origin: youtubeDiscoveryQueryProposals.origin, reason: youtubeDiscoveryQueryProposals.reason, queryText: youtubeDiscoveryQueryProposals.queryText, targetDigest: youtubeDiscoveryQueryProposals.targetDigest, safeSignalSummary: youtubeDiscoveryQueryProposals.safeSignalSummary }).from(youtubeDiscoveryQueryProposals).where(eq(youtubeDiscoveryQueryProposals.id, system!.id))).resolves.toEqual([{
       origin: "system",
       reason: "coverage_gap",
-      queryText: "Changed target text",
-      targetDigest: createHash("sha256").update("coverage_gap\u001fChanged target text", "utf8").digest("hex"),
+      queryText: "Da Lat route",
+      targetDigest: system!.targetDigest,
       safeSignalSummary: "coverage_gap",
     }]);
+    await expect(testDb.select({ id: youtubeDiscoveryQueryProposals.id }).from(youtubeDiscoveryQueryProposals)).resolves.toEqual([{ id: system!.id }]);
   });
 
   test("uses one singleton planning lease and fences a stale planner", async () => {

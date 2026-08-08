@@ -30,12 +30,7 @@ export function createPostgresAdminYoutubeDiscoveryPort(): AdminYoutubeDiscovery
       });
     },
     async edit(principal, id, queryText) {
-      return mutate(principal, id, {
-        queryText,
-        // System edits retain the bounded reason and derive a matching identity.
-        targetDigest: sql`case when ${youtubeDiscoveryQueryProposals.origin} = 'system' then encode(digest(${youtubeDiscoveryQueryProposals.reason} || chr(31) || ${queryText}, 'sha256'), 'hex') else null end`,
-        safeSignalSummary: sql`case when ${youtubeDiscoveryQueryProposals.origin} = 'system' then ${youtubeDiscoveryQueryProposals.reason} else null end`,
-      }, validText(queryText));
+      return mutate(principal, id, { queryText }, validText(queryText));
     },
     async reprioritize(principal, id, priority) { return mutate(principal, id, { priority }, validPriority(priority)); },
     async pause(principal, id) { return mutate(principal, id, { enabled: false, nextDueAt: null }, true); },
