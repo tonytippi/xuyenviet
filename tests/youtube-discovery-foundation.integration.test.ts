@@ -169,7 +169,7 @@ describe.sequential("YouTube Discovery foundation persistence", () => {
     await expect(testDb.select({ actorUserId: auditEvents.actorUserId, actorSystem: auditEvents.actorSystem }).from(auditEvents).where(eq(auditEvents.targetId, created.id))).resolves.toEqual(Array.from({ length: 5 }, () => ({ actorUserId: "operator", actorSystem: null })));
   });
 
-  test("refreshes the canonical system proposal after its text is edited", async () => {
+  test("denies text edits for system proposals while preserving other operator controls", async () => {
     await seedTestOperator();
     await createYoutubeDiscoveryPolicyVersion({ version: 1, isCurrent: true, actor: createSystemAuditActor("system-youtube-discovery") }, testDb);
     const signal = { status: "available" as const, signals: [{ reason: "coverage_gap" as const, geography: "Da Lat", taxonomy: "route", priority: 50 }] };
@@ -178,14 +178,17 @@ describe.sequential("YouTube Discovery foundation persistence", () => {
     const [system] = await testDb.select().from(youtubeDiscoveryQueryProposals);
     const port = createPostgresAdminYoutubeDiscoveryPort();
     const principal: RequestPrincipal = { userId: "operator", email: "operator@example.com", roles: ["operator"], authorizationVersion: 1, sessionId: "operator-session" };
-    await expect(port.edit(principal, system!.id, "Changed target text")).resolves.toMatchObject({ origin: "system", queryText: "Changed target text" });
+    await expect(port.edit(principal, system!.id, "Changed target text")).resolves.toBeNull();
     await expect(testDb.select({ origin: youtubeDiscoveryQueryProposals.origin, reason: youtubeDiscoveryQueryProposals.reason, queryText: youtubeDiscoveryQueryProposals.queryText, targetDigest: youtubeDiscoveryQueryProposals.targetDigest, safeSignalSummary: youtubeDiscoveryQueryProposals.safeSignalSummary }).from(youtubeDiscoveryQueryProposals).where(eq(youtubeDiscoveryQueryProposals.id, system!.id))).resolves.toEqual([{
       origin: system!.origin,
       reason: system!.reason,
-      queryText: "Changed target text",
+      queryText: "Da Lat route",
       targetDigest: system!.targetDigest,
       safeSignalSummary: system!.safeSignalSummary,
     }]);
+    await expect(port.reprioritize(principal, system!.id, 70)).resolves.toMatchObject({ origin: "system", priority: 70 });
+    await expect(port.pause(principal, system!.id)).resolves.toMatchObject({ origin: "system", enabled: false });
+    await expect(port.resume(principal, system!.id)).resolves.toMatchObject({ origin: "system", enabled: true });
     await testDb.update(youtubeDiscoveryPlanningLeases).set({ nextRunAt: new Date(0) }).where(eq(youtubeDiscoveryPlanningLeases.id, "youtube-discovery-planning"));
     const second = await claimYoutubeDiscoveryPlanning("discovery-b", testDb);
     await refreshYoutubeDiscoverySystemProposals(second!, [signal], testDb);
@@ -197,6 +200,17 @@ describe.sequential("YouTube Discovery foundation persistence", () => {
       safeSignalSummary: "coverage_gap",
     }]);
     await expect(testDb.select({ id: youtubeDiscoveryQueryProposals.id }).from(youtubeDiscoveryQueryProposals)).resolves.toEqual([{ id: system!.id }]);
+  });
+
+  test("does not backfill an enabled unanchored legacy proposal after policy re-enable", async () => {
+    await seedTestOperator();
+    await createYoutubeDiscoveryPolicyVersion({ version: 1, isCurrent: true, policy: { enabled: false, cadenceMinutes: 15 }, actor: createSystemAuditActor("system-youtube-discovery") }, testDb);
+    const proposal = await createYoutubeDiscoveryQueryProposal({ origin: "operator", reason: "operator_request", priority: 50, queryText: "Da Lat route", cadenceMinutes: 15, actor: createUserAuditActor({ userId: "operator", email: "operator@example.com" }) }, testDb);
+    await expect(testDb.select({ scheduleAnchorAt: youtubeDiscoveryQueryProposals.scheduleAnchorAt, nextDueAt: youtubeDiscoveryQueryProposals.nextDueAt }).from(youtubeDiscoveryQueryProposals).where(eq(youtubeDiscoveryQueryProposals.id, proposal.id))).resolves.toEqual([{ scheduleAnchorAt: null, nextDueAt: null }]);
+    await createYoutubeDiscoveryPolicyVersion({ version: 2, isCurrent: true, policy: { cadenceMinutes: 15 }, actor: createSystemAuditActor("system-youtube-discovery") }, testDb);
+    expect(await scheduleYoutubeDiscoveryDueRuns(testDb)).toBe(0);
+    await expect(testDb.select({ scheduleAnchorAt: youtubeDiscoveryQueryProposals.scheduleAnchorAt, nextDueAt: youtubeDiscoveryQueryProposals.nextDueAt }).from(youtubeDiscoveryQueryProposals).where(eq(youtubeDiscoveryQueryProposals.id, proposal.id))).resolves.toEqual([{ scheduleAnchorAt: null, nextDueAt: null }]);
+    await expect(testDb.select().from(youtubeDiscoveryRuns).where(eq(youtubeDiscoveryRuns.queryProposalId, proposal.id))).resolves.toEqual([]);
   });
 
   test("uses one singleton planning lease and fences a stale planner", async () => {

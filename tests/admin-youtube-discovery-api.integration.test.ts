@@ -61,7 +61,7 @@ describe("admin YouTube Discovery direct API", () => {
     expect(query.origin).toBe("operator");
   });
 
-  test("admits an authorized text edit for a system-origin proposal", async () => {
+  test("forwards an authorized text edit to the proposal port", async () => {
     const operator = await browserSession("operator", "operator");
     const headers = { Cookie: operator.cookie, Origin: "https://admin.xuyenviet.app", "x-xuyenviet-csrf": operator.csrf };
     port.edit.mockResolvedValueOnce({ ...query, origin: "system", reason: "coverage_gap" });
