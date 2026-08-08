@@ -3,7 +3,7 @@ import { and, eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 
-import { auditEvents, cancelYoutubeDiscoveryRunIfDisabled, claimNextYoutubeDiscoveryRun, claimYoutubeDiscoveryPlanning, createSystemAuditActor, createYoutubeDiscoveryPolicyVersion, createYoutubeDiscoveryRun, finishYoutubeDiscoveryRun, refreshYoutubeDiscoverySystemProposals, retryYoutubeDiscoveryRun, schema, youtubeDiscoveryPlanningLeases, youtubeDiscoveryQueryProposals, youtubeDiscoveryRuns } from "@xuyenviet/database";
+import { auditEvents, cancelYoutubeDiscoveryRunIfDisabled, claimNextYoutubeDiscoveryRun, claimYoutubeDiscoveryPlanning, createAiAskDiscoveryQuerySignalPort, createKnowledgeDiscoveryQuerySignalPort, createSystemAuditActor, createYoutubeDiscoveryPolicyVersion, createYoutubeDiscoveryRun, finishYoutubeDiscoveryRun, refreshYoutubeDiscoverySystemProposals, retryYoutubeDiscoveryRun, schema, youtubeDiscoveryPlanningLeases, youtubeDiscoveryPlanningOutcomes, youtubeDiscoveryQueryProposals, youtubeDiscoveryRuns } from "@xuyenviet/database";
 import { resetTestDatabase, testDb } from "./helpers/db";
 import { runYoutubeDiscoveryPoll, setYoutubeDiscoveryExecutionStageForTest, setYoutubeDiscoveryPlanningPortsForTest } from "../packages/worker-domain/src/features/youtube-discovery/execution";
 
@@ -138,6 +138,18 @@ describe.sequential("YouTube Discovery run execution", () => {
     await expect(testDb.select().from(youtubeDiscoveryQueryProposals)).resolves.toHaveLength(1);
   });
 
+  test("rolls back planning writes when the lease expires at terminalization", async () => {
+    await createYoutubeDiscoveryPolicyVersion({ version: 1, isCurrent: true, actor: createSystemAuditActor("system-youtube-discovery") }, testDb);
+    const claim = await claimYoutubeDiscoveryPlanning("discovery-a", testDb);
+    await testDb.execute(sql`update youtube_discovery_planning_leases set lease_expires_at = clock_timestamp() + interval '10 milliseconds' where id = 'youtube-discovery-planning'`);
+    const results = Array.from({ length: 200 }, (_, index) => ({ status: "available" as const, signals: [{ reason: "coverage_gap" as const, geography: `Region ${index}`, taxonomy: "route", priority: 70 }] }));
+
+    expect(await refreshYoutubeDiscoverySystemProposals(claim!, results, testDb)).toBe("contended");
+    await expect(testDb.select().from(youtubeDiscoveryQueryProposals)).resolves.toEqual([]);
+    await expect(testDb.select().from(youtubeDiscoveryPlanningOutcomes)).resolves.toEqual([]);
+    await expect(testDb.select().from(auditEvents).where(eq(auditEvents.targetType, "youtube_discovery_planning"))).resolves.toHaveLength(1);
+  });
+
   test("does not deadlock a policy transition racing a planning refresh", async () => {
     await createYoutubeDiscoveryPolicyVersion({ version: 1, isCurrent: true, actor: createSystemAuditActor("system-youtube-discovery") }, testDb);
     const claim = await claimYoutubeDiscoveryPlanning("discovery-a", testDb);
@@ -250,6 +262,29 @@ describe.sequential("YouTube Discovery run execution", () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
     await expect(testDb.select().from(youtubeDiscoveryQueryProposals)).resolves.toEqual([]);
   }, 3_000);
+
+  test("cancels timed-out owner aggregate reads in PostgreSQL", async () => {
+    const databaseUrl = process.env.DATABASE_URL_TEST!;
+    const blocker = postgres(databaseUrl, { max: 1 });
+    const inspector = postgres(databaseUrl, { max: 1 });
+    const cases = [
+      { table: "assistant_retrieval_decisions", port: createAiAskDiscoveryQuerySignalPort(), query: "assistant_retrieval_decisions" },
+      { table: "knowledge_recommendations", port: createKnowledgeDiscoveryQuerySignalPort(), query: "knowledge_recommendations" },
+    ];
+    try {
+      for (const fixture of cases) {
+        await blocker.begin(async (transaction) => {
+          await transaction.unsafe(`lock table ${fixture.table} in access exclusive mode`);
+          await expect(fixture.port.readSignals()).resolves.toEqual({ status: "unavailable", code: "source_timeout" });
+          const active = await inspector<{ count: number }[]>`select count(*)::int as count from pg_stat_activity where state = 'active' and query like ${`%${fixture.query}%`}`;
+          expect(active[0]?.count).toBe(0);
+        });
+      }
+    } finally {
+      await blocker.end();
+      await inspector.end();
+    }
+  }, 5_000);
 
   test("observes recovery-only terminal maintenance safely", async () => {
     const policy = await createYoutubeDiscoveryPolicyVersion({ version: 1, isCurrent: true, policy: { maxRetryAttempts: 0 }, actor: createSystemAuditActor("system-youtube-discovery") }, testDb);

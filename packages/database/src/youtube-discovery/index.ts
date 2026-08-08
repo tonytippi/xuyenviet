@@ -18,6 +18,8 @@ export type YoutubeDiscoveryRunClaimResult = Readonly<{ claim: YoutubeDiscoveryR
 export type YoutubeDiscoveryRunDisposition = "completed" | "failed" | "cancelled" | "retrying" | "contended";
 export type YoutubeDiscoveryPlanningClaim = Readonly<{ id: "youtube-discovery-planning"; policyVersionId: string; fencingToken: string }>;
 
+class PlanningLeaseLostError extends Error {}
+
 export async function createYoutubeDiscoveryPolicyVersion(input: CreateYoutubeDiscoveryPolicyVersionInput, database: DiscoveryWriter = getDb()) {
   const policy = parseYoutubeDiscoveryPolicy(input.policy === undefined ? {} : input.policy);
   assertDiscoveryPolicyActor(input.actor);
@@ -105,21 +107,26 @@ export async function claimYoutubeDiscoveryPlanning(workerId: string, database: 
 
 export async function refreshYoutubeDiscoverySystemProposals(claim: YoutubeDiscoveryPlanningClaim, results: readonly DiscoveryQuerySignalPortResult[], database: DiscoveryWriter = getDb()): Promise<"completed" | "cancelled" | "contended"> {
   const derived = deriveDiscoveryQueries(results);
-  return database.transaction(async (transaction) => {
-    const [policy] = await transaction.select({ enabled: youtubeDiscoveryPolicyVersions.enabled, cadenceMinutes: youtubeDiscoveryPolicyVersions.cadenceMinutes }).from(youtubeDiscoveryPolicyVersions).where(and(eq(youtubeDiscoveryPolicyVersions.id, claim.policyVersionId), eq(youtubeDiscoveryPolicyVersions.isCurrent, true))).limit(1).for("update");
-    const active = and(eq(youtubeDiscoveryPlanningLeases.id, claim.id), eq(youtubeDiscoveryPlanningLeases.state, "running"), eq(youtubeDiscoveryPlanningLeases.fencingToken, claim.fencingToken), sql`${youtubeDiscoveryPlanningLeases.leaseExpiresAt} > clock_timestamp()`);
-    const [locked] = await transaction.select({ id: youtubeDiscoveryPlanningLeases.id }).from(youtubeDiscoveryPlanningLeases).where(active).limit(1).for("update");
-    if (!locked) return "contended";
-    if (!policy?.enabled) return finishPlanning(transaction, claim, "cancelled", 0, []);
-    for (const query of derived.queries) {
-      const current = await transaction.select({ enabled: youtubeDiscoveryPolicyVersions.enabled }).from(youtubeDiscoveryPolicyVersions).where(eq(youtubeDiscoveryPolicyVersions.isCurrent, true)).limit(1).for("update");
-      if (!current[0]?.enabled) return finishPlanning(transaction, claim, "cancelled", 0, []);
-      const upserted = await transaction.execute(sql`insert into youtube_discovery_query_proposals (id, origin, reason, priority, query_text, enabled, cadence_minutes, target_digest, safe_signal_summary, schedule_anchor_at, next_due_at) select ${crypto.randomUUID()}, 'system', ${query.reason}, ${query.priority}, ${query.queryText}, true, ${policy.cadenceMinutes}, ${query.targetDigest}, ${query.reason}, clock_timestamp(), clock_timestamp() + ${policy.cadenceMinutes} * interval '1 minute' where exists (select 1 from youtube_discovery_planning_leases where id = ${claim.id} and state = 'running' and fencing_token = ${claim.fencingToken} and lease_expires_at > clock_timestamp()) and exists (select 1 from youtube_discovery_policy_versions where id = ${claim.policyVersionId} and is_current = true and enabled = true) on conflict (reason, target_digest) where origin = 'system' do update set priority = case when youtube_discovery_query_proposals.operator_priority_override is null then excluded.priority else youtube_discovery_query_proposals.operator_priority_override end, query_text = excluded.query_text, cadence_minutes = excluded.cadence_minutes, safe_signal_summary = excluded.safe_signal_summary, next_due_at = case when youtube_discovery_query_proposals.enabled and youtube_discovery_query_proposals.cadence_minutes <> excluded.cadence_minutes and youtube_discovery_query_proposals.schedule_anchor_at is not null then youtube_discovery_query_proposals.schedule_anchor_at + (floor(extract(epoch from (clock_timestamp() - youtube_discovery_query_proposals.schedule_anchor_at)) / 60 / excluded.cadence_minutes)::integer + 1) * excluded.cadence_minutes * interval '1 minute' else youtube_discovery_query_proposals.next_due_at end returning id, enabled, priority`) as Array<{ id: string; enabled: boolean; priority: number }>;
-      if (!upserted[0]) return "contended";
-      await recordAuditEvent({ actor: createSystemAuditActor("system-youtube-discovery"), operation: "update", targetType: "youtube_discovery_query_proposal", targetId: upserted[0].id, afterSummary: JSON.stringify({ origin: "system", priority: upserted[0].priority, enabled: upserted[0].enabled, cadenceMinutes: policy.cadenceMinutes }) }, transaction);
-    }
-    return finishPlanning(transaction, claim, derived.unavailableCodes.length ? "unavailable" : "completed", derived.queries.length, derived.unavailableCodes);
-  });
+  try {
+    return await database.transaction(async (transaction) => {
+      const [policy] = await transaction.select({ enabled: youtubeDiscoveryPolicyVersions.enabled, cadenceMinutes: youtubeDiscoveryPolicyVersions.cadenceMinutes }).from(youtubeDiscoveryPolicyVersions).where(and(eq(youtubeDiscoveryPolicyVersions.id, claim.policyVersionId), eq(youtubeDiscoveryPolicyVersions.isCurrent, true))).limit(1).for("update");
+      const active = and(eq(youtubeDiscoveryPlanningLeases.id, claim.id), eq(youtubeDiscoveryPlanningLeases.state, "running"), eq(youtubeDiscoveryPlanningLeases.fencingToken, claim.fencingToken), sql`${youtubeDiscoveryPlanningLeases.leaseExpiresAt} > clock_timestamp()`);
+      const [locked] = await transaction.select({ id: youtubeDiscoveryPlanningLeases.id }).from(youtubeDiscoveryPlanningLeases).where(active).limit(1).for("update");
+      if (!locked) return "contended";
+      if (!policy?.enabled) return finishPlanning(transaction, claim, "cancelled", 0, []);
+      for (const query of derived.queries) {
+        const current = await transaction.select({ enabled: youtubeDiscoveryPolicyVersions.enabled }).from(youtubeDiscoveryPolicyVersions).where(eq(youtubeDiscoveryPolicyVersions.isCurrent, true)).limit(1).for("update");
+        if (!current[0]?.enabled) return finishPlanning(transaction, claim, "cancelled", 0, []);
+        const upserted = await transaction.execute(sql`insert into youtube_discovery_query_proposals (id, origin, reason, priority, query_text, enabled, cadence_minutes, target_digest, safe_signal_summary, schedule_anchor_at, next_due_at) select ${crypto.randomUUID()}, 'system', ${query.reason}, ${query.priority}, ${query.queryText}, true, ${policy.cadenceMinutes}, ${query.targetDigest}, ${query.reason}, clock_timestamp(), clock_timestamp() + ${policy.cadenceMinutes} * interval '1 minute' where exists (select 1 from youtube_discovery_planning_leases where id = ${claim.id} and state = 'running' and fencing_token = ${claim.fencingToken} and lease_expires_at > clock_timestamp()) and exists (select 1 from youtube_discovery_policy_versions where id = ${claim.policyVersionId} and is_current = true and enabled = true) on conflict (reason, target_digest) where origin = 'system' do update set priority = case when youtube_discovery_query_proposals.operator_priority_override is null then excluded.priority else youtube_discovery_query_proposals.operator_priority_override end, query_text = excluded.query_text, cadence_minutes = excluded.cadence_minutes, safe_signal_summary = excluded.safe_signal_summary, next_due_at = case when youtube_discovery_query_proposals.enabled and youtube_discovery_query_proposals.cadence_minutes <> excluded.cadence_minutes and youtube_discovery_query_proposals.schedule_anchor_at is not null then youtube_discovery_query_proposals.schedule_anchor_at + (floor(extract(epoch from (clock_timestamp() - youtube_discovery_query_proposals.schedule_anchor_at)) / 60 / excluded.cadence_minutes)::integer + 1) * excluded.cadence_minutes * interval '1 minute' else youtube_discovery_query_proposals.next_due_at end returning id, enabled, priority`) as Array<{ id: string; enabled: boolean; priority: number }>;
+        if (!upserted[0]) throw new PlanningLeaseLostError();
+        await recordAuditEvent({ actor: createSystemAuditActor("system-youtube-discovery"), operation: "update", targetType: "youtube_discovery_query_proposal", targetId: upserted[0].id, afterSummary: JSON.stringify({ origin: "system", priority: upserted[0].priority, enabled: upserted[0].enabled, cadenceMinutes: policy.cadenceMinutes }) }, transaction);
+      }
+      return finishPlanning(transaction, claim, derived.unavailableCodes.length ? "unavailable" : "completed", derived.queries.length, derived.unavailableCodes);
+    });
+  } catch (error) {
+    if (error instanceof PlanningLeaseLostError) return "contended";
+    throw error;
+  }
 }
 
 async function lockPlanningLease(transaction: DiscoveryWriter) {
@@ -129,7 +136,7 @@ async function lockPlanningLease(transaction: DiscoveryWriter) {
 
 async function finishPlanning(transaction: DiscoveryWriter, claim: YoutubeDiscoveryPlanningClaim, outcome: "completed" | "unavailable" | "cancelled", count: number, codes: string[]): Promise<"completed" | "cancelled" | "contended"> {
   const [updated] = await transaction.update(youtubeDiscoveryPlanningLeases).set({ state: outcome === "cancelled" ? "cancelled" : "queued", claimedBy: null, claimedAt: null, leaseExpiresAt: null, fencingToken: null, terminalAt: sql`clock_timestamp()`, outcome, createdOrRefreshedCount: count, unavailableCodes: codes, nextRunAt: nextBoundarySql(sql`clock_timestamp()`, sql`clock_timestamp()`, sql`(select cadence_minutes from youtube_discovery_policy_versions where id = ${claim.policyVersionId})`) }).where(and(eq(youtubeDiscoveryPlanningLeases.id, claim.id), eq(youtubeDiscoveryPlanningLeases.state, "running"), eq(youtubeDiscoveryPlanningLeases.fencingToken, claim.fencingToken), sql`${youtubeDiscoveryPlanningLeases.leaseExpiresAt} > clock_timestamp()`)).returning();
-  if (!updated) return "contended";
+  if (!updated) throw new PlanningLeaseLostError();
   await transaction.insert(youtubeDiscoveryPlanningOutcomes).values({ planningId: claim.id, policyVersionId: claim.policyVersionId, outcome, createdOrRefreshedCount: count, unavailableCodes: codes, completedAt: sql`clock_timestamp()` });
   await recordAuditEvent({ actor: createSystemAuditActor("system-youtube-discovery"), operation: "update", targetType: "youtube_discovery_planning", targetId: claim.id, afterSummary: JSON.stringify({ policyVersionId: claim.policyVersionId, outcome, createdOrRefreshedCount: count, unavailableCount: codes.length }) }, transaction);
   return outcome === "cancelled" ? "cancelled" : "completed";
