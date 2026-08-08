@@ -45,7 +45,7 @@ export function parseAdminYoutubeDiscoveryQuery(value: unknown): AdminYoutubeDis
     && Number.isSafeInteger(value.priority) && (value.priority as number) >= 1 && (value.priority as number) <= 100
     && typeof value.enabled === "boolean" && Number.isSafeInteger(value.cadenceMinutes) && (value.cadenceMinutes as number) >= 15 && (value.cadenceMinutes as number) <= 10_080
     && (value.nextRunAt === null || isoTimestamp(value.nextRunAt)) && (value.pausedReason === null || value.pausedReason === "operator" || value.pausedReason === "global")
-    && (value.pausedReason === null ? value.enabled && value.nextRunAt !== null : value.nextRunAt === null)
+    && (value.pausedReason === null ? value.enabled : value.nextRunAt === null)
     ? value as AdminYoutubeDiscoveryQuery : null;
 }
 

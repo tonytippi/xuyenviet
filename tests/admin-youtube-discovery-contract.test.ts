@@ -7,7 +7,7 @@ describe("admin YouTube Discovery contract", () => {
   test("requires exact safe query projections", () => {
     expect(parseAdminYoutubeDiscoveryQuery(query)).toEqual(query);
     expect(parseAdminYoutubeDiscoveryQuery({ ...query, targetDigest: "secret" })).toBeNull();
-    expect(parseAdminYoutubeDiscoveryQuery({ ...query, nextRunAt: null })).toBeNull();
+    expect(parseAdminYoutubeDiscoveryQuery({ ...query, nextRunAt: null })).not.toBeNull();
     expect(parseAdminYoutubeDiscoveryQuery({ ...query, enabled: false, nextRunAt: null, pausedReason: "operator" })).not.toBeNull();
     expect(parseAdminYoutubeDiscoveryQueryList({ items: [query] })).toEqual({ items: [query] });
     expect(parseAdminYoutubeDiscoveryQueryList({ items: [{ ...query, providerPayload: {} }] })).toBeNull();

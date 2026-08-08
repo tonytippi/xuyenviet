@@ -76,6 +76,21 @@ describe.sequential("YouTube Discovery foundation persistence", () => {
     expect(audits[0]!.afterSummary).not.toContain("Da Lat");
   });
 
+  test("re-projects a system proposal at the first future boundary when cadence changes", async () => {
+    await createYoutubeDiscoveryPolicyVersion({ version: 1, isCurrent: true, policy: { cadenceMinutes: 15 }, actor: createSystemAuditActor("system-youtube-discovery") }, testDb);
+    const first = await claimYoutubeDiscoveryPlanning("discovery-a", testDb);
+    await refreshYoutubeDiscoverySystemProposals(first!, [{ status: "available", signals: [{ reason: "coverage_gap", geography: "Da Lat", taxonomy: "route", priority: 70 }] }], testDb);
+    const [before] = await testDb.select().from(youtubeDiscoveryQueryProposals);
+    await testDb.update(youtubeDiscoveryQueryProposals).set({ scheduleAnchorAt: new Date(0), nextDueAt: new Date(1) }).where(eq(youtubeDiscoveryQueryProposals.id, before!.id));
+    await createYoutubeDiscoveryPolicyVersion({ version: 2, isCurrent: true, policy: { cadenceMinutes: 60 }, actor: createSystemAuditActor("system-youtube-discovery") }, testDb);
+    await testDb.update(youtubeDiscoveryPlanningLeases).set({ nextRunAt: new Date(0) }).where(eq(youtubeDiscoveryPlanningLeases.id, "youtube-discovery-planning"));
+    const second = await claimYoutubeDiscoveryPlanning("discovery-b", testDb);
+    await refreshYoutubeDiscoverySystemProposals(second!, [{ status: "available", signals: [{ reason: "coverage_gap", geography: "Da Lat", taxonomy: "route", priority: 70 }] }], testDb);
+    const [after] = await testDb.select({ nextDueAt: youtubeDiscoveryQueryProposals.nextDueAt }).from(youtubeDiscoveryQueryProposals).where(eq(youtubeDiscoveryQueryProposals.id, before!.id));
+    expect(after!.nextDueAt).toBeInstanceOf(Date);
+    expect(after!.nextDueAt!.getTime()).toBeGreaterThan(Date.now());
+  });
+
   test("does not catch up planning or proposal intervals after global disable", async () => {
     const enabled = await createYoutubeDiscoveryPolicyVersion({ version: 1, isCurrent: true, policy: { cadenceMinutes: 15 }, actor: createSystemAuditActor("system-youtube-discovery") }, testDb);
     await seedTestOperator();

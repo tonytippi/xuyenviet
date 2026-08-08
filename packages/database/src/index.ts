@@ -16,6 +16,7 @@ import type { TravelerCommandPort, TripProjectSidebarReadRepository } from "@xuy
 const answerUsefulnessCommentMaxLength = 500;
 
 export * from "./ai-ask-commands";
+export * from "./ai-ask-discovery-signals";
 export * from "./ai-ask-stream-execution";
 export * from "./answer-context";
 export * from "./answer-freshness";
@@ -32,6 +33,7 @@ export * from "./knowledge-ingestion-accounting";
 export * from "./knowledge-lifecycle";
 export * from "./knowledge-corridor";
 export * from "./knowledge-draft-review";
+export * from "./knowledge-discovery-signals";
 export * from "./knowledge-readiness-evidence";
 export * from "./knowledge-recommendations";
 export * from "./knowledge-state";
