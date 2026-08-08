@@ -3,7 +3,7 @@ import { and, eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 
-import { auditEvents, cancelYoutubeDiscoveryRunIfDisabled, claimNextYoutubeDiscoveryRun, claimYoutubeDiscoveryPlanning, createSystemAuditActor, createYoutubeDiscoveryPolicyVersion, createYoutubeDiscoveryRun, finishYoutubeDiscoveryRun, refreshYoutubeDiscoverySystemProposals, retryYoutubeDiscoveryRun, schema, youtubeDiscoveryPlanningLeases, youtubeDiscoveryRuns } from "@xuyenviet/database";
+import { auditEvents, cancelYoutubeDiscoveryRunIfDisabled, claimNextYoutubeDiscoveryRun, claimYoutubeDiscoveryPlanning, createSystemAuditActor, createYoutubeDiscoveryPolicyVersion, createYoutubeDiscoveryRun, finishYoutubeDiscoveryRun, refreshYoutubeDiscoverySystemProposals, retryYoutubeDiscoveryRun, schema, youtubeDiscoveryPlanningLeases, youtubeDiscoveryQueryProposals, youtubeDiscoveryRuns } from "@xuyenviet/database";
 import { resetTestDatabase, testDb } from "./helpers/db";
 import { runYoutubeDiscoveryPoll, setYoutubeDiscoveryExecutionStageForTest, setYoutubeDiscoveryPlanningPortsForTest } from "../packages/worker-domain/src/features/youtube-discovery/execution";
 
@@ -181,10 +181,19 @@ describe.sequential("YouTube Discovery run execution", () => {
     setYoutubeDiscoveryExecutionStageForTest(undefined);
   });
 
-  test("bounds a never-settling planning port as a safe unavailable outcome", async () => {
+  test("aborts a timed-out planning read and fences its late resolution from proposal writes", async () => {
     await createYoutubeDiscoveryPolicyVersion({ version: 1, isCurrent: true, actor: createSystemAuditActor("system-youtube-discovery") }, testDb);
-    setYoutubeDiscoveryPlanningPortsForTest(() => new Promise(() => undefined), async () => ({ status: "available", signals: [] }));
+    let resolveLate!: (value: { status: "available"; signals: Array<{ reason: "coverage_gap"; geography: string; taxonomy: string; priority: number }> }) => void;
+    let aborted = false;
+    setYoutubeDiscoveryPlanningPortsForTest((signal?: AbortSignal) => new Promise((resolve) => {
+      resolveLate = resolve;
+      signal?.addEventListener("abort", () => { aborted = true; });
+    }), async () => ({ status: "available", signals: [] }));
     await expect(runYoutubeDiscoveryPoll("discovery-a")).resolves.toMatchObject({ capability: "youtube.discovery", resultCode: "success", durableId: "youtube-discovery-planning" });
+    expect(aborted).toBe(true);
+    resolveLate({ status: "available", signals: [{ reason: "coverage_gap", geography: "Da Lat", taxonomy: "route", priority: 70 }] });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await expect(testDb.select().from(youtubeDiscoveryQueryProposals)).resolves.toEqual([]);
   }, 3_000);
 
   test("observes recovery-only terminal maintenance safely", async () => {

@@ -4,8 +4,8 @@ export const safeDiscoveryQueryReasons = ["coverage_gap", "freshness_risk", "unr
 export type SafeDiscoveryQueryReason = (typeof safeDiscoveryQueryReasons)[number];
 export type SafeDiscoveryQuerySignal = Readonly<{ reason: SafeDiscoveryQueryReason; geography: string; taxonomy: string; priority: number }>;
 export type DiscoveryQuerySignalPortResult = Readonly<{ status: "available"; signals: readonly SafeDiscoveryQuerySignal[] }> | Readonly<{ status: "unavailable"; code: "source_unavailable" | "source_timeout" | "source_invalid" }>;
-export type KnowledgeDiscoveryQuerySignalPort = Readonly<{ readSignals(): Promise<DiscoveryQuerySignalPortResult> }>;
-export type AiAskDiscoveryQuerySignalPort = Readonly<{ readSignals(): Promise<DiscoveryQuerySignalPortResult> }>;
+export type KnowledgeDiscoveryQuerySignalPort = Readonly<{ readSignals(signal?: AbortSignal): Promise<DiscoveryQuerySignalPortResult> }>;
+export type AiAskDiscoveryQuerySignalPort = Readonly<{ readSignals(signal?: AbortSignal): Promise<DiscoveryQuerySignalPortResult> }>;
 export type DerivedDiscoveryQuery = SafeDiscoveryQuerySignal & Readonly<{ targetDigest: string; queryText: string }>;
 
 const safeText = /^[\p{L}\p{N} -]{1,80}$/u;

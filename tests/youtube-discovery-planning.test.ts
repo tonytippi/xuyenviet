@@ -1,7 +1,6 @@
 import { describe, expect, test } from "vitest";
 import { deriveDiscoveryQueries, parseDiscoveryQuerySignalPortResult } from "@xuyenviet/domain";
 import { parseAdminYoutubeDiscoveryQueryList } from "@xuyenviet/contracts";
-import { createAiAskDiscoveryQuerySignalPort, createKnowledgeDiscoveryQuerySignalPort } from "@xuyenviet/database";
 
 describe("YouTube Discovery safe planning signals", () => {
   test("accepts only exact bounded signal and unavailable contracts", () => {
@@ -28,8 +27,4 @@ describe("YouTube Discovery safe planning signals", () => {
     expect(parseAdminYoutubeDiscoveryQueryList({ items: Array.from({ length: 201 }, () => item) })).toBeNull();
   });
 
-  test("publishes explicit owner aggregate ports when no safe aggregate is available", async () => {
-    await expect(createKnowledgeDiscoveryQuerySignalPort().readSignals()).resolves.toEqual({ status: "available", signals: [] });
-    await expect(createAiAskDiscoveryQuerySignalPort().readSignals()).resolves.toEqual({ status: "available", signals: [] });
-  });
 });

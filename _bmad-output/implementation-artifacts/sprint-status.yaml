@@ -1,5 +1,5 @@
 # generated: 2026-07-25
-# last_updated: 2026-08-08 (Story 18.3 closure-audit repair complete; ready for follow-up review.)
+# last_updated: 2026-08-08 (Story 18.3 final AC closure repair complete; ready for development.)
 # project: xuyenviet
 # project_key: NOKEY
 # tracking_system: file-system
@@ -33,7 +33,7 @@
 #   - done: Completed
 
 generated: 2026-07-25
-last_updated: 2026-08-08 (Story 18.3 closure-audit repair complete; ready for follow-up review.)
+last_updated: 2026-08-08 (Story 18.3 final AC closure repair complete; ready for development.)
 project: xuyenviet
 project_key: NOKEY
 tracking_system: file-system
@@ -416,6 +416,7 @@ development_status:
   # 2026-08-08: Final repair binds owner-published bounded ports, re-projects changed system cadence at the next future boundary, permits the safe global re-enable list transition, and applies the user-authorized 0047 clean break for legacy system operator_request rows. Targeted unit/integration evidence, typecheck, and build passed; follow-up review remains required.
   # 2026-08-08: Mandatory AC1 recovery removes Discovery-owned database-reader adapters. Knowledge and AI Ask each publish a direct bounded aggregate port and return owner-owned available-empty when no safe aggregate is supported. Worker composition binds both directly; focused composition and Discovery persistence-isolation tests pass alongside full typecheck, Worker build, and diff validation. Status remains ready-for-dev.
   # 2026-08-08: Final closure-audit repair only. System text/target derivation is immutable to operator edit, direct enabled system creation sets a PostgreSQL anchor plus first future due timestamp, finite owner-port reads timeout safely as unavailable, and admin projections require canonical UTC ISO timestamps with non-contradictory pause state. Evidence includes competing planning claims, unavailable outcome persistence, proposal/run write-boundary revocation, exact singleton cadence boundaries, pause/resume no-backfill, system-origin command invariants, and prohibited-data database rejection. Direct focused unit (2 files, 5 tests) and integration (2 files, 26 tests), complete typecheck/build, and diff check pass. Project-wide filtered script runs retain unrelated failures only. Status remains ready-for-dev.
+  # 2026-08-08: Final AC1/AC5 closure repair only. Knowledge emits bounded coverage/freshness/conflict tuples from its own review/card metadata; AI Ask emits thresholded anonymized demand from retrieval-decision counts. Neither port reads Discovery or exposes raw source/traveler content. Integration proves a real owner aggregate creates exactly one idempotent system proposal without private text; timed reads are abortable and late resolution cannot write. Migration 0047 disables transformed legacy system operator requests and clears schedule anchor/due projections, with migration proof. Focused 4-file suite (32 tests), typecheck, build, and diff check pass. Status remains ready-for-dev.
   18-3-manage-system-and-operator-query-proposals: ready-for-dev
   18-4-discover-canonical-youtube-candidates-safely: backlog
   18-5-enrich-candidates-with-safe-derived-signals-and-retention: backlog

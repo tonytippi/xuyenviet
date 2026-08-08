@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, test } from "vitest";
 import { eq, sql } from "drizzle-orm";
 import type { RequestPrincipal } from "@xuyenviet/contracts";
 
-import { auditEvents, claimYoutubeDiscoveryPlanning, createPostgresAdminYoutubeDiscoveryPort, createSystemAuditActor, createUserAuditActor, createYoutubeDiscoveryPolicyVersion, createYoutubeDiscoveryQueryProposal, createYoutubeDiscoveryRun, refreshYoutubeDiscoverySystemProposals, scheduleYoutubeDiscoveryDueRuns, youtubeDiscoveryPlanningLeases, youtubeDiscoveryPolicyVersions, youtubeDiscoveryQueryProposals, youtubeDiscoveryRuns } from "@xuyenviet/database";
+import { auditEvents, claimYoutubeDiscoveryPlanning, createKnowledgeDiscoveryQuerySignalPort, createPostgresAdminYoutubeDiscoveryPort, createSystemAuditActor, createUserAuditActor, createYoutubeDiscoveryPolicyVersion, createYoutubeDiscoveryQueryProposal, createYoutubeDiscoveryRun, knowledgeCards, knowledgeRecommendations, refreshYoutubeDiscoverySystemProposals, scheduleYoutubeDiscoveryDueRuns, youtubeDiscoveryPlanningLeases, youtubeDiscoveryPolicyVersions, youtubeDiscoveryQueryProposals, youtubeDiscoveryRuns } from "@xuyenviet/database";
 
 import { resetTestDatabase, seedTestOperator, testDb } from "./helpers/db";
 
@@ -85,6 +85,21 @@ describe.sequential("YouTube Discovery foundation persistence", () => {
     expect(proposal).toHaveLength(1);
     expect(audits).toEqual([{ targetId: proposal[0]!.id, actorSystem: "system-youtube-discovery", afterSummary: JSON.stringify({ origin: "system", priority: 70, enabled: true, cadenceMinutes: 15 }) }]);
     expect(audits[0]!.afterSummary).not.toContain("Da Lat");
+  });
+
+  test("turns an owner-published bounded Knowledge aggregate into one idempotent system proposal", async () => {
+    await seedTestOperator();
+    await createYoutubeDiscoveryPolicyVersion({ version: 1, isCurrent: true, policy: { cadenceMinutes: 15 }, actor: createSystemAuditActor("system-youtube-discovery") }, testDb);
+    await testDb.insert(knowledgeCards).values({ id: "gap-card", lifecycleState: "pending_operator", knowledgeState: "community_observation", verificationRequirement: "operator_required", type: "route_note", title: "Private title must not leave Knowledge", locationName: "Da Lat", summary: "Private source-derived summary must not leave Knowledge", aiPromptVersion: "test", createdByUserId: "operator" });
+    await testDb.insert(knowledgeRecommendations).values({ knowledgeCardId: "gap-card", contentVersion: 1, evidenceSetRevision: 1, status: "open", workType: "missing_context", priority: 70 });
+    const signals = await createKnowledgeDiscoveryQuerySignalPort(testDb).readSignals();
+    expect(signals).toEqual({ status: "available", signals: [{ reason: "coverage_gap", geography: "Da Lat", taxonomy: "route note", priority: 70 }] });
+    const first = await claimYoutubeDiscoveryPlanning("discovery-a", testDb);
+    expect(await refreshYoutubeDiscoverySystemProposals(first!, [signals], testDb)).toBe("completed");
+    await testDb.update(youtubeDiscoveryPlanningLeases).set({ nextRunAt: new Date(0) }).where(eq(youtubeDiscoveryPlanningLeases.id, "youtube-discovery-planning"));
+    const second = await claimYoutubeDiscoveryPlanning("discovery-b", testDb);
+    expect(await refreshYoutubeDiscoverySystemProposals(second!, [signals], testDb)).toBe("completed");
+    await expect(testDb.select({ queryText: youtubeDiscoveryQueryProposals.queryText, targetDigest: youtubeDiscoveryQueryProposals.targetDigest, safeSignalSummary: youtubeDiscoveryQueryProposals.safeSignalSummary }).from(youtubeDiscoveryQueryProposals)).resolves.toEqual([{ queryText: "Da Lat route note", targetDigest: expect.stringMatching(/^[a-f0-9]{64}$/), safeSignalSummary: "coverage_gap" }]);
   });
 
   test("re-projects a system proposal at the first future boundary when cadence changes", async () => {

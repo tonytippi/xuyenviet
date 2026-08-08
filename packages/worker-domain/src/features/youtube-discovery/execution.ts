@@ -51,11 +51,12 @@ export function setYoutubeDiscoveryExecutionStageForTest(stage: (() => Promise<D
 
 async function readPlanningPort(port: KnowledgeDiscoveryQuerySignalPort | AiAskDiscoveryQuerySignalPort): Promise<DiscoveryQuerySignalPortResult> {
   let timeout: ReturnType<typeof setTimeout> | undefined;
+  const controller = new AbortController();
   try {
     // A finite poll must not be held by an owner port that never settles.
     return await Promise.race([
-      Promise.resolve().then(() => port.readSignals()).catch(() => ({ status: "unavailable", code: "source_unavailable" } as const)),
-      new Promise<DiscoveryQuerySignalPortResult>((resolve) => { timeout = setTimeout(() => resolve({ status: "unavailable", code: "source_timeout" }), planningPortTimeoutMs); }),
+      Promise.resolve().then(() => port.readSignals(controller.signal)).catch(() => ({ status: "unavailable", code: "source_unavailable" } as const)),
+      new Promise<DiscoveryQuerySignalPortResult>((resolve) => { timeout = setTimeout(() => { controller.abort(); resolve({ status: "unavailable", code: "source_timeout" }); }, planningPortTimeoutMs); }),
     ]);
   } finally { if (timeout) clearTimeout(timeout); }
 }
@@ -64,6 +65,6 @@ async function readPlanningPort(port: KnowledgeDiscoveryQuerySignalPort | AiAskD
 export function bindYoutubeDiscoveryPlanningPorts(knowledge: KnowledgeDiscoveryQuerySignalPort, aiAsk: AiAskDiscoveryQuerySignalPort) { knowledgePlanningPort = knowledge; aiAskPlanningPort = aiAsk; }
 
 /** @internal Test-only safe-port seam. */
-export function setYoutubeDiscoveryPlanningPortsForTest(knowledge: (() => Promise<DiscoveryQuerySignalPortResult>) | undefined, aiAsk: (() => Promise<DiscoveryQuerySignalPortResult>) | undefined) {
+export function setYoutubeDiscoveryPlanningPortsForTest(knowledge: ((signal?: AbortSignal) => Promise<DiscoveryQuerySignalPortResult>) | undefined, aiAsk: ((signal?: AbortSignal) => Promise<DiscoveryQuerySignalPortResult>) | undefined) {
   bindYoutubeDiscoveryPlanningPorts(knowledge ? { readSignals: knowledge } : createUnavailableKnowledgeDiscoveryQuerySignalPort(), aiAsk ? { readSignals: aiAsk } : createUnavailableAiAskDiscoveryQuerySignalPort());
 }
