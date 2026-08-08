@@ -1,6 +1,6 @@
 ---
 story_id: 18-3
-status: ready-for-dev
+status: in-progress
 created: 2026-08-07
 epic: 18
 ---
@@ -153,6 +153,7 @@ gpu4ai/gpt-5.6-terra
 - Independent BMad validation passed after resolving the planning lease lifecycle, due-query scheduling, safe-port contract, and protected API command boundary. No implementation, test execution, migration, or application-code change was performed.
 - 2026-08-07: Unattended independent review of `bbc752d79fb48927571beb4fe9f9ce0019b84db9..10c352b22c79bd10eb951f27eb6740ed57297b4d` ran Blind Hunter, Edge Case Hunter, and Acceptance Auditor synchronously. Actionable findings: migration `0047` rewrites legacy system `operator_request` rows to operator origin; the concrete Knowledge port queries Knowledge tables directly and treats healthy empty results as unavailable; system target identity differs between the generic create API and planner; new planning tables are missing from the exported schema aggregate; system-upsert audits can report an unpreserved enabled state; duplicate scheduling relies on driver error text; required bounded ports do not provide all required signal categories; and required API/concurrency/scheduling integration coverage is incomplete. Status set to in-progress; no implementation changes made.
 - 2026-08-07: Repaired the supplied independent-review findings only. Legacy system origins remain immutable; Discovery adapts owner-published bounded ports, including healthy empty signals; direct system creation derives the planner tuple identity; planning tables are exported; refresh audits retain persisted enablement; due scheduling uses conflict-safe insertion; and focused command/lease/fence/scheduling coverage was added. Status returned to ready-for-dev pending follow-up review.
+- 2026-08-08: Second unattended independent review of `bbc752d79fb48927571beb4fe9f9ce0019b84db9..eb5bd887dd496fc230eb4825abd362e3e5949ae7` ran the adversarial and edge-case layers synchronously; the required Acceptance Auditor failed to provide an auditable AC/scope result and is recorded as a failed layer. Actionable findings: production Worker composition permanently binds both upstream planning ports as unavailable, existing system-proposal refreshes can retain a next due timestamp projected using a superseded cadence, and the safe admin read parser rejects enabled proposals with no next run after global re-enable. Decision needed: migration 0047 permits legacy `operator_request` as a system safe-signal summary to preserve existing immutable system rows, which conflicts with the new four-reason system input contract. Status set to in-progress; no application code or tests changed.
 
 ### File List
 

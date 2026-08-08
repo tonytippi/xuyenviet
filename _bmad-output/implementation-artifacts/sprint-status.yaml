@@ -1,5 +1,5 @@
 # generated: 2026-07-25
-# last_updated: 2026-08-07 (Story 18.3 independent review found actionable implementation and coverage gaps; in progress.)
+# last_updated: 2026-08-08 (Story 18.3 second independent review found actionable implementation defects, a policy decision, and an Acceptance Auditor layer failure; in progress.)
 # project: xuyenviet
 # project_key: NOKEY
 # tracking_system: file-system
@@ -33,7 +33,7 @@
 #   - done: Completed
 
 generated: 2026-07-25
-last_updated: 2026-08-07 (Story 18.3 independent review found actionable implementation and coverage gaps; in progress.)
+last_updated: 2026-08-08 (Story 18.3 second independent review found actionable implementation defects, a policy decision, and an Acceptance Auditor layer failure; in progress.)
 project: xuyenviet
 project_key: NOKEY
 tracking_system: file-system
@@ -412,7 +412,8 @@ development_status:
   18-2-execute-fenced-scheduled-discovery-runs: done
   # 2026-08-07: Unattended independent review of bbc752d79fb48927571beb4fe9f9ce0019b84db9..10c352b22c79bd10eb951f27eb6740ed57297b4d ran Blind Hunter, Edge Case Hunter, and Acceptance Auditor synchronously. Actionable findings: legacy system-origin corruption in migration 0047; direct Knowledge-table access and empty-source misclassification in the concrete port; inconsistent system target identity; missing planning tables in exported schema; inaccurate preserved-enabled audit; driver-text duplicate scheduling recovery; incomplete required port categories; and incomplete protected-command, lease/fence, and scheduling integration evidence. No implementation changes were made during review.
   # 2026-08-07: Repaired only the independent-review findings: immutable legacy system origin, aggregate-owned safe port adapters and empty availability, shared tuple identity, schema export, preserved-enabled audit, conflict-safe due admission, and focused command/lease/fence/scheduling coverage. Status restored to ready-for-dev pending follow-up review.
-  18-3-manage-system-and-operator-query-proposals: ready-for-dev
+  # 2026-08-08: Second unattended independent review of bbc752d79fb48927571beb4fe9f9ce0019b84db9..eb5bd887dd496fc230eb4825abd362e3e5949ae7 ran adversarial and edge-case layers synchronously; the Acceptance Auditor failed without an auditable AC/scope result. Actionable patches: Worker composition binds both owner signal ports permanently unavailable; cadence refresh retains a stale next_due_at projection; safe admin list parsing rejects globally re-enabled enabled rows until scheduling projects a next run. Decision needed: migration 0047's legacy system operator_request safe-signal allowance conflicts with the strict four-reason system contract. No application code or tests changed.
+  18-3-manage-system-and-operator-query-proposals: in-progress
   18-4-discover-canonical-youtube-candidates-safely: backlog
   18-5-enrich-candidates-with-safe-derived-signals-and-retention: backlog
   epic-18-retrospective: optional
