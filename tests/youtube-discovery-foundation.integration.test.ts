@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, test } from "vitest";
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import type { RequestPrincipal } from "@xuyenviet/contracts";
 
 import { auditEvents, claimYoutubeDiscoveryPlanning, createKnowledgeDiscoveryQuerySignalPort, createPostgresAdminYoutubeDiscoveryPort, createSystemAuditActor, createUserAuditActor, createYoutubeDiscoveryPolicyVersion, createYoutubeDiscoveryQueryProposal, createYoutubeDiscoveryRun, knowledgeCards, knowledgeRecommendations, refreshYoutubeDiscoverySystemProposals, scheduleYoutubeDiscoveryDueRuns, youtubeDiscoveryPlanningLeases, youtubeDiscoveryPolicyVersions, youtubeDiscoveryQueryProposals, youtubeDiscoveryRuns } from "@xuyenviet/database";
@@ -200,6 +200,7 @@ describe.sequential("YouTube Discovery foundation persistence", () => {
       safeSignalSummary: "coverage_gap",
     }]);
     await expect(testDb.select({ id: youtubeDiscoveryQueryProposals.id }).from(youtubeDiscoveryQueryProposals)).resolves.toEqual([{ id: system!.id }]);
+    await expect(testDb.select({ actorUserId: auditEvents.actorUserId, targetId: auditEvents.targetId, afterSummary: auditEvents.afterSummary }).from(auditEvents).where(and(eq(auditEvents.targetType, "youtube_discovery_query_proposal"), eq(auditEvents.targetId, system!.id)))).resolves.toContainEqual({ actorUserId: "operator", targetId: system!.id, afterSummary: JSON.stringify({ action: "edit_rejected", reason: "system_origin_immutable" }) });
   });
 
   test("does not backfill an enabled unanchored legacy proposal after policy re-enable", async () => {

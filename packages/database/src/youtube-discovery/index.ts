@@ -74,17 +74,21 @@ export async function claimYoutubeDiscoveryPlanning(workerId: string, database: 
   return database.transaction(async (transaction) => {
     // Test/database resets can remove the singleton; its identity remains fixed.
     await transaction.execute(sql`insert into youtube_discovery_planning_leases (id, next_run_at) values ('youtube-discovery-planning', clock_timestamp()) on conflict (id) do nothing`);
-    await transaction.execute(sql`update youtube_discovery_planning_leases set state = 'queued', claimed_by = null, claimed_at = null, lease_expires_at = null, fencing_token = null where id = 'youtube-discovery-planning' and state = 'running' and lease_expires_at <= clock_timestamp()`);
+    const recovered = await transaction.execute(sql`update youtube_discovery_planning_leases set state = 'queued', claimed_by = null, claimed_at = null, lease_expires_at = null, fencing_token = null where id = 'youtube-discovery-planning' and state = 'running' and lease_expires_at <= clock_timestamp() returning id`) as Array<{ id: string }>;
+    if (recovered[0]) await recordPlanningAudit(transaction, "recover_expired", "lease_expired");
     const rows = await transaction.execute(sql`select id, state from youtube_discovery_planning_leases where id = 'youtube-discovery-planning' and (state = 'queued' and next_run_at <= clock_timestamp() or state = 'cancelled') for update skip locked`) as Array<{ id: string; state: "queued" | "cancelled" }>;
     if (!rows[0]) return null;
     const [policy] = await transaction.select({ id: youtubeDiscoveryPolicyVersions.id, enabled: youtubeDiscoveryPolicyVersions.enabled, cadenceMinutes: youtubeDiscoveryPolicyVersions.cadenceMinutes }).from(youtubeDiscoveryPolicyVersions).where(eq(youtubeDiscoveryPolicyVersions.isCurrent, true)).limit(1).for("update");
     if (!policy?.enabled) {
-      await transaction.update(youtubeDiscoveryPlanningLeases).set({ state: "cancelled", policyVersionId: policy?.id ?? null, nextRunAt: policy ? nextBoundarySql(sql`clock_timestamp()`, sql`clock_timestamp()`, policy.cadenceMinutes) : sql`clock_timestamp() + interval '15 minutes'`, terminalAt: sql`clock_timestamp()`, outcome: "cancelled", claimedBy: null, claimedAt: null, leaseExpiresAt: null, fencingToken: null, createdOrRefreshedCount: 0, unavailableCodes: [] }).where(eq(youtubeDiscoveryPlanningLeases.id, "youtube-discovery-planning"));
+      const [cancelled] = await transaction.update(youtubeDiscoveryPlanningLeases).set({ state: "cancelled", policyVersionId: policy?.id ?? null, nextRunAt: policy ? nextBoundarySql(sql`clock_timestamp()`, sql`clock_timestamp()`, policy.cadenceMinutes) : sql`clock_timestamp() + interval '15 minutes'`, terminalAt: sql`clock_timestamp()`, outcome: "cancelled", claimedBy: null, claimedAt: null, leaseExpiresAt: null, fencingToken: null, createdOrRefreshedCount: 0, unavailableCodes: [] }).where(and(eq(youtubeDiscoveryPlanningLeases.id, "youtube-discovery-planning"), sql`${youtubeDiscoveryPlanningLeases.state} <> 'cancelled'`)).returning({ id: youtubeDiscoveryPlanningLeases.id });
+      if (cancelled) await recordPlanningAudit(transaction, "cancel", "policy_disabled", policy?.id);
       return null;
     }
     if (rows[0].state === "cancelled") await transaction.execute(sql`update youtube_discovery_planning_leases set state = 'queued', next_run_at = ${nextBoundarySql(sql`clock_timestamp()`, sql`clock_timestamp()`, policy.cadenceMinutes)}, terminal_at = null, outcome = null, created_or_refreshed_count = 0, unavailable_codes = '{}' where id = 'youtube-discovery-planning' and state = 'cancelled'`);
     const [lease] = await transaction.update(youtubeDiscoveryPlanningLeases).set({ state: "running", policyVersionId: policy.id, claimedBy: workerId, claimedAt: sql`clock_timestamp()`, leaseExpiresAt: sql`clock_timestamp() + interval '5 minutes'`, fencingToken, terminalAt: null, outcome: null, createdOrRefreshedCount: 0, unavailableCodes: [] }).where(and(eq(youtubeDiscoveryPlanningLeases.id, "youtube-discovery-planning"), sql`${youtubeDiscoveryPlanningLeases.state} in ('queued', 'cancelled') and ${youtubeDiscoveryPlanningLeases.nextRunAt} <= clock_timestamp()`)).returning();
-    return lease ? { id: "youtube-discovery-planning", policyVersionId: policy.id, fencingToken } : null;
+    if (!lease) return null;
+    await recordPlanningAudit(transaction, "claim", "due", policy.id);
+    return { id: "youtube-discovery-planning", policyVersionId: policy.id, fencingToken };
   });
 }
 
@@ -248,6 +252,10 @@ function activeClaim(claim: YoutubeDiscoveryRunClaim) {
 
 async function recordTerminalAudit(database: AuditEventWriter, runId: string, outcome: "completed" | "failed" | "cancelled", attemptCount: number, safeErrorCode: YoutubeDiscoveryRunSafeErrorCode | null, policyVersionId: string) {
   await recordAuditEvent({ actor: createSystemAuditActor("system-youtube-discovery"), operation: "update", targetType: "youtube_discovery_run_terminal", targetId: runId, afterSummary: JSON.stringify({ policyVersionId, outcome, attemptCount, ...(safeErrorCode ? { safeErrorCode } : {}) }) }, database);
+}
+
+async function recordPlanningAudit(database: AuditEventWriter, action: "claim" | "recover_expired" | "cancel", reason: "due" | "lease_expired" | "policy_disabled", policyVersionId?: string) {
+  await recordAuditEvent({ actor: createSystemAuditActor("system-youtube-discovery"), operation: "update", targetType: "youtube_discovery_planning", targetId: "youtube-discovery-planning", afterSummary: JSON.stringify({ action, reason, ...(policyVersionId ? { policyVersionId } : {}) }) }, database);
 }
 
 function assertDiscoveryPolicyActor(actor: AuditActor) {

@@ -95,6 +95,49 @@ describe.sequential("YouTube Discovery run execution", () => {
     expect([left.claim, right.claim].filter(Boolean)).toHaveLength(1);
   });
 
+  test("allows one concurrent planning claim and audits the winning claim", async () => {
+    const policy = await createYoutubeDiscoveryPolicyVersion({ version: 1, isCurrent: true, actor: createSystemAuditActor("system-youtube-discovery") }, testDb);
+    const [left, right] = await Promise.all([
+      claimYoutubeDiscoveryPlanning("discovery-a", firstWorker),
+      claimYoutubeDiscoveryPlanning("discovery-b", secondWorker),
+    ]);
+    expect([left, right].filter(Boolean)).toHaveLength(1);
+    await expect(testDb.select({ actorSystem: auditEvents.actorSystem, afterSummary: auditEvents.afterSummary }).from(auditEvents).where(eq(auditEvents.targetType, "youtube_discovery_planning"))).resolves.toEqual([{ actorSystem: "system-youtube-discovery", afterSummary: JSON.stringify({ action: "claim", reason: "due", policyVersionId: policy.id }) }]);
+  });
+
+  test("recovers an expired planning lease and records exactly one recovery audit", async () => {
+    const policy = await createYoutubeDiscoveryPolicyVersion({ version: 1, isCurrent: true, actor: createSystemAuditActor("system-youtube-discovery") }, testDb);
+    const stale = await claimYoutubeDiscoveryPlanning("discovery-a", testDb);
+    await testDb.update(youtubeDiscoveryPlanningLeases).set({ claimedAt: new Date(0), leaseExpiresAt: new Date(1) }).where(eq(youtubeDiscoveryPlanningLeases.id, "youtube-discovery-planning"));
+    expect(await claimYoutubeDiscoveryPlanning("discovery-b", testDb)).toMatchObject({ policyVersionId: policy.id });
+    await expect(testDb.select({ actorSystem: auditEvents.actorSystem, afterSummary: auditEvents.afterSummary }).from(auditEvents).where(eq(auditEvents.targetType, "youtube_discovery_planning"))).resolves.toEqual([
+      { actorSystem: "system-youtube-discovery", afterSummary: JSON.stringify({ action: "claim", reason: "due", policyVersionId: policy.id }) },
+      { actorSystem: "system-youtube-discovery", afterSummary: JSON.stringify({ action: "recover_expired", reason: "lease_expired" }) },
+      { actorSystem: "system-youtube-discovery", afterSummary: JSON.stringify({ action: "claim", reason: "due", policyVersionId: policy.id }) },
+    ]);
+    expect(stale).not.toBeNull();
+  });
+
+  test("cancels disabled planning with one safe system audit", async () => {
+    await createYoutubeDiscoveryPolicyVersion({ version: 1, isCurrent: true, actor: createSystemAuditActor("system-youtube-discovery") }, testDb);
+    const disabled = await createYoutubeDiscoveryPolicyVersion({ version: 2, isCurrent: true, policy: { enabled: false }, actor: createSystemAuditActor("system-youtube-discovery") }, testDb);
+    expect(await claimYoutubeDiscoveryPlanning("discovery-a", testDb)).toBeNull();
+    expect(await claimYoutubeDiscoveryPlanning("discovery-b", testDb)).toBeNull();
+    await expect(testDb.select({ actorSystem: auditEvents.actorSystem, afterSummary: auditEvents.afterSummary }).from(auditEvents).where(eq(auditEvents.targetType, "youtube_discovery_planning"))).resolves.toEqual([{ actorSystem: "system-youtube-discovery", afterSummary: JSON.stringify({ action: "cancel", reason: "policy_disabled", policyVersionId: disabled.id }) }]);
+  });
+
+  test("creates one proposal when two physical connections refresh the same planning claim", async () => {
+    await createYoutubeDiscoveryPolicyVersion({ version: 1, isCurrent: true, actor: createSystemAuditActor("system-youtube-discovery") }, testDb);
+    const claim = await claimYoutubeDiscoveryPlanning("discovery-a", testDb);
+    const result = { status: "available" as const, signals: [{ reason: "coverage_gap" as const, geography: "Da Lat", taxonomy: "route", priority: 70 }] };
+    const outcomes = await Promise.all([
+      refreshYoutubeDiscoverySystemProposals(claim!, [result], firstWorker),
+      refreshYoutubeDiscoverySystemProposals(claim!, [result], secondWorker),
+    ]);
+    expect(outcomes.filter((outcome) => outcome === "completed")).toHaveLength(1);
+    await expect(testDb.select().from(youtubeDiscoveryQueryProposals)).resolves.toHaveLength(1);
+  });
+
   test("recovers an expired lease and fences its stale claimant", async () => {
     const policy = await createYoutubeDiscoveryPolicyVersion({ version: 1, isCurrent: true, actor: createSystemAuditActor("system-youtube-discovery") }, testDb);
     const run = await createYoutubeDiscoveryRun({ policyVersionId: policy.id }, testDb);
