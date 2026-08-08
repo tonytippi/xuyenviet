@@ -32,7 +32,7 @@ export function createPostgresAdminYoutubeDiscoveryPort(): AdminYoutubeDiscovery
     async edit(principal, id, queryText) {
       return mutate(principal, id, { queryText }, validText(queryText), "operator");
     },
-    async reprioritize(principal, id, priority) { return mutate(principal, id, { priority }, validPriority(priority)); },
+    async reprioritize(principal, id, priority) { return mutate(principal, id, { priority, operatorPriorityOverride: sql`case when ${youtubeDiscoveryQueryProposals.origin} = 'system' then ${priority} else ${youtubeDiscoveryQueryProposals.operatorPriorityOverride} end` }, validPriority(priority)); },
     async pause(principal, id) { return mutate(principal, id, { enabled: false, nextDueAt: null }, true); },
     async resume(principal, id) { return mutate(principal, id, { enabled: true, scheduleAnchorAt: sql`coalesce(${youtubeDiscoveryQueryProposals.scheduleAnchorAt}, clock_timestamp())`, nextDueAt: sql`case when (select enabled from youtube_discovery_policy_versions where is_current = true) then coalesce(${youtubeDiscoveryQueryProposals.scheduleAnchorAt}, clock_timestamp()) + (floor(extract(epoch from (clock_timestamp() - coalesce(${youtubeDiscoveryQueryProposals.scheduleAnchorAt}, clock_timestamp()))) / 60 / ${youtubeDiscoveryQueryProposals.cadenceMinutes})::integer + 1) * ${youtubeDiscoveryQueryProposals.cadenceMinutes} * interval '1 minute' else null end` }, true); },
   };
