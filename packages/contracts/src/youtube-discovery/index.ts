@@ -24,12 +24,14 @@ export type YoutubeDiscoveryRunAuditSummary = Readonly<{
   state: "queued" | "running" | "retrying" | "completed" | "failed" | "cancelled";
 }>;
 
-export function parseAdminYoutubeDiscoveryCommand(value: unknown, kind: "create" | "edit" | "priority"): { queryText?: string; priority?: number; cadenceMinutes?: number } | null {
+export function parseAdminYoutubeDiscoveryCommand(value: unknown, kind: "create" | "edit" | "priority" | "empty"): { queryText?: string; priority?: number; cadenceMinutes?: number } | null {
+  if (kind === "empty" && value === undefined) return {};
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const input = value as Record<string, unknown>;
   const text = typeof input.queryText === "string" && input.queryText.trim() === input.queryText && /^[\p{L}\p{N} '-]{1,240}$/u.test(input.queryText);
   const priority = Number.isSafeInteger(input.priority) && (input.priority as number) >= 1 && (input.priority as number) <= 100;
   const cadence = Number.isSafeInteger(input.cadenceMinutes) && (input.cadenceMinutes as number) >= 15 && (input.cadenceMinutes as number) <= 10_080;
+  if (kind === "empty") return Object.keys(input).length === 0 ? {} : null;
   if (kind === "create") return Object.keys(input).length === 3 && text && priority && cadence ? { queryText: input.queryText as string, priority: input.priority as number, cadenceMinutes: input.cadenceMinutes as number } : null;
   if (kind === "edit") return Object.keys(input).length === 1 && text ? { queryText: input.queryText as string } : null;
   return Object.keys(input).length === 1 && priority ? { priority: input.priority as number } : null;

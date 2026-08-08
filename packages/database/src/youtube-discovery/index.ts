@@ -35,8 +35,10 @@ export async function createYoutubeDiscoveryQueryProposal(input: CreateYoutubeDi
   assertSafeDiscoveryQueryProposal(input);
   return database.transaction(async (transaction) => {
     const { actor, ...proposal } = input;
-    const systemFields = input.origin === "system" ? systemProposalFields(input.systemSignal!) : {};
-    const [created] = await transaction.insert(youtubeDiscoveryQueryProposals).values({ ...proposal, ...systemFields, enabled: input.enabled ?? true }).returning();
+    const systemFields = input.origin === "system" ? systemProposalFields(input.systemSignal!) : null;
+    const [policy] = systemFields ? await transaction.select({ cadenceMinutes: youtubeDiscoveryPolicyVersions.cadenceMinutes }).from(youtubeDiscoveryPolicyVersions).where(eq(youtubeDiscoveryPolicyVersions.isCurrent, true)).limit(1).for("update") : [];
+    if (systemFields && !policy) throw new Error("YouTube Discovery system query proposals require the current policy version.");
+    const [created] = await transaction.insert(youtubeDiscoveryQueryProposals).values(systemFields ? { ...proposal, ...systemFields, priority: systemFields.priority, cadenceMinutes: policy!.cadenceMinutes, enabled: input.enabled ?? true } : { ...proposal, enabled: input.enabled ?? true }).returning();
     if (!created) throw new Error("YouTube Discovery query proposal creation failed.");
     await recordAuditEvent({ actor, operation: "create", targetType: "youtube_discovery_query_proposal", targetId: created.id, afterSummary: JSON.stringify(queryProposalAuditSummary(created)) }, transaction);
     return created;
@@ -131,7 +133,7 @@ export async function scheduleYoutubeDiscoveryDueRuns(database: DiscoveryWriter 
       // A conflict-safe duplicate insert leaves the schedule in place for the winner.
       if (!run) continue;
       const dueAt = new Date(proposal.next_due_at);
-      const [advanced] = await transaction.update(youtubeDiscoveryQueryProposals).set({ scheduleAnchorAt: dueAt, nextDueAt: sql`${youtubeDiscoveryQueryProposals.nextDueAt} + ${youtubeDiscoveryQueryProposals.cadenceMinutes} * interval '1 minute'` }).where(and(eq(youtubeDiscoveryQueryProposals.id, proposal.id), eq(youtubeDiscoveryQueryProposals.enabled, true))).returning({ id: youtubeDiscoveryQueryProposals.id });
+      const [advanced] = await transaction.update(youtubeDiscoveryQueryProposals).set({ scheduleAnchorAt: dueAt, nextDueAt: nextBoundarySql(sql`${youtubeDiscoveryQueryProposals.nextDueAt}`, sql`clock_timestamp()`, sql`${youtubeDiscoveryQueryProposals.cadenceMinutes}`) }).where(and(eq(youtubeDiscoveryQueryProposals.id, proposal.id), eq(youtubeDiscoveryQueryProposals.enabled, true))).returning({ id: youtubeDiscoveryQueryProposals.id });
       if (!advanced) throw new Error("YouTube Discovery schedule advancement was contended.");
       admitted += 1;
     }
@@ -271,7 +273,7 @@ function assertSafeDiscoveryQueryProposal(input: CreateYoutubeDiscoveryQueryProp
 function systemProposalFields(signal: SafeDiscoveryQuerySignal) {
   const [derived] = deriveDiscoveryQueries([{ status: "available", signals: [signal] }]).queries;
   if (!derived) throw new Error("Invalid YouTube Discovery system query proposal.");
-  return { targetDigest: derived.targetDigest, safeSignalSummary: derived.reason, queryText: derived.queryText };
+  return { targetDigest: derived.targetDigest, safeSignalSummary: derived.reason, queryText: derived.queryText, priority: derived.priority };
 }
 
 function policyAuditSummary(policy: YoutubeDiscoveryPolicyAuditSummary): YoutubeDiscoveryPolicyAuditSummary {

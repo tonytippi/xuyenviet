@@ -60,4 +60,22 @@ describe("admin YouTube Discovery direct API", () => {
     expect(port.resume).toHaveBeenCalledWith(expect.objectContaining({ userId: "operator", email: "operator@example.com" }), "proposal-1");
     expect(query.origin).toBe("operator");
   });
+
+  test("rejects non-empty pause and resume bodies before port admission", async () => {
+    const operator = await browserSession("operator", "operator");
+    const headers = { Cookie: operator.cookie, Origin: "https://admin.xuyenviet.app", "x-xuyenviet-csrf": operator.csrf };
+    await request(app.getHttpServer()).post("/v1/admin/knowledge/youtube-discovery/proposal-1/pause").set(headers).send({ origin: "system" }).expect(400);
+    await request(app.getHttpServer()).post("/v1/admin/knowledge/youtube-discovery/proposal-1/resume").set(headers).send({ providerPayload: {} }).expect(400);
+    expect(port.pause).not.toHaveBeenCalled();
+    expect(port.resume).not.toHaveBeenCalled();
+  });
+
+  test("admits bodyless pause and resume commands", async () => {
+    const operator = await browserSession("operator", "operator");
+    const headers = { Cookie: operator.cookie, Origin: "https://admin.xuyenviet.app", "x-xuyenviet-csrf": operator.csrf };
+    await request(app.getHttpServer()).post("/v1/admin/knowledge/youtube-discovery/proposal-1/pause").set(headers).expect(201);
+    await request(app.getHttpServer()).post("/v1/admin/knowledge/youtube-discovery/proposal-1/resume").set(headers).expect(201);
+    expect(port.pause).toHaveBeenCalledOnce();
+    expect(port.resume).toHaveBeenCalledOnce();
+  });
 });
