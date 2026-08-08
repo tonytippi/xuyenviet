@@ -14,7 +14,7 @@ UPDATE "youtube_discovery_query_proposals" SET "origin" = 'operator', "enabled" 
 --> statement-breakpoint
 -- Remaining system proposals predate safe upstream tuples. Preserve their
 -- immutable system origin while assigning a stable legacy identity.
-UPDATE "youtube_discovery_query_proposals" SET "target_digest" = encode(digest("reason" || chr(31) || "query_text" || chr(31) || "id", 'sha256'), 'hex'), "safe_signal_summary" = "reason", "schedule_anchor_at" = clock_timestamp(), "next_due_at" = clock_timestamp() + "cadence_minutes" * interval '1 minute' WHERE "origin" = 'system';
+UPDATE "youtube_discovery_query_proposals" SET "target_digest" = encode(digest("reason" || chr(31) || "query_text" || chr(31) || "id", 'sha256'), 'hex'), "safe_signal_summary" = "reason", "schedule_anchor_at" = CASE WHEN "enabled" THEN clock_timestamp() ELSE NULL END, "next_due_at" = CASE WHEN "enabled" THEN clock_timestamp() + "cadence_minutes" * interval '1 minute' ELSE NULL END WHERE "origin" = 'system';
 --> statement-breakpoint
 UPDATE "youtube_discovery_query_proposals" SET "schedule_anchor_at" = CASE WHEN "enabled" THEN clock_timestamp() ELSE NULL END, "next_due_at" = CASE WHEN "enabled" THEN clock_timestamp() + "cadence_minutes" * interval '1 minute' ELSE NULL END WHERE "origin" = 'operator';
 --> statement-breakpoint
