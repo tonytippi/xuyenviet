@@ -1,6 +1,6 @@
 ---
 story_id: 18-4
-status: review
+status: done
 created: 2026-08-08
 epic: 18
 ---
@@ -74,6 +74,12 @@ so that I can review a deduplicated URL queue with query-specific discovery cont
   - [x] Add serial PostgreSQL integration coverage with local `resetTestDatabase()` setup. Prove many results from one query create many appearances; concurrent/later runs for one video create one candidate and retain all appearances/history; a stale or revoked claimant cannot append any candidate/appearance/history after provider return; and a terminal run retains its one terminal audit.
    - [x] Add ownership tests proving Discovery has no direct import/query of Knowledge tables and candidate/ranking rows contain no source link or prohibited raw/provider fields. Prove the Knowledge port returns only its closed safe shape; the identical durable compatibility key returns `already_compatible`, a changed compatibility key returns `eligible`, and `already_compatible`/`unavailable` create no reviewable candidate.
    - [x] Preserve Story 18.1 foundation, Story 18.2 lease/retry/terminal-audit, and Story 18.3 planning/scheduling/owner-port tests. Run focused `pnpm test:unit` and `pnpm test:integration` selections, then `pnpm lint`, `pnpm typecheck`, `pnpm build`, and `git diff --check`; record exact blockers rather than claiming unrun verification. Before enabling production polling, verify the Worker-only `YOUTUBE_DATA_API_KEY` is nonblank and restricted for the documented API, confirm quota/billing and safe provider-failure monitoring, apply migration `0049`, then deploy the Worker. Discovery readiness must fail safe for this capability when the key is absent; keep global Discovery disabled until this rollout validation is complete.
+
+### Review Findings
+
+- [x] [Review][Patch] Missing Worker credential readiness fence [packages/worker-domain/src/features/youtube-discovery/execution.ts:69] -- The Worker adapter validates the nonblank credential only for the Discovery adapter and injects it through the execution composition seam; Worker-domain no longer reads process environment.
+- [x] [Review][Patch] Bound untrusted provider results before persistence [packages/worker-domain/src/features/youtube-discovery/youtube-search.ts:17] -- Search parsing retains at most the fixed request limit of 25 results, keeping ordinals inside the database constraint; regression coverage verifies the bound.
+- [x] [Review][Patch] Preserve raw seed URL for canonicalization [scripts/youtube-seed-urls.ts:39] -- The seed loader passes the trimmed raw URL to the shared canonicalizer, and regression coverage rejects an explicit default port.
 
 ## Dev Notes
 
@@ -156,6 +162,7 @@ gpu4ai/gpt-5.6-terra
 - 2026-08-09: Independent review repairs completed in the active uncommitted 0049 migration. Execution now aborts provider search and Knowledge eligibility at a 240-second deadline, safely retries hangs as `stage_transient`, and clears its timer. Every normal `saveYoutubeEvidence` write persists the exact Knowledge-owned compatibility descriptor; 0049 backfills recoverable legacy metadata while preserving null compatibility for irrecoverable rows. Ranking history now has a composite appearance/candidate/run foreign key and a discovered-stage appearance check. Focused verification passed: 3 unit files/7 tests, 3 serial integration files/60 tests, `pnpm typecheck`, `pnpm lint` (0 errors, 43 pre-existing warnings), `pnpm build`, and `git diff --check`.
 - 2026-08-09: Final review repair: the production Knowledge eligibility binding now derives its exact descriptor from the same `GEMINI_YOUTUBE_MEDIA_RESOLUTION` parser/configuration as YouTube capture; Discovery still supplies only the video ID. The production-equivalent binding returns `already_compatible` for low, medium, and high captures. Migration 0049 now backfills only metadata positively identifiable as supported v4 aggregate capture metadata: exact aggregate method/version, schema `2`, and a supported resolution. Unknown or spoofed raw metadata remains null. Focused verification passed: 7 configured unit tests and 68 serial integration tests. Full verification is recorded in the companion spec.
 - 2026-08-09: Final narrow repair: moved the existing process/`.env.local`/`.env` lookup into the database runtime configuration boundary and re-exported it from `scripts/db-env.ts`, so production capture and the Worker-bound Knowledge eligibility port resolve `GEMINI_YOUTUBE_MEDIA_RESOLUTION` identically without a second parser. Real provider execution now explicitly cancels a claimed run lacking an enabled proposal before search or eligibility work; generic lower-level lease test seams retain their foundational behavior. Added process/env-file precedence and proposal-less Worker-run regressions. Focused verification passed: 8 unit tests and 69 serial integration tests.
+- 2026-08-09: BMad code review repaired all three findings: Discovery-only Worker startup now rejects a blank `YOUTUBE_DATA_API_KEY` and injects it into execution; provider parsing caps retained results at its fixed 25-result request limit; and seed canonicalization receives the raw URL so explicit default ports remain rejected. Verification passed: focused unit tests (4 files, 32 tests), serial execution integration tests (1 file, 26 tests), `pnpm typecheck`, `pnpm build`, and `git diff --check`. `pnpm lint` has 0 errors and 43 pre-existing warnings; the temporary seed-loader warning introduced by the repair was removed before final lint rerun.
 
 ### File List
 

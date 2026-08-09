@@ -59,7 +59,7 @@ describe.sequential("YouTube Discovery run execution", () => {
     const run = await createYoutubeDiscoveryRun({ policyVersionId: policy.id }, testDb);
     await completeDuePlanning();
     let searchCalls = 0;
-    bindYoutubeDiscoveryExecutionPorts({ check: async () => "eligible" }, async () => { searchCalls += 1; return []; });
+    bindYoutubeDiscoveryExecutionPorts({ check: async () => "eligible" }, async () => { searchCalls += 1; return []; }, "test-key");
 
     await expect(runYoutubeDiscoveryPoll("discovery-proposal-less")).resolves.toMatchObject({ resultCode: "success", durableId: run.id });
     expect(searchCalls).toBe(0);
@@ -298,7 +298,7 @@ describe.sequential("YouTube Discovery run execution", () => {
     const run = await createYoutubeDiscoveryRun({ policyVersionId: policy.id, queryProposalId: proposal.id }, testDb);
     await completeDuePlanning();
     let aborted = false;
-    bindYoutubeDiscoveryExecutionPorts({ check: async () => "eligible" }, async (_query, _key, _fetch, signal) => new Promise((resolve) => { signal?.addEventListener("abort", () => { aborted = true; resolve([]); }); }));
+    bindYoutubeDiscoveryExecutionPorts({ check: async () => "eligible" }, async (_query, _key, _fetch, signal) => new Promise((resolve) => { signal?.addEventListener("abort", () => { aborted = true; resolve([]); }); }), "test-key");
     setYoutubeDiscoveryExecutionTimeoutForTest(5);
     await expect(runYoutubeDiscoveryPoll("discovery-timeout")).resolves.toMatchObject({ resultCode: "retry", durableId: run.id });
     expect(aborted).toBe(true);
@@ -314,7 +314,7 @@ describe.sequential("YouTube Discovery run execution", () => {
     bindYoutubeDiscoveryExecutionPorts({ check: async () => "eligible" }, async () => {
       await createYoutubeDiscoveryPolicyVersion({ version: 2, isCurrent: true, policy: { enabled: false }, actor: createSystemAuditActor("system-youtube-discovery") }, testDb);
       return [{ videoId: "abcDEF12345", canonicalUrl: "https://www.youtube.com/watch?v=abcDEF12345", resultOrdinal: 0 }];
-    });
+    }, "test-key");
     await expect(runYoutubeDiscoveryPoll("discovery-cancel-after-provider")).resolves.toMatchObject({ resultCode: "success", durableId: run.id });
     await expect(testDb.select().from(youtubeDiscoveryCandidates)).resolves.toEqual([]);
     await expect(testDb.select().from(youtubeDiscoveryAppearances)).resolves.toEqual([]);

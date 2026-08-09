@@ -24,11 +24,13 @@ function testTelemetryFileSink(environment = process.env): OperationalTelemetryS
 
 async function main() {
   try {
+    const youtubeDataApiKey = process.env.YOUTUBE_DATA_API_KEY?.trim();
+    if (process.argv[2] === "discovery" && !youtubeDataApiKey) throw new Error("Worker YouTube Discovery configuration is invalid");
     bindYoutubeDiscoveryPlanningPorts(
       createKnowledgeDiscoveryQuerySignalPort(),
       createAiAskDiscoveryQuerySignalPort(),
     );
-    bindYoutubeDiscoveryExecutionPorts(createYoutubeCaptureEligibilityPort());
+    bindYoutubeDiscoveryExecutionPorts(createYoutubeCaptureEligibilityPort(), undefined, youtubeDataApiKey);
     await runWorkerAdapter(process.argv.slice(2), { telemetry: testTelemetryFileSink() ?? consoleOperationalTelemetrySink });
   } catch {
     console.error("Worker adapter failed");

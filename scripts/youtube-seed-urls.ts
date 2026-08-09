@@ -36,9 +36,8 @@ export function loadYoutubeSeedUrls(fileUrl = new URL("./youtube-urls.txt", impo
   const seenUrls = new Set<string>();
 
   return urls.map(({ label, line, url }) => {
-    let parsed: URL;
-    try { parsed = new URL(url); } catch { throw new Error(`Invalid YouTube seed URL on line ${line}.`); }
-    const video = canonicalizeYoutubeVideoUrl(parsed.toString());
+    try { new URL(url); } catch { throw new Error(`Invalid YouTube seed URL on line ${line}.`); }
+    const video = canonicalizeYoutubeVideoUrl(url);
     if (!video) {
       throw new Error(`YouTube seed URL on line ${line} must use an HTTPS YouTube video URL.`);
     }

@@ -17,4 +17,12 @@ describe("YouTube Discovery search adapter", () => {
     await expect(searchYoutubeVideos("Da Lat", "secret", async () => new Response("{}"))).rejects.toThrow("youtube_search_transient");
     await expect(searchYoutubeVideos("Da Lat", "", async () => new Response("{}"))).rejects.toThrow("youtube_search_configuration");
   });
+
+  test("bounds valid results to the fixed request limit", async () => {
+    const items = Array.from({ length: 26 }, (_, index) => ({ id: { kind: "youtube#video", videoId: `video${String(index).padStart(7, "0")}` } }));
+    const result = await searchYoutubeVideos("Da Lat", "secret", async () => new Response(JSON.stringify({ items })));
+
+    expect(result).toHaveLength(25);
+    expect(result.at(-1)).toMatchObject({ resultOrdinal: 24 });
+  });
 });

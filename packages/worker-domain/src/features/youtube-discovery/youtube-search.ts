@@ -2,11 +2,12 @@ import { canonicalizeYoutubeVideoUrl } from "@xuyenviet/domain";
 
 export type YoutubeSearchResult = Readonly<{ videoId: string; canonicalUrl: string; resultOrdinal: number }>;
 const endpoint = "https://www.googleapis.com/youtube/v3/search";
+const maxResults = 25;
 
 export async function searchYoutubeVideos(queryText: string, apiKey: string, fetchImpl: typeof fetch = fetch, signal?: AbortSignal): Promise<YoutubeSearchResult[]> {
   if (!apiKey.trim()) throw new Error("youtube_search_configuration");
   const url = new URL(endpoint);
-  url.search = new URLSearchParams({ part: "snippet", type: "video", maxResults: "25", regionCode: "VN", relevanceLanguage: "vi", safeSearch: "strict", q: queryText, key: apiKey }).toString();
+  url.search = new URLSearchParams({ part: "snippet", type: "video", maxResults: String(maxResults), regionCode: "VN", relevanceLanguage: "vi", safeSearch: "strict", q: queryText, key: apiKey }).toString();
   let response: Response;
   try { response = await fetchImpl(url, { signal }); } catch { throw new Error("youtube_search_transient"); }
   if (!response.ok) throw new Error("youtube_search_transient");
@@ -22,6 +23,7 @@ export async function searchYoutubeVideos(queryText: string, apiKey: string, fet
     if (!video || seen.has(video.videoId)) continue;
     seen.add(video.videoId);
     results.push({ ...video, resultOrdinal: results.length });
+    if (results.length === maxResults) break;
   }
   return results;
 }

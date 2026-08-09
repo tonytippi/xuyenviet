@@ -15,6 +15,7 @@ let knowledgePlanningPort: KnowledgeDiscoveryQuerySignalPort = createUnavailable
 let aiAskPlanningPort: AiAskDiscoveryQuerySignalPort = createUnavailableAiAskDiscoveryQuerySignalPort();
 let youtubeCaptureEligibilityPort: YoutubeCaptureEligibilityPort | undefined;
 let youtubeSearch: typeof searchYoutubeVideos = searchYoutubeVideos;
+let youtubeDataApiKey: string | undefined;
 
 export async function runYoutubeDiscoveryPoll(workerId: string): Promise<WorkerPollObservation> {
   const planning = await claimYoutubeDiscoveryPlanning(workerId);
@@ -66,7 +67,8 @@ export async function runYoutubeDiscoveryPoll(workerId: string): Promise<WorkerP
 }
 
 async function runYoutubeDiscoveryExecutionStage(queryText: string, signal: AbortSignal) {
-  const results = await youtubeSearch(queryText, process.env.YOUTUBE_DATA_API_KEY ?? "", undefined, signal);
+  if (!youtubeDataApiKey) throw new Error("youtube_search_configuration");
+  const results = await youtubeSearch(queryText, youtubeDataApiKey, undefined, signal);
   const eligible = [];
   for (const result of results) {
     const status = await youtubeCaptureEligibilityPort!.check(result.videoId, signal);
@@ -107,7 +109,11 @@ async function readPlanningPort(port: KnowledgeDiscoveryQuerySignalPort | AiAskD
 
 /** Public composition seam. Owners bind their explicit aggregate-only ports here. */
 export function bindYoutubeDiscoveryPlanningPorts(knowledge: KnowledgeDiscoveryQuerySignalPort, aiAsk: AiAskDiscoveryQuerySignalPort) { knowledgePlanningPort = knowledge; aiAskPlanningPort = aiAsk; }
-export function bindYoutubeDiscoveryExecutionPorts(eligibility: YoutubeCaptureEligibilityPort, search = searchYoutubeVideos) { youtubeCaptureEligibilityPort = eligibility; youtubeSearch = search; }
+export function bindYoutubeDiscoveryExecutionPorts(eligibility: YoutubeCaptureEligibilityPort, search: typeof searchYoutubeVideos = searchYoutubeVideos, apiKey?: string) {
+  youtubeCaptureEligibilityPort = eligibility;
+  youtubeSearch = search;
+  youtubeDataApiKey = apiKey?.trim() || undefined;
+}
 
 /** @internal Test-only deadline seam; production execution uses the lease-safe value. */
 export function setYoutubeDiscoveryExecutionTimeoutForTest(timeoutMs: number | undefined) { executionStageTimeoutOverrideMs = timeoutMs; }

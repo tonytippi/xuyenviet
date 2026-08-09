@@ -56,6 +56,7 @@ describe("YouTube seed URL loader", () => {
     ["", "must contain at least one URL"],
     ["not a URL\n", "Invalid YouTube seed URL on line 1"],
     ["http://youtube.com/watch?v=abcDEF12345\n", "must use an HTTPS YouTube video URL"],
+    ["https://youtu.be:443/abcDEF12345\n", "must use an HTTPS YouTube video URL"],
     ["https://example.com/watch?v=abcDEF12345\n", "must use an HTTPS YouTube video URL"],
     ["https://www.youtube.com/@xuyenviet\n", "must use an HTTPS YouTube video URL"],
     ["https://www.youtube.com/watchlater?v=abcDEF12345\n", "must use an HTTPS YouTube video URL"],

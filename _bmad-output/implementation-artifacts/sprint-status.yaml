@@ -33,7 +33,7 @@
 #   - done: Completed
 
 generated: 2026-07-25
-last_updated: 2026-08-09 (Story 18.4 implementation complete; verification review pending.)
+last_updated: 2026-08-09 (Story 18.4 review repairs verified; story complete.)
 project: xuyenviet
 project_key: NOKEY
 tracking_system: file-system
@@ -420,7 +420,7 @@ development_status:
   # 2026-08-08: User-approved Story 18.3 command boundary: operator-origin proposals alone support text edit. System-origin proposal text and derived target identity remain immutable to operator edit, while system proposals remain reprioritizable, pausable, and resumable. Existing focused integration evidence proves the rejected system edit, identity preservation, and all three allowed system controls. No application code changed; status remains ready-for-dev pending final independent audit.
   # 2026-08-08: Final independent closure audit is clean after bounded repairs for policy-first lock ordering, planning cadence projection, paused-run lifecycle fencing, scheduler batching, distinct-traveler AI Ask demand, and version-fenced deterministic Knowledge signals. Blind Hunter and Edge Case Hunter found no actionable findings; Acceptance Auditor confirmed AC1-AC5 and scope pass. Focused verification: 51 integration tests, 29 unit tests, full typecheck, and diff check passed. Implementation remains uncommitted by user choice; status synchronized to done.
   18-3-manage-system-and-operator-query-proposals: done
-   # 2026-08-09: Final independent-review repairs roll back candidate graph writes on a post-write guard loss, derive durable compatibility from actual media resolution, bound eligibility reads with PostgreSQL statement timeout, reject malformed raw percent escapes, safely backfill identifiable v4 aggregate captures, and enforce ranking run/policy provenance. Follow-up repair unifies process/.env.local/.env capture and Worker eligibility resolution, and proposal-less claims cancel before provider work. Final synchronous adversarial and edge-case closure reviews found no actionable findings. Focused Story verification: 18 unit tests, 69 serial PostgreSQL integration tests, typecheck, build, and diff check passed; lint has 0 errors and 43 pre-existing warnings. No commit requested. Apply migration 0049 and complete Worker credential/quota/failure-monitoring rollout validation before enabling Discovery.
+   # 2026-08-09: Final independent-review repairs roll back candidate graph writes on a post-write guard loss, derive durable compatibility from actual media resolution, bound eligibility reads with PostgreSQL statement timeout, reject malformed raw percent escapes, safely backfill identifiable v4 aggregate captures, and enforce ranking run/policy provenance. Follow-up repair unifies process/.env.local/.env capture and Worker eligibility resolution, and proposal-less claims cancel before provider work. This review repaired the remaining startup credential admission, provider result-bound, and raw seed URL canonicalization findings. Focused verification: 32 unit tests, 26 serial execution integration tests, typecheck, build, and diff check passed; lint has 0 errors and 43 pre-existing warnings. No commit requested. Apply migration 0049 and complete Worker credential/quota/failure-monitoring rollout validation before enabling Discovery.
    18-4-discover-canonical-youtube-candidates-safely: done
   18-5-enrich-candidates-with-safe-derived-signals-and-retention: backlog
   epic-18-retrospective: optional
