@@ -1,5 +1,5 @@
 # generated: 2026-07-25
-# last_updated: 2026-08-08 (Story 18.4 canonical YouTube candidate guide created; ready for development.)
+# last_updated: 2026-08-09 (Story 18.5 safe enrichment, derived signals, and retention guide created; ready for development.)
 # project: xuyenviet
 # project_key: NOKEY
 # tracking_system: file-system
@@ -33,7 +33,7 @@
 #   - done: Completed
 
 generated: 2026-07-25
-last_updated: 2026-08-09 (Story 18.4 review repairs verified; story complete.)
+last_updated: 2026-08-09 (Story 18.5 safe enrichment, derived signals, and retention guide created; ready for development.)
 project: xuyenviet
 project_key: NOKEY
 tracking_system: file-system
@@ -422,7 +422,7 @@ development_status:
   18-3-manage-system-and-operator-query-proposals: done
    # 2026-08-09: Final independent-review repairs roll back candidate graph writes on a post-write guard loss, derive durable compatibility from actual media resolution, bound eligibility reads with PostgreSQL statement timeout, reject malformed raw percent escapes, safely backfill identifiable v4 aggregate captures, and enforce ranking run/policy provenance. Follow-up repair unifies process/.env.local/.env capture and Worker eligibility resolution, and proposal-less claims cancel before provider work. This review repaired the remaining startup credential admission, provider result-bound, and raw seed URL canonicalization findings. Focused verification: 32 unit tests, 26 serial execution integration tests, typecheck, build, and diff check passed; lint has 0 errors and 43 pre-existing warnings. No commit requested. Apply migration 0049 and complete Worker credential/quota/failure-monitoring rollout validation before enabling Discovery.
    18-4-discover-canonical-youtube-candidates-safely: done
-  18-5-enrich-candidates-with-safe-derived-signals-and-retention: backlog
+  18-5-enrich-candidates-with-safe-derived-signals-and-retention: ready-for-dev
   epic-18-retrospective: optional
 
   epic-19: backlog
