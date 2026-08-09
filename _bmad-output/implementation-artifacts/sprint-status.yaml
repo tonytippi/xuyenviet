@@ -1,5 +1,5 @@
 # generated: 2026-07-25
-# last_updated: 2026-08-08 (Story 18.3 approved system/operator command boundary recorded; ready for development.)
+# last_updated: 2026-08-08 (Story 18.4 canonical YouTube candidate guide created; ready for development.)
 # project: xuyenviet
 # project_key: NOKEY
 # tracking_system: file-system
@@ -33,7 +33,7 @@
 #   - done: Completed
 
 generated: 2026-07-25
-last_updated: 2026-08-08 (Story 18.3 approved system/operator command boundary recorded; ready for development.)
+last_updated: 2026-08-08 (Story 18.4 canonical YouTube candidate guide created; ready for development.)
 project: xuyenviet
 project_key: NOKEY
 tracking_system: file-system
@@ -420,7 +420,7 @@ development_status:
   # 2026-08-08: User-approved Story 18.3 command boundary: operator-origin proposals alone support text edit. System-origin proposal text and derived target identity remain immutable to operator edit, while system proposals remain reprioritizable, pausable, and resumable. Existing focused integration evidence proves the rejected system edit, identity preservation, and all three allowed system controls. No application code changed; status remains ready-for-dev pending final independent audit.
   # 2026-08-08: Final independent closure audit is clean after bounded repairs for policy-first lock ordering, planning cadence projection, paused-run lifecycle fencing, scheduler batching, distinct-traveler AI Ask demand, and version-fenced deterministic Knowledge signals. Blind Hunter and Edge Case Hunter found no actionable findings; Acceptance Auditor confirmed AC1-AC5 and scope pass. Focused verification: 51 integration tests, 29 unit tests, full typecheck, and diff check passed. Implementation remains uncommitted by user choice; status synchronized to done.
   18-3-manage-system-and-operator-query-proposals: done
-  18-4-discover-canonical-youtube-candidates-safely: backlog
+  18-4-discover-canonical-youtube-candidates-safely: ready-for-dev
   18-5-enrich-candidates-with-safe-derived-signals-and-retention: backlog
   epic-18-retrospective: optional
 
