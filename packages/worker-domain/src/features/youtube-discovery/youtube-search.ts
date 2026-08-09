@@ -3,6 +3,7 @@ import { canonicalizeYoutubeVideoUrl } from "@xuyenviet/domain";
 export type YoutubeSearchResult = Readonly<{ videoId: string; canonicalUrl: string; resultOrdinal: number }>;
 const endpoint = "https://www.googleapis.com/youtube/v3/search";
 const maxResults = 25;
+const maxResponseBytes = 64 * 1024;
 
 export async function searchYoutubeVideos(queryText: string, apiKey: string, fetchImpl: typeof fetch = fetch, signal?: AbortSignal): Promise<YoutubeSearchResult[]> {
   if (!apiKey.trim()) throw new Error("youtube_search_configuration");
@@ -11,7 +12,7 @@ export async function searchYoutubeVideos(queryText: string, apiKey: string, fet
   let response: Response;
   try { response = await fetchImpl(url, { signal }); } catch { throw new Error("youtube_search_transient"); }
   if (!response.ok) throw new Error("youtube_search_transient");
-  const payload: unknown = await response.json().catch(() => { throw new Error("youtube_search_transient"); });
+  const payload = await readBoundedJson(response);
   if (!payload || typeof payload !== "object" || !Array.isArray((payload as { items?: unknown }).items)) throw new Error("youtube_search_transient");
   const seen = new Set<string>();
   const results: YoutubeSearchResult[] = [];
@@ -26,4 +27,26 @@ export async function searchYoutubeVideos(queryText: string, apiKey: string, fet
     if (results.length === maxResults) break;
   }
   return results;
+}
+
+async function readBoundedJson(response: Response): Promise<unknown> {
+  const contentLength = response.headers.get("content-length");
+  if (contentLength && (!/^\d+$/.test(contentLength) || Number(contentLength) > maxResponseBytes)) throw new Error("youtube_search_transient");
+  const reader = response.body?.getReader();
+  if (!reader) throw new Error("youtube_search_transient");
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > maxResponseBytes) throw new Error("youtube_search_transient");
+      chunks.push(value);
+    }
+  } catch { throw new Error("youtube_search_transient"); }
+  const bytes = new Uint8Array(size);
+  let offset = 0;
+  for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
+  try { return JSON.parse(new TextDecoder().decode(bytes)) as unknown; } catch { throw new Error("youtube_search_transient"); }
 }

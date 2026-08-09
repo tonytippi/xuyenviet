@@ -487,8 +487,17 @@ export const youtubeDiscoveryRuns = pgTable(
 
 export const youtubeDiscoveryCandidates = pgTable(
   "youtube_discovery_candidates",
-  { id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()), videoId: text("video_id").notNull(), canonicalUrl: text("canonical_url").notNull(), createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(), updatedAt: timestamp("updated_at", { mode: "date" }).defaultNow().notNull() },
-  (candidate) => [uniqueIndex("youtube_discovery_candidates_video_id_idx").on(candidate.videoId), check("youtube_discovery_candidates_video_id_check", sql`${candidate.videoId} ~ '^[A-Za-z0-9_-]{6,20}$'`), check("youtube_discovery_candidates_url_check", sql`${candidate.canonicalUrl} = 'https://www.youtube.com/watch?v=' || ${candidate.videoId}`)],
+  { id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()), videoId: text("video_id").notNull(), canonicalUrl: text("canonical_url").notNull(), title: text("title"), description: text("description"), channelId: text("channel_id"), channelName: text("channel_name"), publishedAt: timestamp("published_at", { mode: "date" }), durationSeconds: integer("duration_seconds"), categoryId: text("category_id"), tags: text("tags").array(), viewCount: integer("view_count"), likeCount: integer("like_count"), commentCount: integer("comment_count"), channelSubscriberCount: integer("channel_subscriber_count"), thumbnailUrl: text("thumbnail_url"), createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(), updatedAt: timestamp("updated_at", { mode: "date" }).defaultNow().notNull() },
+  (candidate) => [uniqueIndex("youtube_discovery_candidates_video_id_idx").on(candidate.videoId), check("youtube_discovery_candidates_video_id_check", sql`${candidate.videoId} ~ '^[A-Za-z0-9_-]{6,20}$'`), check("youtube_discovery_candidates_url_check", sql`${candidate.canonicalUrl} = 'https://www.youtube.com/watch?v=' || ${candidate.videoId}`), check("youtube_discovery_candidates_safe_text_check", sql`(${candidate.title} is null or (char_length(${candidate.title}) <= 200 and ${candidate.title} !~ '[\\n\\r\\x00-\\x1F]')) and (${candidate.description} is null or (char_length(${candidate.description}) <= 1000 and ${candidate.description} !~ '[\\x00-\\x08\\x0B\\x0C\\x0E-\\x1F]')) and (${candidate.channelName} is null or (char_length(${candidate.channelName}) <= 160 and ${candidate.channelName} !~ '[\\n\\r\\x00-\\x1F]'))`), check("youtube_discovery_candidates_metadata_check", sql`(${candidate.channelId} is null or ${candidate.channelId} ~ '^[A-Za-z0-9_-]{6,64}$') and (${candidate.categoryId} is null or ${candidate.categoryId} ~ '^[0-9]{1,8}$') and (${candidate.durationSeconds} is null or ${candidate.durationSeconds} between 0 and 86400) and (${candidate.viewCount} is null or ${candidate.viewCount} >= 0) and (${candidate.likeCount} is null or ${candidate.likeCount} >= 0) and (${candidate.commentCount} is null or ${candidate.commentCount} >= 0) and (${candidate.channelSubscriberCount} is null or ${candidate.channelSubscriberCount} >= 0) and (${candidate.thumbnailUrl} is null or (char_length(${candidate.thumbnailUrl}) <= 500 and ${candidate.thumbnailUrl} !~ '[\\x00-\\x1F\\x7F]' and ${candidate.thumbnailUrl} ~ '^https://(i\\.ytimg\\.com|img\\.youtube\\.com)/[^[:space:]]+$'))`), check("youtube_discovery_candidates_tags_check", sql`${candidate.tags} is null or (cardinality(${candidate.tags}) <= 20 and char_length(array_to_string(${candidate.tags}, '')) <= 1600 and array_to_string(${candidate.tags}, '') !~ '[\\n\\r\\x00-\\x1F]')`)],
+);
+
+export const youtubeDiscoveryCommentSignalValues = ["recent_discussion", "stale_or_changed_warning", "practical_question_demand", "creator_responsiveness", "commercial_risk", "contradictory_discussion"] as const;
+export type YoutubeDiscoveryCommentSignal = (typeof youtubeDiscoveryCommentSignalValues)[number];
+
+export const youtubeDiscoveryCommentSignals = pgTable(
+  "youtube_discovery_comment_signals",
+  { id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()), candidateId: text("candidate_id").notNull().references(() => youtubeDiscoveryCandidates.id, { onDelete: "restrict" }), runId: text("run_id").notNull().references(() => youtubeDiscoveryRuns.id, { onDelete: "restrict" }), policyVersionId: text("policy_version_id").notNull().references(() => youtubeDiscoveryPolicyVersions.id, { onDelete: "restrict" }), signal: text("signal").$type<YoutubeDiscoveryCommentSignal>().notNull(), count: integer("count").notNull(), score: integer("score").notNull(), derivedAt: timestamp("derived_at", { mode: "date" }).defaultNow().notNull(), expiresAt: timestamp("expires_at", { mode: "date" }).notNull() },
+  (signal) => [index("youtube_discovery_comment_signals_expiry_idx").on(signal.expiresAt), uniqueIndex("youtube_discovery_comment_signals_candidate_signal_idx").on(signal.candidateId, signal.signal), check("youtube_discovery_comment_signals_value_check", sql`${signal.signal} in ('recent_discussion', 'stale_or_changed_warning', 'practical_question_demand', 'creator_responsiveness', 'commercial_risk', 'contradictory_discussion') and ${signal.count} between 1 and 100 and ${signal.score} between 1 and 100 and ${signal.expiresAt} > ${signal.derivedAt}`)],
 );
 
 export const youtubeDiscoveryAppearances = pgTable(
@@ -2327,6 +2336,7 @@ export const schema = {
   youtubeDiscoveryPlanningOutcomes,
   youtubeDiscoveryRuns,
   youtubeDiscoveryCandidates,
+  youtubeDiscoveryCommentSignals,
   youtubeDiscoveryAppearances,
   youtubeDiscoveryRankingHistory,
   sources,

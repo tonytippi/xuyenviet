@@ -39,6 +39,7 @@ const unitTests = [
     "tests/youtube-discovery-owner-port-composition.test.ts",
     "tests/youtube-discovery-runtime-config.test.ts",
     "tests/youtube-discovery-search.test.ts",
+    "tests/youtube-discovery-enrichment.test.ts",
     "tests/youtube-video.test.ts",
     "tests/admin-youtube-discovery-contract.test.ts",
 ];

@@ -1,0 +1,19 @@
+ALTER TABLE "youtube_discovery_candidates" ADD COLUMN "title" text;--> statement-breakpoint
+ALTER TABLE "youtube_discovery_candidates" ADD COLUMN "description" text;--> statement-breakpoint
+ALTER TABLE "youtube_discovery_candidates" ADD COLUMN "channel_id" text;--> statement-breakpoint
+ALTER TABLE "youtube_discovery_candidates" ADD COLUMN "channel_name" text;--> statement-breakpoint
+ALTER TABLE "youtube_discovery_candidates" ADD COLUMN "published_at" timestamp;--> statement-breakpoint
+ALTER TABLE "youtube_discovery_candidates" ADD COLUMN "duration_seconds" integer;--> statement-breakpoint
+ALTER TABLE "youtube_discovery_candidates" ADD COLUMN "category_id" text;--> statement-breakpoint
+ALTER TABLE "youtube_discovery_candidates" ADD COLUMN "tags" text[];--> statement-breakpoint
+ALTER TABLE "youtube_discovery_candidates" ADD COLUMN "view_count" integer;--> statement-breakpoint
+ALTER TABLE "youtube_discovery_candidates" ADD COLUMN "like_count" integer;--> statement-breakpoint
+ALTER TABLE "youtube_discovery_candidates" ADD COLUMN "comment_count" integer;--> statement-breakpoint
+ALTER TABLE "youtube_discovery_candidates" ADD COLUMN "channel_subscriber_count" integer;--> statement-breakpoint
+ALTER TABLE "youtube_discovery_candidates" ADD COLUMN "thumbnail_url" text;--> statement-breakpoint
+ALTER TABLE "youtube_discovery_candidates" ADD CONSTRAINT "youtube_discovery_candidates_safe_text_check" CHECK (("title" IS NULL OR (char_length("title") <= 200 AND "title" !~ '[\n\r\x00-\x1F]')) AND ("description" IS NULL OR (char_length("description") <= 1000 AND "description" !~ '[\x00-\x08\x0B\x0C\x0E-\x1F]')) AND ("channel_name" IS NULL OR (char_length("channel_name") <= 160 AND "channel_name" !~ '[\n\r\x00-\x1F]')));--> statement-breakpoint
+ALTER TABLE "youtube_discovery_candidates" ADD CONSTRAINT "youtube_discovery_candidates_metadata_check" CHECK (("channel_id" IS NULL OR "channel_id" ~ '^[A-Za-z0-9_-]{6,64}$') AND ("category_id" IS NULL OR "category_id" ~ '^[0-9]{1,8}$') AND ("duration_seconds" IS NULL OR "duration_seconds" BETWEEN 0 AND 86400) AND ("view_count" IS NULL OR "view_count" >= 0) AND ("like_count" IS NULL OR "like_count" >= 0) AND ("comment_count" IS NULL OR "comment_count" >= 0) AND ("channel_subscriber_count" IS NULL OR "channel_subscriber_count" >= 0) AND ("thumbnail_url" IS NULL OR (char_length("thumbnail_url") <= 500 AND "thumbnail_url" ~ '^https://(i\.ytimg\.com|img\.youtube\.com)/[^[:space:]]+$')));--> statement-breakpoint
+ALTER TABLE "youtube_discovery_candidates" ADD CONSTRAINT "youtube_discovery_candidates_tags_check" CHECK ("tags" IS NULL OR (cardinality("tags") <= 20 AND char_length(array_to_string("tags", '')) <= 1600 AND array_to_string("tags", '') !~ '[\n\r\x00-\x1F]'));--> statement-breakpoint
+CREATE TABLE "youtube_discovery_comment_signals" ("id" text PRIMARY KEY NOT NULL, "candidate_id" text NOT NULL REFERENCES "youtube_discovery_candidates"("id") ON DELETE restrict, "run_id" text NOT NULL REFERENCES "youtube_discovery_runs"("id") ON DELETE restrict, "policy_version_id" text NOT NULL REFERENCES "youtube_discovery_policy_versions"("id") ON DELETE restrict, "signal" text NOT NULL, "count" integer NOT NULL, "score" integer NOT NULL, "derived_at" timestamp DEFAULT now() NOT NULL, "expires_at" timestamp NOT NULL, CONSTRAINT "youtube_discovery_comment_signals_value_check" CHECK ("signal" IN ('recent_discussion', 'stale_or_changed_warning', 'practical_question_demand', 'creator_responsiveness', 'commercial_risk', 'contradictory_discussion') AND "count" BETWEEN 1 AND 100 AND "score" BETWEEN 1 AND 100 AND "expires_at" > "derived_at"));--> statement-breakpoint
+CREATE UNIQUE INDEX "youtube_discovery_comment_signals_candidate_signal_idx" ON "youtube_discovery_comment_signals" USING btree ("candidate_id","signal");--> statement-breakpoint
+CREATE INDEX "youtube_discovery_comment_signals_expiry_idx" ON "youtube_discovery_comment_signals" USING btree ("expires_at");

@@ -1,9 +1,10 @@
-import { cancelYoutubeDiscoveryRunIfDisabled, claimNextYoutubeDiscoveryRun, claimYoutubeDiscoveryPlanning, finishYoutubeDiscoveryRun, getYoutubeDiscoveryRunQuery, persistYoutubeDiscoveryCandidates, refreshYoutubeDiscoverySystemProposals, retryYoutubeDiscoveryRun, scheduleYoutubeDiscoveryDueRuns } from "@xuyenviet/database";
+import { cancelYoutubeDiscoveryRunIfDisabled, claimNextYoutubeDiscoveryRun, claimYoutubeDiscoveryPlanning, finishYoutubeDiscoveryRun, getYoutubeDiscoveryRunQuery, persistYoutubeDiscoveryCandidates, persistYoutubeDiscoveryEnrichment, refreshYoutubeDiscoverySystemProposals, retainYoutubeDiscoveryRecords, retryYoutubeDiscoveryRun, scheduleYoutubeDiscoveryDueRuns } from "@xuyenviet/database";
 import type { WorkerPollObservation } from "@xuyenviet/contracts";
 import { createUnavailableAiAskDiscoveryQuerySignalPort, createUnavailableKnowledgeDiscoveryQuerySignalPort, type AiAskDiscoveryQuerySignalPort, type DiscoveryQuerySignalPortResult, type KnowledgeDiscoveryQuerySignalPort, type YoutubeCaptureEligibilityPort } from "@xuyenviet/domain";
 import { searchYoutubeVideos } from "./youtube-search";
+import { enrichYoutubeVideo } from "./youtube-enrichment";
 
-type DiscoveryStageResult = "complete" | "stage_transient";
+type DiscoveryStageResult = "complete" | "cancelled" | "stage_transient";
 const planningPortTimeoutMs = 1_000;
 // Keep external work comfortably inside the active five-minute run lease.
 const executionStageTimeoutMs = 240_000;
@@ -15,6 +16,7 @@ let knowledgePlanningPort: KnowledgeDiscoveryQuerySignalPort = createUnavailable
 let aiAskPlanningPort: AiAskDiscoveryQuerySignalPort = createUnavailableAiAskDiscoveryQuerySignalPort();
 let youtubeCaptureEligibilityPort: YoutubeCaptureEligibilityPort | undefined;
 let youtubeSearch: typeof searchYoutubeVideos = searchYoutubeVideos;
+const youtubeEnrichment: typeof enrichYoutubeVideo = enrichYoutubeVideo;
 let youtubeDataApiKey: string | undefined;
 
 export async function runYoutubeDiscoveryPoll(workerId: string): Promise<WorkerPollObservation> {
@@ -24,6 +26,7 @@ export async function runYoutubeDiscoveryPoll(workerId: string): Promise<WorkerP
     const outcome = await refreshYoutubeDiscoverySystemProposals(planning, results);
     return { capability: "youtube.discovery", resultCode: outcome === "contended" ? "contended" : "success", durableId: planning.id, leaseRecovery: "none" };
   }
+  await retainYoutubeDiscoveryRecords();
   await scheduleYoutubeDiscoveryDueRuns();
   const claim = await claimNextYoutubeDiscoveryRun({ workerId });
   if (!claim.claim) return { capability: "youtube.discovery", resultCode: claim.contended ? "contended" : claim.recoveredTerminalCount ? "failure" : claim.recoveredCount ? "success" : "no_work", leaseRecovery: claim.recoveredCount ? "recovered" : claim.contended ? "contended" : "none", ...(claim.recoveredCount ? { leaseRecoveryCount: claim.recoveredCount } : {}) };
@@ -45,37 +48,58 @@ export async function runYoutubeDiscoveryPoll(workerId: string): Promise<WorkerP
         const timedOut = Symbol("youtube_discovery_execution_timeout");
         try {
           const result = await Promise.race([
-            runYoutubeDiscoveryExecutionStage(run.queryText, controller.signal),
+            runYoutubeDiscoveryExecutionStage(claim.claim, run.queryText, controller.signal),
             new Promise<typeof timedOut>((resolve) => { timeout = setTimeout(() => { controller.abort(); resolve(timedOut); }, executionStageTimeoutOverrideMs ?? executionStageTimeoutMs); }),
           ]);
           if (result === timedOut) stageResult = "stage_transient";
           else {
-            const persisted = await persistYoutubeDiscoveryCandidates(claim.claim, result);
+            const persisted = await persistYoutubeDiscoveryCandidates(claim.claim, result.candidates);
             if (persisted === "cancelled") return observationFor(claim.claim, "success");
-            stageResult = persisted === "completed" ? "complete" : "stage_transient";
+            if (persisted !== "completed") stageResult = "stage_transient";
+            else {
+              for (const enrichment of result.enrichments) {
+                const stored = await persistYoutubeDiscoveryEnrichment(claim.claim, enrichment);
+                if (stored === "cancelled") return observationFor(claim.claim, "success");
+                if (stored !== "completed") throw new Error("youtube_enrichment_contended");
+              }
+              stageResult = "complete";
+            }
           }
         } finally {
           if (timeout) clearTimeout(timeout);
         }
       }
     }
-  } catch {
-    stageResult = "stage_transient";
+  } catch (error) {
+    stageResult = error instanceof Error && error.message === "youtube_enrichment_cancelled" ? "cancelled" : "stage_transient";
   }
+  if (stageResult === "cancelled") return observationFor(claim.claim, "success");
   const disposition = stageResult === "complete" ? await finishYoutubeDiscoveryRun(claim.claim) : await retryYoutubeDiscoveryRun(claim.claim);
   return observationFor(claim.claim, disposition === "completed" ? "success" : disposition === "retrying" ? "retry" : disposition === "failed" ? "failure" : disposition === "cancelled" ? "success" : "contended");
 }
 
-async function runYoutubeDiscoveryExecutionStage(queryText: string, signal: AbortSignal) {
+async function runYoutubeDiscoveryExecutionStage(claim: NonNullable<Awaited<ReturnType<typeof claimNextYoutubeDiscoveryRun>>["claim"]>, queryText: string, signal: AbortSignal) {
   if (!youtubeDataApiKey) throw new Error("youtube_search_configuration");
+  const requireActive = async () => {
+    if ((await cancelYoutubeDiscoveryRunIfDisabled(claim, undefined, true)) !== "active") {
+      throw new Error("youtube_enrichment_cancelled");
+    }
+  };
+  await requireActive();
   const results = await youtubeSearch(queryText, youtubeDataApiKey, undefined, signal);
   const eligible = [];
   for (const result of results) {
+    await requireActive();
     const status = await youtubeCaptureEligibilityPort!.check(result.videoId, signal);
     if (status === "unavailable" || signal.aborted) throw new Error("youtube_capture_eligibility_unavailable");
     if (status === "eligible") eligible.push(result);
   }
-  return eligible;
+  const enrichments = [];
+  for (const candidate of eligible) {
+    await requireActive();
+    enrichments.push(await youtubeEnrichment(candidate.videoId, youtubeDataApiKey, undefined, signal, requireActive));
+  }
+  return { candidates: eligible, enrichments };
 }
 
 function observationFor(claim: NonNullable<Awaited<ReturnType<typeof claimNextYoutubeDiscoveryRun>>["claim"]>, resultCode: WorkerPollObservation["resultCode"]): WorkerPollObservation {

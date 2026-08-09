@@ -51,6 +51,9 @@
     { "idx": 46, "version": "7", "when": 1786291200000, "tag": "0046_discovery_run_execution", "breakpoints": true },
     { "idx": 47, "version": "7", "when": 1786377600000, "tag": "0047_discovery_query_planning", "breakpoints": true },
     { "idx": 48, "version": "7", "when": 1786464000000, "tag": "0048_discovery_operator_priority_and_policy_transition", "breakpoints": true },
-    { "idx": 49, "version": "7", "when": 1786550400000, "tag": "0049_discovery_youtube_candidates", "breakpoints": true }
+    { "idx": 49, "version": "7", "when": 1786550400000, "tag": "0049_discovery_youtube_candidates", "breakpoints": true },
+    { "idx": 50, "version": "7", "when": 1786636800000, "tag": "0050_discovery_youtube_enrichment_retention", "breakpoints": true },
+    { "idx": 51, "version": "7", "when": 1786723200000, "tag": "0051_fix_discovery_thumbnail_constraint", "breakpoints": true },
+    { "idx": 52, "version": "7", "when": 1786809600000, "tag": "0052_reject_discovery_thumbnail_controls", "breakpoints": true }
   ]
 }

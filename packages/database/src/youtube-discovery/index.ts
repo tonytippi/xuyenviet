@@ -1,7 +1,7 @@
 import { recordAuditEvent, type AuditEventWriter } from "../audit-writers";
 import { createSystemAuditActor, type AuditActor } from "../actors";
 import { getDb } from "../client";
-import { youtubeDiscoveryPlanningLeases, youtubeDiscoveryPlanningOutcomes, youtubeDiscoveryPolicyVersions, youtubeDiscoveryQueryProposals, youtubeDiscoveryQueryProposalReasonValues, youtubeDiscoveryRuns, type YoutubeDiscoveryQueryProposalOrigin, type YoutubeDiscoveryQueryProposalReason, type YoutubeDiscoveryRunSafeErrorCode } from "../schema";
+import { youtubeDiscoveryAppearances, youtubeDiscoveryCandidates, youtubeDiscoveryCommentSignals, youtubeDiscoveryPlanningLeases, youtubeDiscoveryPlanningOutcomes, youtubeDiscoveryPolicyVersions, youtubeDiscoveryQueryProposals, youtubeDiscoveryQueryProposalReasonValues, youtubeDiscoveryRankingHistory, youtubeDiscoveryRuns, type YoutubeDiscoveryCommentSignal, type YoutubeDiscoveryQueryProposalOrigin, type YoutubeDiscoveryQueryProposalReason, type YoutubeDiscoveryRunSafeErrorCode } from "../schema";
 import type { YoutubeDiscoveryPolicyAuditSummary, YoutubeDiscoveryQueryProposalAuditSummary, YoutubeDiscoveryRunAuditSummary } from "@xuyenviet/contracts";
 import { deriveDiscoveryQueries, parseYoutubeDiscoveryPolicy, type DiscoveryQuerySignalPortResult, type SafeDiscoveryQuerySignal } from "@xuyenviet/domain";
 import { and, eq, sql } from "drizzle-orm";
@@ -18,6 +18,7 @@ export type YoutubeDiscoveryRunClaimResult = Readonly<{ claim: YoutubeDiscoveryR
 export type YoutubeDiscoveryRunDisposition = "completed" | "failed" | "cancelled" | "retrying" | "contended";
 export type YoutubeDiscoveryPlanningClaim = Readonly<{ id: "youtube-discovery-planning"; policyVersionId: string; fencingToken: string }>;
 export type YoutubeDiscoverySearchCandidate = Readonly<{ videoId: string; canonicalUrl: string; resultOrdinal: number }>;
+export type YoutubeDiscoveryEnrichment = Readonly<{ videoId: string; title?: string; description?: string; channelId?: string; channelName?: string; publishedAt?: Date; durationSeconds?: number; categoryId?: string; tags?: string[]; viewCount?: number; likeCount?: number; commentCount?: number; channelSubscriberCount?: number; thumbnailUrl?: string; signals: ReadonlyArray<{ signal: YoutubeDiscoveryCommentSignal; count: number; score: number }> }>;
 
 class PlanningLeaseLostError extends Error {}
 class CandidateWriteAborted extends Error {
@@ -315,6 +316,52 @@ export async function persistYoutubeDiscoveryCandidates(claim: YoutubeDiscoveryR
     // must be committed separately so its terminal audit is retained exactly once.
     return error.outcome === "cancelled" ? (await cancelYoutubeDiscoveryRunIfDisabled(claim, database)) === "cancelled" ? "cancelled" : "contended" : "contended";
   }
+}
+
+export async function persistYoutubeDiscoveryEnrichment(claim: YoutubeDiscoveryRunClaim, enrichment: YoutubeDiscoveryEnrichment, database: DiscoveryWriter = getDb()): Promise<"completed" | "cancelled" | "contended"> {
+  try {
+    return await database.transaction<"completed">(async (transaction) => {
+      const guard = await guardYoutubeDiscoveryCandidateWrite(transaction, claim);
+      if (typeof guard === "string") throw new CandidateWriteAborted(guard);
+      const [candidate] = await transaction.select({ id: youtubeDiscoveryCandidates.id }).from(youtubeDiscoveryCandidates).where(eq(youtubeDiscoveryCandidates.videoId, enrichment.videoId)).limit(1).for("update");
+      if (!candidate) return "completed";
+      const current = await guardYoutubeDiscoveryCandidateWrite(transaction, claim);
+      if (typeof current === "string") throw new CandidateWriteAborted(current);
+      const [appearance] = await transaction.select({ id: youtubeDiscoveryAppearances.id }).from(youtubeDiscoveryAppearances).where(and(eq(youtubeDiscoveryAppearances.candidateId, candidate.id), eq(youtubeDiscoveryAppearances.runId, claim.id))).limit(1);
+      if (!appearance) return "completed";
+      await transaction.update(youtubeDiscoveryCandidates).set({ title: enrichment.title, description: enrichment.description, channelId: enrichment.channelId, channelName: enrichment.channelName, publishedAt: enrichment.publishedAt, durationSeconds: enrichment.durationSeconds, categoryId: enrichment.categoryId, tags: enrichment.tags, viewCount: enrichment.viewCount, likeCount: enrichment.likeCount, commentCount: enrichment.commentCount, channelSubscriberCount: enrichment.channelSubscriberCount, thumbnailUrl: enrichment.thumbnailUrl, updatedAt: sql`clock_timestamp()` }).where(eq(youtubeDiscoveryCandidates.id, candidate.id));
+      await transaction.delete(youtubeDiscoveryCommentSignals).where(eq(youtubeDiscoveryCommentSignals.candidateId, candidate.id));
+      for (const signal of enrichment.signals) await transaction.insert(youtubeDiscoveryCommentSignals).values({ id: crypto.randomUUID(), candidateId: candidate.id, runId: claim.id, policyVersionId: current.policyVersionId, signal: signal.signal, count: signal.count, score: signal.score, derivedAt: sql`clock_timestamp()`, expiresAt: sql`clock_timestamp() + (select comment_signal_ttl_days from youtube_discovery_policy_versions where id = ${current.policyVersionId}) * interval '1 day'` });
+      await transaction.insert(youtubeDiscoveryRankingHistory).values({ id: crypto.randomUUID(), candidateId: candidate.id, appearanceId: appearance?.id, runId: claim.id, policyVersionId: current.policyVersionId, stage: "enriched", createdAt: sql`clock_timestamp()` });
+      await transaction.execute(sql`delete from youtube_discovery_ranking_history where id in (select id from youtube_discovery_ranking_history where candidate_id = ${candidate.id} order by created_at desc, id desc offset 20)`);
+      const finalGuard = await guardYoutubeDiscoveryCandidateWrite(transaction, claim);
+      if (typeof finalGuard === "string") throw new CandidateWriteAborted(finalGuard);
+      return "completed";
+    });
+  } catch (error) {
+    if (!(error instanceof CandidateWriteAborted)) throw error;
+    return error.outcome === "cancelled" ? (await cancelYoutubeDiscoveryRunIfDisabled(claim, database)) === "cancelled" ? "cancelled" : "contended" : "contended";
+  }
+}
+
+/** Runs one bounded, advisory-lock-serialized retention batch. */
+export async function retainYoutubeDiscoveryRecords(database: DiscoveryWriter = getDb()): Promise<number> {
+  return database.transaction(async (transaction) => {
+    const [locked] = await transaction.execute(sql`select pg_try_advisory_xact_lock(hashtext('youtube-discovery-retention')) as locked`) as Array<{ locked: boolean }>;
+    if (!locked?.locked) return 0;
+    const [policy] = await transaction.select({ id: youtubeDiscoveryPolicyVersions.id, enabled: youtubeDiscoveryPolicyVersions.enabled, retentionDays: youtubeDiscoveryPolicyVersions.retentionDays }).from(youtubeDiscoveryPolicyVersions).where(eq(youtubeDiscoveryPolicyVersions.isCurrent, true)).limit(1).for("update");
+    if (!policy?.enabled) return 0;
+    await transaction.execute(sql`delete from youtube_discovery_comment_signals where id in (select id from youtube_discovery_comment_signals where expires_at <= clock_timestamp() order by expires_at asc, id asc limit 20)`);
+    const candidates = await transaction.execute(sql`select id from youtube_discovery_candidates where updated_at <= clock_timestamp() - ${policy.retentionDays} * interval '1 day' order by updated_at asc limit 20 for update`) as Array<{ id: string }>;
+    for (const candidate of candidates) {
+      await transaction.delete(youtubeDiscoveryCommentSignals).where(eq(youtubeDiscoveryCommentSignals.candidateId, candidate.id));
+      await transaction.delete(youtubeDiscoveryRankingHistory).where(eq(youtubeDiscoveryRankingHistory.candidateId, candidate.id));
+      await transaction.delete(youtubeDiscoveryAppearances).where(eq(youtubeDiscoveryAppearances.candidateId, candidate.id));
+      await transaction.delete(youtubeDiscoveryCandidates).where(eq(youtubeDiscoveryCandidates.id, candidate.id));
+    }
+    await transaction.execute(sql`delete from audit_events where id in (select id from audit_events where target_type = 'youtube_discovery_run_terminal' and created_at <= clock_timestamp() - ${policy.retentionDays} * interval '1 day' order by created_at asc limit 20)`);
+    return candidates.length;
+  });
 }
 
 async function guardYoutubeDiscoveryCandidateWrite(transaction: DiscoveryWriter, claim: YoutubeDiscoveryRunClaim): Promise<"contended" | "cancelled" | { readonly policyVersionId: string; readonly active: true }> {

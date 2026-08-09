@@ -15,6 +15,7 @@ describe("YouTube Discovery search adapter", () => {
 
   test("classifies malformed provider responses safely", async () => {
     await expect(searchYoutubeVideos("Da Lat", "secret", async () => new Response("{}"))).rejects.toThrow("youtube_search_transient");
+    await expect(searchYoutubeVideos("Da Lat", "secret", async () => new Response("{", { headers: { "content-length": "65537" } }))).rejects.toThrow("youtube_search_transient");
     await expect(searchYoutubeVideos("Da Lat", "", async () => new Response("{}"))).rejects.toThrow("youtube_search_configuration");
   });
 

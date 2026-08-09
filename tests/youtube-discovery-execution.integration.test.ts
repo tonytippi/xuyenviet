@@ -323,6 +323,26 @@ describe.sequential("YouTube Discovery run execution", () => {
     await expect(testDb.select().from(auditEvents).where(and(eq(auditEvents.targetType, "youtube_discovery_run_terminal"), eq(auditEvents.targetId, run.id)))).resolves.toHaveLength(1);
   });
 
+  test("does not call another eligibility check after policy revocation", async () => {
+    await seedTestOperator();
+    const policy = await createYoutubeDiscoveryPolicyVersion({ version: 1, isCurrent: true, actor: createSystemAuditActor("system-youtube-discovery") }, testDb);
+    const proposal = await createYoutubeDiscoveryQueryProposal({ origin: "operator", reason: "operator_request", priority: 50, queryText: "Da Lat route", cadenceMinutes: 15, actor: createUserAuditActor({ userId: "operator", email: "operator@example.com" }) }, testDb);
+    const run = await createYoutubeDiscoveryRun({ policyVersionId: policy.id, queryProposalId: proposal.id }, testDb);
+    await completeDuePlanning();
+    let eligibilityCalls = 0;
+    bindYoutubeDiscoveryExecutionPorts({ check: async () => {
+      eligibilityCalls += 1;
+      await createYoutubeDiscoveryPolicyVersion({ version: 2, isCurrent: true, policy: { enabled: false }, actor: createSystemAuditActor("system-youtube-discovery") }, testDb);
+      return "eligible";
+    } }, async () => [
+      { videoId: "abcDEF12345", canonicalUrl: "https://www.youtube.com/watch?v=abcDEF12345", resultOrdinal: 0 },
+      { videoId: "defGHI67890", canonicalUrl: "https://www.youtube.com/watch?v=defGHI67890", resultOrdinal: 1 },
+    ], "test-key");
+    await expect(runYoutubeDiscoveryPoll("discovery-cancel-before-eligibility")).resolves.toMatchObject({ resultCode: "success", durableId: run.id });
+    expect(eligibilityCalls).toBe(1);
+    await expect(testDb.select().from(youtubeDiscoveryRuns).where(eq(youtubeDiscoveryRuns.id, run.id))).resolves.toMatchObject([{ state: "cancelled", terminalOutcome: "cancelled", safeErrorCode: "policy_revoked" }]);
+  });
+
   test("aborts a timed-out planning read and fences its late resolution from proposal writes", async () => {
     await createYoutubeDiscoveryPolicyVersion({ version: 1, isCurrent: true, actor: createSystemAuditActor("system-youtube-discovery") }, testDb);
     let resolveLate!: (value: { status: "available"; signals: Array<{ reason: "coverage_gap"; geography: string; taxonomy: string; priority: number }> }) => void;
