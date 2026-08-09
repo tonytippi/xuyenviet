@@ -17,8 +17,12 @@ export type YoutubeDiscoveryRunClaim = Readonly<{ id: string; fencingToken: stri
 export type YoutubeDiscoveryRunClaimResult = Readonly<{ claim: YoutubeDiscoveryRunClaim | null; recoveredCount: number; recoveredTerminalCount: number; contended: boolean }>;
 export type YoutubeDiscoveryRunDisposition = "completed" | "failed" | "cancelled" | "retrying" | "contended";
 export type YoutubeDiscoveryPlanningClaim = Readonly<{ id: "youtube-discovery-planning"; policyVersionId: string; fencingToken: string }>;
+export type YoutubeDiscoverySearchCandidate = Readonly<{ videoId: string; canonicalUrl: string; resultOrdinal: number }>;
 
 class PlanningLeaseLostError extends Error {}
+class CandidateWriteAborted extends Error {
+  constructor(readonly outcome: "cancelled" | "contended") { super(outcome); }
+}
 
 export async function createYoutubeDiscoveryPolicyVersion(input: CreateYoutubeDiscoveryPolicyVersionInput, database: DiscoveryWriter = getDb()) {
   const policy = parseYoutubeDiscoveryPolicy(input.policy === undefined ? {} : input.policy);
@@ -256,18 +260,71 @@ export async function finishYoutubeDiscoveryRun(claim: YoutubeDiscoveryRunClaim,
   });
 }
 
-export async function cancelYoutubeDiscoveryRunIfDisabled(claim: YoutubeDiscoveryRunClaim, database: DiscoveryWriter = getDb()): Promise<"active" | "cancelled" | "contended"> {
+export async function cancelYoutubeDiscoveryRunIfDisabled(claim: YoutubeDiscoveryRunClaim, database: DiscoveryWriter = getDb(), requireProposal = false): Promise<"active" | "cancelled" | "contended"> {
   return database.transaction(async (transaction) => {
     const [run] = await transaction.select({ id: youtubeDiscoveryRuns.id, attemptCount: youtubeDiscoveryRuns.attemptCount, policyVersionId: youtubeDiscoveryRuns.policyVersionId }).from(youtubeDiscoveryRuns).where(activeClaim(claim)).limit(1).for("update");
     if (!run) return "contended";
     const [currentPolicy] = await transaction.select({ enabled: youtubeDiscoveryPolicyVersions.enabled }).from(youtubeDiscoveryPolicyVersions).where(eq(youtubeDiscoveryPolicyVersions.isCurrent, true)).limit(1).for("update");
     const [proposal] = await transaction.execute(sql`select enabled from youtube_discovery_query_proposals where id = (select query_proposal_id from youtube_discovery_runs where id = ${run.id}) for update`) as Array<{ enabled: boolean }>;
-    if (currentPolicy?.enabled && proposal?.enabled !== false) return "active";
+    if (currentPolicy?.enabled && (proposal?.enabled === true || !requireProposal && proposal === undefined)) return "active";
     const [updated] = await transaction.update(youtubeDiscoveryRuns).set({ state: "cancelled", claimedBy: null, claimedAt: null, leaseExpiresAt: null, fencingToken: null, terminalAt: sql`clock_timestamp()`, terminalOutcome: "cancelled", safeErrorCode: "policy_revoked" }).where(activeClaim(claim)).returning();
     if (!updated) return "contended";
     await recordTerminalAudit(transaction, updated.id, "cancelled", updated.attemptCount, "policy_revoked", run.policyVersionId);
     return "cancelled";
   });
+}
+
+export async function getYoutubeDiscoveryRunQuery(claim: YoutubeDiscoveryRunClaim, database: DiscoveryWriter = getDb()): Promise<{ queryText: string } | "cancelled" | "contended"> {
+  return database.transaction(async (transaction) => {
+    const rows = await transaction.execute(sql`select proposal.query_text as "queryText", proposal.enabled as "proposalEnabled", policy.is_current as "policyCurrent", policy.enabled as "policyEnabled" from youtube_discovery_runs run left join youtube_discovery_query_proposals proposal on proposal.id = run.query_proposal_id join youtube_discovery_policy_versions policy on policy.id = run.policy_version_id where run.id = ${claim.id} and run.state = 'running' and run.fencing_token = ${claim.fencingToken} and run.lease_expires_at > clock_timestamp()`) as Array<{ queryText: string | null; proposalEnabled: boolean | null; policyCurrent: boolean; policyEnabled: boolean }>;
+    const run = rows[0];
+    if (!run) return "contended";
+    if (!run.policyCurrent || !run.policyEnabled || !run.proposalEnabled || !run.queryText) return "cancelled";
+    return { queryText: run.queryText };
+  });
+}
+
+export async function persistYoutubeDiscoveryCandidates(claim: YoutubeDiscoveryRunClaim, candidates: readonly YoutubeDiscoverySearchCandidate[], database: DiscoveryWriter = getDb()): Promise<"completed" | "cancelled" | "contended"> {
+  try {
+    return await database.transaction<"completed">(async (transaction) => {
+      const requireGuard = async () => {
+        const guard = await guardYoutubeDiscoveryCandidateWrite(transaction, claim);
+        if (typeof guard === "string") throw new CandidateWriteAborted(guard);
+        return guard;
+      };
+      await requireGuard();
+      for (const candidate of candidates) {
+        await requireGuard();
+        const [stored] = await transaction.execute(sql`insert into youtube_discovery_candidates (id, video_id, canonical_url, updated_at) values (${crypto.randomUUID()}, ${candidate.videoId}, ${candidate.canonicalUrl}, clock_timestamp()) on conflict (video_id) do update set updated_at = excluded.updated_at returning id`) as Array<{ id: string }>;
+        await requireGuard();
+        const [appearance] = await transaction.execute(sql`insert into youtube_discovery_appearances (id, candidate_id, run_id, result_ordinal, discovered_at) values (${crypto.randomUUID()}, ${stored!.id}, ${claim.id}, ${candidate.resultOrdinal}, clock_timestamp()) on conflict (run_id, candidate_id) do nothing returning id`) as Array<{ id: string }>;
+        if (appearance) {
+          const historyGuard = await requireGuard();
+          await transaction.execute(sql`insert into youtube_discovery_ranking_history (id, candidate_id, appearance_id, run_id, policy_version_id, stage, created_at) values (${crypto.randomUUID()}, ${stored!.id}, ${appearance.id}, ${claim.id}, ${historyGuard.policyVersionId}, 'discovered', clock_timestamp())`);
+          // Trimming is a graph write too, so it must remain fenced.
+          await requireGuard();
+          await transaction.execute(sql`delete from youtube_discovery_ranking_history where id in (select id from youtube_discovery_ranking_history where candidate_id = ${stored!.id} order by created_at desc, id desc offset 20)`);
+        }
+      }
+      await requireGuard();
+      return "completed";
+    });
+  } catch (error) {
+    if (!(error instanceof CandidateWriteAborted)) throw error;
+    // The sentinel rolls back every candidate-graph write. Cancellation itself
+    // must be committed separately so its terminal audit is retained exactly once.
+    return error.outcome === "cancelled" ? (await cancelYoutubeDiscoveryRunIfDisabled(claim, database)) === "cancelled" ? "cancelled" : "contended" : "contended";
+  }
+}
+
+async function guardYoutubeDiscoveryCandidateWrite(transaction: DiscoveryWriter, claim: YoutubeDiscoveryRunClaim): Promise<"contended" | "cancelled" | { readonly policyVersionId: string; readonly active: true }> {
+  const [run] = await transaction.execute(sql`select id, policy_version_id as "policyVersionId", attempt_count as "attemptCount" from youtube_discovery_runs where id = ${claim.id} and state = 'running' and fencing_token = ${claim.fencingToken} and lease_expires_at > clock_timestamp() for update`) as Array<{ id: string; policyVersionId: string; attemptCount: number }>;
+  if (!run) return "contended";
+  const [enabled] = await transaction.execute(sql`select policy.enabled as "policyEnabled", proposal.enabled as "proposalEnabled" from youtube_discovery_policy_versions policy join youtube_discovery_runs current_run on current_run.policy_version_id = policy.id join youtube_discovery_query_proposals proposal on proposal.id = current_run.query_proposal_id where current_run.id = ${claim.id} and policy.is_current = true and policy.id = ${run.policyVersionId} for update`) as Array<{ policyEnabled: boolean; proposalEnabled: boolean }>;
+  if (enabled?.policyEnabled && enabled.proposalEnabled) return { active: true, policyVersionId: run.policyVersionId };
+  // Do not cancel here: this guard runs inside the candidate graph transaction.
+  // Its caller aborts first, then commits cancellation and its terminal audit alone.
+  return "cancelled";
 }
 
 export async function retryYoutubeDiscoveryRun(claim: YoutubeDiscoveryRunClaim, database: DiscoveryWriter = getDb()): Promise<YoutubeDiscoveryRunDisposition> {

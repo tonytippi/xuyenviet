@@ -475,6 +475,7 @@ export const youtubeDiscoveryRuns = pgTable(
     index("youtube_discovery_runs_claim_queue_idx").on(run.state, run.nextRunAt, run.createdAt),
     index("youtube_discovery_runs_lease_expiry_idx").on(run.leaseExpiresAt).where(sql`${run.leaseExpiresAt} is not null`),
     index("youtube_discovery_runs_policy_version_idx").on(run.policyVersionId),
+    uniqueIndex("youtube_discovery_runs_id_policy_idx").on(run.id, run.policyVersionId),
     uniqueIndex("youtube_discovery_runs_proposal_interval_idx").on(run.queryProposalId, run.scheduleIntervalAt).where(sql`${run.queryProposalId} is not null and ${run.scheduleIntervalAt} is not null`),
     check("youtube_discovery_runs_state_check", sql`${run.state} in ('queued', 'running', 'retrying', 'completed', 'failed', 'cancelled')`),
     check("youtube_discovery_runs_snapshots_check", sql`${run.maxRetryAttempts} between 0 and 10 and ${run.retryDelayMinutes} between 1 and 1440 and ${run.maxConcurrentRuns} between 1 and 20 and ${run.attemptCount} between 0 and ${run.maxRetryAttempts} + 1`),
@@ -482,6 +483,24 @@ export const youtubeDiscoveryRuns = pgTable(
     check("youtube_discovery_runs_claim_shape_check", sql`(${run.claimedBy} is null and ${run.claimedAt} is null and ${run.leaseExpiresAt} is null and ${run.fencingToken} is null) or (${run.claimedBy} is not null and length(btrim(${run.claimedBy})) between 1 and 160 and ${run.claimedAt} is not null and ${run.leaseExpiresAt} > ${run.claimedAt} and ${run.fencingToken} ~ '^[a-f0-9]{64}$')`),
     check("youtube_discovery_runs_state_shape_check", sql`(${run.state} = 'queued' and ${run.claimedBy} is null and ${run.terminalAt} is null and ${run.terminalOutcome} is null and ${run.safeErrorCode} is null) or (${run.state} = 'running' and ${run.claimedBy} is not null and ${run.terminalAt} is null and ${run.terminalOutcome} is null and ${run.safeErrorCode} is null) or (${run.state} = 'retrying' and ${run.claimedBy} is null and ${run.nextRunAt} > ${run.createdAt} and ${run.terminalAt} is null and ${run.terminalOutcome} is null and ${run.safeErrorCode} = 'stage_transient') or (${run.state} in ('completed', 'failed', 'cancelled') and ${run.claimedBy} is null and ${run.terminalAt} is not null and ${run.terminalOutcome} = ${run.state} and (${run.state} <> 'failed' or ${run.safeErrorCode} in ('retry_exhausted', 'lease_retry_exhausted')) and (${run.state} <> 'cancelled' or ${run.safeErrorCode} = 'policy_revoked') and (${run.state} <> 'completed' or ${run.safeErrorCode} is null))`),
   ],
+);
+
+export const youtubeDiscoveryCandidates = pgTable(
+  "youtube_discovery_candidates",
+  { id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()), videoId: text("video_id").notNull(), canonicalUrl: text("canonical_url").notNull(), createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(), updatedAt: timestamp("updated_at", { mode: "date" }).defaultNow().notNull() },
+  (candidate) => [uniqueIndex("youtube_discovery_candidates_video_id_idx").on(candidate.videoId), check("youtube_discovery_candidates_video_id_check", sql`${candidate.videoId} ~ '^[A-Za-z0-9_-]{6,20}$'`), check("youtube_discovery_candidates_url_check", sql`${candidate.canonicalUrl} = 'https://www.youtube.com/watch?v=' || ${candidate.videoId}`)],
+);
+
+export const youtubeDiscoveryAppearances = pgTable(
+  "youtube_discovery_appearances",
+  { id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()), candidateId: text("candidate_id").notNull().references(() => youtubeDiscoveryCandidates.id, { onDelete: "restrict" }), runId: text("run_id").notNull().references(() => youtubeDiscoveryRuns.id, { onDelete: "restrict" }), resultOrdinal: integer("result_ordinal").notNull(), discoveredAt: timestamp("discovered_at", { mode: "date" }).defaultNow().notNull() },
+  (appearance) => [uniqueIndex("youtube_discovery_appearances_run_candidate_idx").on(appearance.runId, appearance.candidateId), uniqueIndex("youtube_discovery_appearances_id_candidate_run_idx").on(appearance.id, appearance.candidateId, appearance.runId), index("youtube_discovery_appearances_candidate_idx").on(appearance.candidateId), check("youtube_discovery_appearances_ordinal_check", sql`${appearance.resultOrdinal} between 0 and 49`)],
+);
+
+export const youtubeDiscoveryRankingHistory = pgTable(
+  "youtube_discovery_ranking_history",
+  { id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()), candidateId: text("candidate_id").notNull().references(() => youtubeDiscoveryCandidates.id, { onDelete: "restrict" }), appearanceId: text("appearance_id").references(() => youtubeDiscoveryAppearances.id, { onDelete: "restrict" }), runId: text("run_id").notNull().references(() => youtubeDiscoveryRuns.id, { onDelete: "restrict" }), policyVersionId: text("policy_version_id").notNull().references(() => youtubeDiscoveryPolicyVersions.id, { onDelete: "restrict" }), stage: text("stage").$type<"discovered" | "enriched" | "triaged">().notNull(), createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull() },
+  (history) => [index("youtube_discovery_ranking_history_candidate_created_idx").on(history.candidateId, history.createdAt), foreignKey({ columns: [history.appearanceId, history.candidateId, history.runId], foreignColumns: [youtubeDiscoveryAppearances.id, youtubeDiscoveryAppearances.candidateId, youtubeDiscoveryAppearances.runId], name: "youtube_discovery_ranking_history_appearance_provenance_fk" }).onDelete("restrict"), foreignKey({ columns: [history.runId, history.policyVersionId], foreignColumns: [youtubeDiscoveryRuns.id, youtubeDiscoveryRuns.policyVersionId], name: "youtube_discovery_ranking_history_run_policy_fk" }).onDelete("restrict"), check("youtube_discovery_ranking_history_stage_check", sql`${history.stage} in ('discovered', 'enriched', 'triaged')`), check("youtube_discovery_ranking_history_discovered_appearance_check", sql`${history.stage} <> 'discovered' or ${history.appearanceId} is not null`)],
 );
 
 export const sources = pgTable(
@@ -552,6 +571,8 @@ export const sourceCaptureVersions = pgTable(
     rawMetadata: jsonb("raw_metadata").$type<Record<string, unknown>>(),
     contentHash: text("content_hash").notNull(),
     executorSystem: text("executor_system"),
+    captureMethodVersion: text("capture_method_version"),
+    payloadSchemaVersion: text("payload_schema_version"),
     capturedAt: timestamp("captured_at", { mode: "date" }).notNull(),
     createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
     payloadDeletedAt: timestamp("payload_deleted_at", { mode: "date" }),
@@ -568,6 +589,7 @@ export const sourceCaptureVersions = pgTable(
     check("source_capture_versions_executor_system_check", sql`${version.executorSystem} is null or length(btrim(${version.executorSystem})) between 1 and 160`),
     check("source_capture_versions_text_length_check", sql`${version.rawText} is null or (length(btrim(${version.rawText})) > 0 and char_length(${version.rawText}) <= 120000)`),
     check("source_capture_versions_tombstone_shape_check", sql`${version.payloadDeletedAt} is null or (${version.rawText} is null and ${version.fileName} is null and ${version.mimeType} is null and ${version.byteSize} is null and ${version.storageKey} is null and ${version.rawMetadata} is null)`),
+    check("source_capture_versions_compatibility_pair_check", sql`${version.captureKind} <> 'youtube' or ((${version.captureMethodVersion} is null and ${version.payloadSchemaVersion} is null) or (${version.captureMethodVersion} is not null and ${version.payloadSchemaVersion} is not null))`),
   ],
 );
 
@@ -2304,6 +2326,9 @@ export const schema = {
   youtubeDiscoveryPlanningLeases,
   youtubeDiscoveryPlanningOutcomes,
   youtubeDiscoveryRuns,
+  youtubeDiscoveryCandidates,
+  youtubeDiscoveryAppearances,
+  youtubeDiscoveryRankingHistory,
   sources,
   sourceCaptureVersions,
   rawSourceMaterial,

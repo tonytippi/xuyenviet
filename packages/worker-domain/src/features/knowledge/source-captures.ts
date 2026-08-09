@@ -17,7 +17,7 @@ const maxMetadataValueLength = 500;
 
 export type GenericCaptureMetadata = { kind: "submitted"; fileName?: string; mimeType?: "image/jpeg" | "image/png" | "image/webp"; byteSize?: number; storageKey?: string };
 export type FacebookCaptureMetadata = { kind: "facebook_operator"; captureMethod: "playwright_operator_browser"; capturedAt: string; sourceUrl: string; finalUrl: string; authorText?: string; groupName?: string; timestampText?: string; postCreatedAt?: string; captureOrigin?: "live" | "cache"; captureArtifactId?: string; importCorrelationToken?: string; captureMethodVersion?: string; payloadSchemaVersion?: string };
-export type YoutubeCaptureMetadata = { kind: "youtube"; captureMethod: "gemini_youtube_url"; capturedAt: string; sourceUrl: string; model: string; mediaResolution: "MEDIA_RESOLUTION_LOW" | "MEDIA_RESOLUTION_MEDIUM" | "MEDIA_RESOLUTION_HIGH"; promptVersion: string; evidenceCount: number; latencyMs: number; videoDurationSeconds?: number; windowStartSeconds?: number; windowEndSeconds?: number; windowCount?: number; captureOrigin?: "live" | "cache"; captureArtifactId?: string; importedAt?: string; importCorrelationToken?: string; payloadSchemaVersion?: string; promptTokens?: number; outputTokens?: number; totalTokens?: number };
+export type YoutubeCaptureMetadata = { kind: "youtube"; captureMethod: "gemini_youtube_url"; capturedAt: string; sourceUrl: string; model: string; mediaResolution: "MEDIA_RESOLUTION_LOW" | "MEDIA_RESOLUTION_MEDIUM" | "MEDIA_RESOLUTION_HIGH"; promptVersion: string; evidenceCount: number; latencyMs: number; videoDurationSeconds?: number; windowStartSeconds?: number; windowEndSeconds?: number; windowCount?: number; captureOrigin?: "live" | "cache"; captureArtifactId?: string; importedAt?: string; importCorrelationToken?: string; captureMethodVersion?: string; payloadSchemaVersion?: string; promptTokens?: number; outputTokens?: number; totalTokens?: number };
 export type SafeCaptureMetadata = GenericCaptureMetadata | FacebookCaptureMetadata | YoutubeCaptureMetadata;
 
 export class SourceCaptureValidationError extends Error {
@@ -76,7 +76,7 @@ export function validateSafeCaptureMetadata(captureKind: SourceKind, value: Safe
 function allowedMetadataKeys(kind: SafeCaptureMetadata["kind"]) {
   if (kind === "submitted") return new Set(["kind", "fileName", "mimeType", "byteSize", "storageKey"]);
   if (kind === "facebook_operator") return new Set(["kind", "captureMethod", "capturedAt", "sourceUrl", "finalUrl", "authorText", "groupName", "timestampText", "postCreatedAt", "captureOrigin", "captureArtifactId", "importCorrelationToken", "captureMethodVersion", "payloadSchemaVersion"]);
-  return new Set(["kind", "captureMethod", "capturedAt", "sourceUrl", "model", "mediaResolution", "promptVersion", "evidenceCount", "latencyMs", "videoDurationSeconds", "windowStartSeconds", "windowEndSeconds", "windowCount", "captureOrigin", "captureArtifactId", "importedAt", "importCorrelationToken", "payloadSchemaVersion", "promptTokens", "outputTokens", "totalTokens"]);
+  return new Set(["kind", "captureMethod", "capturedAt", "sourceUrl", "model", "mediaResolution", "promptVersion", "evidenceCount", "latencyMs", "videoDurationSeconds", "windowStartSeconds", "windowEndSeconds", "windowCount", "captureOrigin", "captureArtifactId", "importedAt", "importCorrelationToken", "captureMethodVersion", "payloadSchemaVersion", "promptTokens", "outputTokens", "totalTokens"]);
 }
 
 function isSafeCaptureMetadataKind(value: unknown): value is SafeCaptureMetadata["kind"] {
@@ -126,6 +126,8 @@ export async function appendSourceCaptureVersion(
       rawText,
       contentHash: hashCaptureText(rawText),
       rawMetadata,
+      captureMethodVersion: typeof rawMetadata.captureMethodVersion === "string" ? rawMetadata.captureMethodVersion : null,
+      payloadSchemaVersion: typeof rawMetadata.payloadSchemaVersion === "string" ? rawMetadata.payloadSchemaVersion : null,
       executorSystem,
       capturedAt: input.capturedAt ?? new Date(),
       fileName: input.file?.fileName ?? null,

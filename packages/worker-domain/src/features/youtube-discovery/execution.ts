@@ -1,14 +1,20 @@
-import { cancelYoutubeDiscoveryRunIfDisabled, claimNextYoutubeDiscoveryRun, claimYoutubeDiscoveryPlanning, finishYoutubeDiscoveryRun, refreshYoutubeDiscoverySystemProposals, retryYoutubeDiscoveryRun, scheduleYoutubeDiscoveryDueRuns } from "@xuyenviet/database";
+import { cancelYoutubeDiscoveryRunIfDisabled, claimNextYoutubeDiscoveryRun, claimYoutubeDiscoveryPlanning, finishYoutubeDiscoveryRun, getYoutubeDiscoveryRunQuery, persistYoutubeDiscoveryCandidates, refreshYoutubeDiscoverySystemProposals, retryYoutubeDiscoveryRun, scheduleYoutubeDiscoveryDueRuns } from "@xuyenviet/database";
 import type { WorkerPollObservation } from "@xuyenviet/contracts";
-import { createUnavailableAiAskDiscoveryQuerySignalPort, createUnavailableKnowledgeDiscoveryQuerySignalPort, type AiAskDiscoveryQuerySignalPort, type DiscoveryQuerySignalPortResult, type KnowledgeDiscoveryQuerySignalPort } from "@xuyenviet/domain";
+import { createUnavailableAiAskDiscoveryQuerySignalPort, createUnavailableKnowledgeDiscoveryQuerySignalPort, type AiAskDiscoveryQuerySignalPort, type DiscoveryQuerySignalPortResult, type KnowledgeDiscoveryQuerySignalPort, type YoutubeCaptureEligibilityPort } from "@xuyenviet/domain";
+import { searchYoutubeVideos } from "./youtube-search";
 
 type DiscoveryStageResult = "complete" | "stage_transient";
 const planningPortTimeoutMs = 1_000;
+// Keep external work comfortably inside the active five-minute run lease.
+const executionStageTimeoutMs = 240_000;
+let executionStageTimeoutOverrideMs: number | undefined;
 
 // This is deliberately private and finite; Story 18.4 replaces the no-provider stage.
 let executionStage: (() => Promise<DiscoveryStageResult>) | undefined;
 let knowledgePlanningPort: KnowledgeDiscoveryQuerySignalPort = createUnavailableKnowledgeDiscoveryQuerySignalPort();
 let aiAskPlanningPort: AiAskDiscoveryQuerySignalPort = createUnavailableAiAskDiscoveryQuerySignalPort();
+let youtubeCaptureEligibilityPort: YoutubeCaptureEligibilityPort | undefined;
+let youtubeSearch: typeof searchYoutubeVideos = searchYoutubeVideos;
 
 export async function runYoutubeDiscoveryPoll(workerId: string): Promise<WorkerPollObservation> {
   const planning = await claimYoutubeDiscoveryPlanning(workerId);
@@ -24,12 +30,50 @@ export async function runYoutubeDiscoveryPoll(workerId: string): Promise<WorkerP
   if (active !== "active") return observationFor(claim.claim, active === "cancelled" ? "success" : "contended");
   let stageResult: DiscoveryStageResult;
   try {
-    stageResult = executionStage ? await executionStage() : "complete";
+    // The test seam exercises generic lease mechanics only; real provider work
+    // must first read an enabled proposal through the fenced query accessor.
+    if (executionStage) stageResult = await executionStage();
+    else {
+      const run = await getYoutubeDiscoveryRunQuery(claim.claim);
+      if (run === "cancelled") return observationFor(claim.claim, (await cancelYoutubeDiscoveryRunIfDisabled(claim.claim, undefined, true)) === "cancelled" ? "success" : "contended");
+      if (run === "contended") return observationFor(claim.claim, "contended");
+      else if (!youtubeCaptureEligibilityPort) stageResult = "stage_transient";
+      else {
+        const controller = new AbortController();
+        let timeout: ReturnType<typeof setTimeout> | undefined;
+        const timedOut = Symbol("youtube_discovery_execution_timeout");
+        try {
+          const result = await Promise.race([
+            runYoutubeDiscoveryExecutionStage(run.queryText, controller.signal),
+            new Promise<typeof timedOut>((resolve) => { timeout = setTimeout(() => { controller.abort(); resolve(timedOut); }, executionStageTimeoutOverrideMs ?? executionStageTimeoutMs); }),
+          ]);
+          if (result === timedOut) stageResult = "stage_transient";
+          else {
+            const persisted = await persistYoutubeDiscoveryCandidates(claim.claim, result);
+            if (persisted === "cancelled") return observationFor(claim.claim, "success");
+            stageResult = persisted === "completed" ? "complete" : "stage_transient";
+          }
+        } finally {
+          if (timeout) clearTimeout(timeout);
+        }
+      }
+    }
   } catch {
     stageResult = "stage_transient";
   }
   const disposition = stageResult === "complete" ? await finishYoutubeDiscoveryRun(claim.claim) : await retryYoutubeDiscoveryRun(claim.claim);
   return observationFor(claim.claim, disposition === "completed" ? "success" : disposition === "retrying" ? "retry" : disposition === "failed" ? "failure" : disposition === "cancelled" ? "success" : "contended");
+}
+
+async function runYoutubeDiscoveryExecutionStage(queryText: string, signal: AbortSignal) {
+  const results = await youtubeSearch(queryText, process.env.YOUTUBE_DATA_API_KEY ?? "", undefined, signal);
+  const eligible = [];
+  for (const result of results) {
+    const status = await youtubeCaptureEligibilityPort!.check(result.videoId, signal);
+    if (status === "unavailable" || signal.aborted) throw new Error("youtube_capture_eligibility_unavailable");
+    if (status === "eligible") eligible.push(result);
+  }
+  return eligible;
 }
 
 function observationFor(claim: NonNullable<Awaited<ReturnType<typeof claimNextYoutubeDiscoveryRun>>["claim"]>, resultCode: WorkerPollObservation["resultCode"]): WorkerPollObservation {
@@ -63,6 +107,10 @@ async function readPlanningPort(port: KnowledgeDiscoveryQuerySignalPort | AiAskD
 
 /** Public composition seam. Owners bind their explicit aggregate-only ports here. */
 export function bindYoutubeDiscoveryPlanningPorts(knowledge: KnowledgeDiscoveryQuerySignalPort, aiAsk: AiAskDiscoveryQuerySignalPort) { knowledgePlanningPort = knowledge; aiAskPlanningPort = aiAsk; }
+export function bindYoutubeDiscoveryExecutionPorts(eligibility: YoutubeCaptureEligibilityPort, search = searchYoutubeVideos) { youtubeCaptureEligibilityPort = eligibility; youtubeSearch = search; }
+
+/** @internal Test-only deadline seam; production execution uses the lease-safe value. */
+export function setYoutubeDiscoveryExecutionTimeoutForTest(timeoutMs: number | undefined) { executionStageTimeoutOverrideMs = timeoutMs; }
 
 /** @internal Test-only safe-port seam. */
 export function setYoutubeDiscoveryPlanningPortsForTest(knowledge: ((signal?: AbortSignal) => Promise<DiscoveryQuerySignalPortResult>) | undefined, aiAsk: ((signal?: AbortSignal) => Promise<DiscoveryQuerySignalPortResult>) | undefined) {

@@ -9,5 +9,6 @@ describe("YouTube Discovery ownership boundary", () => {
     expect(source).toContain('from "../audit-writers"');
     expect(source).toContain("recordAuditEvent(");
     expect(source).not.toMatch(/\b(auditEvents|tripPlanChangeHistory|aiUsageEvents|sources|sourceCaptureVersions|knowledge[A-Z]\w*)\b/);
+    expect(source).not.toMatch(/knowledge-youtube-capture-eligibility/);
   });
 });

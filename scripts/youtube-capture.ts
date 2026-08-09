@@ -5,6 +5,7 @@ import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 
 import { schema } from "@xuyenviet/database";
+import { canonicalizeYoutubeVideoUrl, defaultYoutubeMediaResolution, resolveYoutubeMediaResolution } from "@xuyenviet/domain";
 import { admitArtifact, assertCaptureCacheReady, findReusableArtifact, findReusableArtifactAcrossModels, finishImport, prepareImport } from "@xuyenviet/worker-domain/features/knowledge/capture-cache";
 import { flushCachedArtifact } from "@xuyenviet/worker-domain/features/knowledge/capture-orchestration";
 import { YOUTUBE_CAPTURE_PAYLOAD_SCHEMA_VERSION, captureReuseKey, youtubeCaptureMethodVersion, youtubeResourceIdentity, youtubeVideoId, youtubeWindowResourceIdentity } from "@xuyenviet/worker-domain/features/knowledge/capture-identity";
@@ -19,7 +20,7 @@ const geminiRetryDelaysMs = [1_000, 2_000];
 const youtubeCaptureProgressIntervalMs = 30_000;
 const prompt = `Analyze this public YouTube video window as a Vietnam road-trip research source. Return JSON only: {"evidence":[{"category":"road_condition|route|toll|fuel|charging|rest_stop|parking|accommodation|food|attraction|safety|weather|cost","claim_vi":"Vietnamese factual claim (non-empty, max 500 chars)","evidence_type":"spoken|on_screen|both","timestamp_start_seconds":0,"timestamp_end_seconds":0,"confidence":"high|medium|low","freshness_sensitive":true,"evidence_excerpt":"non-empty excerpt, max 240 chars","uncertainty_or_condition":null}]}. Every evidence item must include every key exactly as shown. Use only the listed enum values. Timestamps must be non-negative integer seconds relative to the full video and fall within the requested window. Use exactly one timestamp convention for the complete response: full-video timestamps are preferred; otherwise use offsets relative to the requested window for every item. Never mix conventions, never report timestamps outside the requested window, and do not use the duration of the full video as a timestamp. End must not precede start. uncertainty_or_condition must be null or a non-empty string under 400 characters. Extract at most ${maxYoutubeEvidenceItemsPerWindow} items. Include only explicitly spoken or clearly shown facts. Do not infer missing facts or return a transcript. Return {"evidence":[]} if no reliable travel evidence exists.`;
 type GeminiMediaResolution = "MEDIA_RESOLUTION_LOW" | "MEDIA_RESOLUTION_MEDIUM" | "MEDIA_RESOLUTION_HIGH";
-const defaultMediaResolution: GeminiMediaResolution = "MEDIA_RESOLUTION_LOW";
+const defaultMediaResolution: GeminiMediaResolution = defaultYoutubeMediaResolution;
 
 class GeminiRequestError extends Error {
   constructor(code: string, readonly diagnostic: string | null) {
@@ -233,22 +234,11 @@ function formatYoutubeWindow(window: YoutubeWindow) {
 }
 
 export function getYoutubeMediaResolution(value = getEnvValue("GEMINI_YOUTUBE_MEDIA_RESOLUTION")): GeminiMediaResolution {
-  if (!value) return defaultMediaResolution;
-  if (value === "MEDIA_RESOLUTION_LOW" || value === "MEDIA_RESOLUTION_MEDIUM" || value === "MEDIA_RESOLUTION_HIGH") return value;
-  throw new Error("GEMINI_YOUTUBE_MEDIA_RESOLUTION must be MEDIA_RESOLUTION_LOW, MEDIA_RESOLUTION_MEDIUM, or MEDIA_RESOLUTION_HIGH.");
+  return resolveYoutubeMediaResolution(value);
 }
 
 export function canonicalizeYoutubeCaptureUrl(value: string | null) {
-  if (!value) return null;
-  try {
-    const url = new URL(value);
-    const hostname = url.hostname.toLowerCase();
-    if (!(hostname === "youtu.be" || hostname === "youtube.com" || hostname.endsWith(".youtube.com"))) return null;
-    const videoId = youtubeVideoId(value);
-    return videoId ? `https://www.youtube.com/watch?v=${videoId}` : null;
-  } catch {
-    return null;
-  }
+  return value ? canonicalizeYoutubeVideoUrl(value)?.canonicalUrl ?? null : null;
 }
 
 async function main() {

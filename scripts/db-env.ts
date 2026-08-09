@@ -1,24 +1,6 @@
-import { existsSync, readFileSync } from "node:fs";
+import { getEnvValue } from "@xuyenviet/database";
 
-const envFileNames = [".env.local", ".env"] as const;
-
-export function getEnvValue(name: string) {
-  if (process.env[name]) {
-    return process.env[name];
-  }
-
-  for (const envFile of envFileNames) {
-    if (!existsSync(envFile)) {
-      continue;
-    }
-
-    const match = readFileSync(envFile, "utf8").match(new RegExp(`^${name}=(.*)$`, "m"));
-
-    if (match?.[1]) {
-      return match[1].trim().replace(/^['"]|['"]$/g, "");
-    }
-  }
-}
+export { getEnvValue };
 
 export function getDatabaseUrl() {
   const databaseUrl = getEnvValue("DATABASE_URL");

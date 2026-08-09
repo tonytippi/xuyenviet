@@ -3,4 +3,4 @@ export { runKnowledgeIngestionWorkerLoop } from "./features/knowledge/ingestion-
 export { runApprovedKnowledgeIndexingWorkerLoop } from "./features/knowledge/indexing-worker";
 export { containHighSeverityKnowledgeSampling, runKnowledgeSamplingSelection } from "./features/knowledge/recommendations";
 export { processAiAskDomainOutboxBatch } from "./features/ai/domain-outbox-worker";
-export { bindYoutubeDiscoveryPlanningPorts, runYoutubeDiscoveryPoll } from "./features/youtube-discovery/execution";
+export { bindYoutubeDiscoveryExecutionPorts, bindYoutubeDiscoveryPlanningPorts, runYoutubeDiscoveryPoll } from "./features/youtube-discovery/execution";

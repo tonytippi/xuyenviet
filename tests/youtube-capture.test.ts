@@ -2,6 +2,8 @@ import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, test } from "vitest";
 
 import { auditEvents, knowledgeCardSearchDocuments, knowledgeCardSources, knowledgeCards, knowledgeIndexDirtyMarkers, knowledgeIngestionJobs, rawSourceMaterial, sourceCaptureVersions, sources, users } from "@/db/schema";
+import { createYoutubeCaptureEligibilityPort } from "@xuyenviet/database";
+import { currentYoutubeCaptureCompatibility, youtubeCaptureCompatibilityForMediaResolution } from "@xuyenviet/domain";
 import { validateSafeCaptureMetadata } from "@/features/knowledge/source-captures";
 import { admitArtifact } from "@/features/knowledge/capture-cache";
 import { listQueuedYoutubeSources, maxYoutubeEvidenceItemsPerVideo, maxYoutubeEvidenceItemsPerWindow, parseYoutubeEvidence, recordYoutubeCaptureFailure, saveYoutubeEvidence, serializeYoutubeEvidence } from "@/features/knowledge/youtube-capture";
@@ -64,12 +66,23 @@ describe("YouTube capture", () => {
     const [raw] = await testDb.select().from(sourceCaptureVersions).where(eq(sourceCaptureVersions.sourceId, "queued"));
     expect(raw.rawText).toContain("NovaWorld Phan Thiết");
     expect(raw.rawMetadata).not.toHaveProperty("importActorId");
+    expect(raw).toMatchObject(currentYoutubeCaptureCompatibility);
+    await expect(createYoutubeCaptureEligibilityPort(testDb).check("abcDEF12345")).resolves.toBe("already_compatible");
+    await testDb.update(sourceCaptureVersions).set({ payloadSchemaVersion: "changed" }).where(eq(sourceCaptureVersions.id, raw.id));
+    await expect(createYoutubeCaptureEligibilityPort(testDb).check("abcDEF12345")).resolves.toBe("eligible");
     await expect(testDb.select().from(knowledgeIngestionJobs).where(eq(knowledgeIngestionJobs.captureVersionId, raw.id))).resolves.toMatchObject([{ status: "queued" }]);
     await expect(testDb.select({ label: sources.label }).from(sources).where(eq(sources.id, "queued"))).resolves.toEqual([{ label: "Hành trình qua Phan Thiết" }]);
     const [audit] = await testDb.select().from(auditEvents).where(eq(auditEvents.targetType, "source_capture_version"));
     expect(audit).toMatchObject({ actorClass: "system", actorUserId: null, actorEmail: null, actorSystem: "system-youtube-capture" });
     expect(audit.afterSummary).not.toContain("NovaWorld");
     expect(audit.afterSummary).toContain("evidenceCount: 1");
+  });
+
+  test.each(["MEDIA_RESOLUTION_LOW", "MEDIA_RESOLUTION_MEDIUM", "MEDIA_RESOLUTION_HIGH"] as const)("persists the actual %s aggregate compatibility", async (mediaResolution) => {
+    await createSource(`resolution-${mediaResolution}`);
+    await saveYoutubeEvidence(testDb, { sourceId: `resolution-${mediaResolution}`, evidence: parseYoutubeEvidence({ evidence }), metadata: { captureMethod: "gemini_youtube_url", capturedAt: "2026-07-17T00:00:00.000Z", sourceUrl: "https://www.youtube.com/watch?v=abcDEF12345", model: "gemini-3.5-flash", mediaResolution, promptVersion: "youtube-evidence-v1", evidenceCount: 1, latencyMs: 1 } });
+    const [capture] = await testDb.select({ captureMethodVersion: sourceCaptureVersions.captureMethodVersion, payloadSchemaVersion: sourceCaptureVersions.payloadSchemaVersion }).from(sourceCaptureVersions).where(eq(sourceCaptureVersions.sourceId, `resolution-${mediaResolution}`));
+    expect(capture).toEqual(youtubeCaptureCompatibilityForMediaResolution(mediaResolution));
   });
 
   test("accepts complete YouTube cache-import metadata", () => {

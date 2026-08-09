@@ -43,6 +43,8 @@ export * from "./admin-quality";
 export * from "./youtube-discovery/policy";
 export * from "./youtube-discovery/planning";
 export * from "./youtube-discovery/admin";
+export * from "./youtube-video";
+export * from "./knowledge/youtube-capture-compatibility";
 
 const newConversationPreview = "Hội thoại mới";
 const previewMaxLength = 60;

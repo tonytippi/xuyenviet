@@ -1,8 +1,10 @@
 export const FACEBOOK_CAPTURE_METHOD_VERSION = "facebook-visible-dom-v2";
+import { canonicalizeYoutubeVideoUrl, currentYoutubeCaptureCompatibility, youtubeCaptureCompatibilityForMediaResolution, type YoutubeMediaResolution } from "@xuyenviet/domain";
+
 export const YOUTUBE_CAPTURE_METHOD_VERSION = "youtube-gemini-windowed-v4";
 const YOUTUBE_SEGMENT_CAPTURE_METHOD_VERSION = "youtube-gemini-windowed-v3";
 export const CAPTURE_PAYLOAD_SCHEMA_VERSION = "1";
-export const YOUTUBE_CAPTURE_PAYLOAD_SCHEMA_VERSION = "2";
+export const YOUTUBE_CAPTURE_PAYLOAD_SCHEMA_VERSION = currentYoutubeCaptureCompatibility.payloadSchemaVersion;
 
 function canonicalUrl(value: string) {
   try {
@@ -50,13 +52,7 @@ export function facebookResourceIdentity(input: { finalUrl?: string | null; subm
 }
 
 export function youtubeVideoId(value: string) {
-  try {
-    const url = new URL(value);
-    const id = url.hostname === "youtu.be" ? url.pathname.slice(1) : url.searchParams.get("v");
-    return id && /^[A-Za-z0-9_-]{6,20}$/.test(id) ? id : null;
-  } catch {
-    return null;
-  }
+  return canonicalizeYoutubeVideoUrl(value)?.videoId ?? null;
 }
 
 export function youtubeResourceIdentity(value: string) {
@@ -64,9 +60,9 @@ export function youtubeResourceIdentity(value: string) {
   return videoId ? `video:${videoId}` : null;
 }
 
-export function youtubeCaptureMethodVersion(mediaResolution: "MEDIA_RESOLUTION_LOW" | "MEDIA_RESOLUTION_MEDIUM" | "MEDIA_RESOLUTION_HIGH", artifactType: "segment" | "aggregate" = "aggregate") {
-  const version = artifactType === "segment" ? YOUTUBE_SEGMENT_CAPTURE_METHOD_VERSION : YOUTUBE_CAPTURE_METHOD_VERSION;
-  return `${version}-${artifactType}-${mediaResolution.replace("MEDIA_RESOLUTION_", "").toLowerCase()}`;
+export function youtubeCaptureMethodVersion(mediaResolution: YoutubeMediaResolution, artifactType: "segment" | "aggregate" = "aggregate") {
+  if (artifactType === "aggregate") return youtubeCaptureCompatibilityForMediaResolution(mediaResolution).captureMethodVersion;
+  return `${YOUTUBE_SEGMENT_CAPTURE_METHOD_VERSION}-segment-${mediaResolution.replace("MEDIA_RESOLUTION_", "").toLowerCase()}`;
 }
 
 export function youtubeWindowResourceIdentity(videoResourceIdentity: string, startOffsetSeconds: number, endOffsetSeconds: number) {

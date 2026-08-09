@@ -5,6 +5,7 @@ import { knowledgeCardSources, knowledgeCards, rawSourceMaterial, schema, source
 import { recordAuditEvent } from "../audit/events";
 import { createSystemAuditActor } from "../audit/actors";
 import { appendSourceCaptureVersion, type YoutubeCaptureMetadata } from "./source-captures";
+import { youtubeCaptureCompatibilityForMediaResolution } from "@xuyenviet/domain";
 
 export type YoutubeCaptureDb = PostgresJsDatabase<typeof schema>;
 
@@ -126,7 +127,7 @@ export async function saveYoutubeEvidence(db: YoutubeCaptureDb, input: { sourceI
       sourceId: input.sourceId,
       captureKind: "youtube",
       rawText,
-      metadata: { ...sanitizeYoutubeMetadata(input.metadata), kind: "youtube" } as YoutubeCaptureMetadata,
+      metadata: { ...sanitizeYoutubeMetadata(input.metadata), ...youtubeCaptureCompatibilityForMediaResolution(input.metadata.mediaResolution), kind: "youtube" } as YoutubeCaptureMetadata,
       executorSystem: "system-youtube-capture",
       capturedAt: new Date(input.metadata.capturedAt),
     });

@@ -3,9 +3,9 @@ import { and, eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 
-import { auditEvents, cancelYoutubeDiscoveryRunIfDisabled, claimNextYoutubeDiscoveryRun, claimYoutubeDiscoveryPlanning, createAiAskDiscoveryQuerySignalPort, createKnowledgeDiscoveryQuerySignalPort, createSystemAuditActor, createUserAuditActor, createYoutubeDiscoveryPolicyVersion, createYoutubeDiscoveryQueryProposal, createYoutubeDiscoveryRun, finishYoutubeDiscoveryRun, refreshYoutubeDiscoverySystemProposals, retryYoutubeDiscoveryRun, schema, youtubeDiscoveryPlanningLeases, youtubeDiscoveryPlanningOutcomes, youtubeDiscoveryQueryProposals, youtubeDiscoveryRuns } from "@xuyenviet/database";
+import { auditEvents, cancelYoutubeDiscoveryRunIfDisabled, claimNextYoutubeDiscoveryRun, claimYoutubeDiscoveryPlanning, createAiAskDiscoveryQuerySignalPort, createKnowledgeDiscoveryQuerySignalPort, createSystemAuditActor, createUserAuditActor, createYoutubeDiscoveryPolicyVersion, createYoutubeDiscoveryQueryProposal, createYoutubeDiscoveryRun, finishYoutubeDiscoveryRun, refreshYoutubeDiscoverySystemProposals, retryYoutubeDiscoveryRun, schema, youtubeDiscoveryAppearances, youtubeDiscoveryCandidates, youtubeDiscoveryRankingHistory, youtubeDiscoveryPlanningLeases, youtubeDiscoveryPlanningOutcomes, youtubeDiscoveryQueryProposals, youtubeDiscoveryRuns } from "@xuyenviet/database";
 import { resetTestDatabase, seedTestOperator, testDb } from "./helpers/db";
-import { runYoutubeDiscoveryPoll, setYoutubeDiscoveryExecutionStageForTest, setYoutubeDiscoveryPlanningPortsForTest } from "../packages/worker-domain/src/features/youtube-discovery/execution";
+import { bindYoutubeDiscoveryExecutionPorts, runYoutubeDiscoveryPoll, setYoutubeDiscoveryExecutionStageForTest, setYoutubeDiscoveryExecutionTimeoutForTest, setYoutubeDiscoveryPlanningPortsForTest } from "../packages/worker-domain/src/features/youtube-discovery/execution";
 
 let firstWorker: ReturnType<typeof drizzle<typeof schema>>;
 let secondWorker: ReturnType<typeof drizzle<typeof schema>>;
@@ -38,7 +38,7 @@ describe.sequential("YouTube Discovery run execution", () => {
 
   beforeEach(async () => { await resetTestDatabase(); });
 
-  afterEach(() => { setYoutubeDiscoveryExecutionStageForTest(undefined); setYoutubeDiscoveryPlanningPortsForTest(undefined, undefined); });
+  afterEach(() => { setYoutubeDiscoveryExecutionStageForTest(undefined); setYoutubeDiscoveryExecutionTimeoutForTest(undefined); setYoutubeDiscoveryPlanningPortsForTest(undefined, undefined); });
 
   test("claims one due run and persists an atomic fenced terminal audit", async () => {
     const policy = await createYoutubeDiscoveryPolicyVersion({ version: 1, isCurrent: true, actor: createSystemAuditActor("system-youtube-discovery") }, testDb);
@@ -52,6 +52,18 @@ describe.sequential("YouTube Discovery run execution", () => {
     const terminalAudits = await testDb.select().from(auditEvents).where(and(eq(auditEvents.targetType, "youtube_discovery_run_terminal"), eq(auditEvents.targetId, run.id)));
     expect(terminalAudits).toMatchObject([{ actorSystem: "system-youtube-discovery", afterSummary: JSON.stringify({ policyVersionId: policy.id, outcome: "completed", attemptCount: 1 }) }]);
     expect(terminalAudits).toHaveLength(1);
+  });
+
+  test("cancels a legacy proposal-less run before provider work", async () => {
+    const policy = await createYoutubeDiscoveryPolicyVersion({ version: 1, isCurrent: true, actor: createSystemAuditActor("system-youtube-discovery") }, testDb);
+    const run = await createYoutubeDiscoveryRun({ policyVersionId: policy.id }, testDb);
+    await completeDuePlanning();
+    let searchCalls = 0;
+    bindYoutubeDiscoveryExecutionPorts({ check: async () => "eligible" }, async () => { searchCalls += 1; return []; });
+
+    await expect(runYoutubeDiscoveryPoll("discovery-proposal-less")).resolves.toMatchObject({ resultCode: "success", durableId: run.id });
+    expect(searchCalls).toBe(0);
+    await expect(testDb.select({ state: youtubeDiscoveryRuns.state, terminalOutcome: youtubeDiscoveryRuns.terminalOutcome, safeErrorCode: youtubeDiscoveryRuns.safeErrorCode }).from(youtubeDiscoveryRuns).where(eq(youtubeDiscoveryRuns.id, run.id))).resolves.toEqual([{ state: "cancelled", terminalOutcome: "cancelled", safeErrorCode: "policy_revoked" }]);
   });
 
   test("exhausts one run without affecting a later eligible run under the same policy", async () => {
@@ -277,6 +289,38 @@ describe.sequential("YouTube Discovery run execution", () => {
     await expect(runYoutubeDiscoveryPoll("discovery-a")).resolves.toMatchObject({ capability: "youtube.discovery", resultCode: "retry", durableId: run.id });
     await expect(testDb.select().from(youtubeDiscoveryRuns).where(eq(youtubeDiscoveryRuns.id, run.id))).resolves.toMatchObject([{ state: "retrying", safeErrorCode: "stage_transient", claimedBy: null }]);
     setYoutubeDiscoveryExecutionStageForTest(undefined);
+  });
+
+  test("bounds a never-settling provider call and safely retries", async () => {
+    await seedTestOperator();
+    const policy = await createYoutubeDiscoveryPolicyVersion({ version: 1, isCurrent: true, policy: { maxRetryAttempts: 2 }, actor: createSystemAuditActor("system-youtube-discovery") }, testDb);
+    const proposal = await createYoutubeDiscoveryQueryProposal({ origin: "operator", reason: "operator_request", priority: 50, queryText: "Da Lat route", cadenceMinutes: 15, actor: createUserAuditActor({ userId: "operator", email: "operator@example.com" }) }, testDb);
+    const run = await createYoutubeDiscoveryRun({ policyVersionId: policy.id, queryProposalId: proposal.id }, testDb);
+    await completeDuePlanning();
+    let aborted = false;
+    bindYoutubeDiscoveryExecutionPorts({ check: async () => "eligible" }, async (_query, _key, _fetch, signal) => new Promise((resolve) => { signal?.addEventListener("abort", () => { aborted = true; resolve([]); }); }));
+    setYoutubeDiscoveryExecutionTimeoutForTest(5);
+    await expect(runYoutubeDiscoveryPoll("discovery-timeout")).resolves.toMatchObject({ resultCode: "retry", durableId: run.id });
+    expect(aborted).toBe(true);
+    await expect(testDb.select().from(youtubeDiscoveryRuns).where(eq(youtubeDiscoveryRuns.id, run.id))).resolves.toMatchObject([{ state: "retrying", safeErrorCode: "stage_transient" }]);
+  });
+
+  test("cancels after provider results and before persistence without graph writes", async () => {
+    await seedTestOperator();
+    const policy = await createYoutubeDiscoveryPolicyVersion({ version: 1, isCurrent: true, actor: createSystemAuditActor("system-youtube-discovery") }, testDb);
+    const proposal = await createYoutubeDiscoveryQueryProposal({ origin: "operator", reason: "operator_request", priority: 50, queryText: "Da Lat route", cadenceMinutes: 15, actor: createUserAuditActor({ userId: "operator", email: "operator@example.com" }) }, testDb);
+    const run = await createYoutubeDiscoveryRun({ policyVersionId: policy.id, queryProposalId: proposal.id }, testDb);
+    await completeDuePlanning();
+    bindYoutubeDiscoveryExecutionPorts({ check: async () => "eligible" }, async () => {
+      await createYoutubeDiscoveryPolicyVersion({ version: 2, isCurrent: true, policy: { enabled: false }, actor: createSystemAuditActor("system-youtube-discovery") }, testDb);
+      return [{ videoId: "abcDEF12345", canonicalUrl: "https://www.youtube.com/watch?v=abcDEF12345", resultOrdinal: 0 }];
+    });
+    await expect(runYoutubeDiscoveryPoll("discovery-cancel-after-provider")).resolves.toMatchObject({ resultCode: "success", durableId: run.id });
+    await expect(testDb.select().from(youtubeDiscoveryCandidates)).resolves.toEqual([]);
+    await expect(testDb.select().from(youtubeDiscoveryAppearances)).resolves.toEqual([]);
+    await expect(testDb.select().from(youtubeDiscoveryRankingHistory)).resolves.toEqual([]);
+    await expect(testDb.select().from(youtubeDiscoveryRuns).where(eq(youtubeDiscoveryRuns.id, run.id))).resolves.toMatchObject([{ state: "cancelled", terminalOutcome: "cancelled", safeErrorCode: "policy_revoked" }]);
+    await expect(testDb.select().from(auditEvents).where(and(eq(auditEvents.targetType, "youtube_discovery_run_terminal"), eq(auditEvents.targetId, run.id)))).resolves.toHaveLength(1);
   });
 
   test("aborts a timed-out planning read and fences its late resolution from proposal writes", async () => {

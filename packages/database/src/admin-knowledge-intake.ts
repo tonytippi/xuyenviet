@@ -1,6 +1,6 @@
 import { and, desc, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import type { AdminKnowledgeIntake, AdminKnowledgeIntakeQuery, AdminKnowledgeSeedBatchRequest, AdminKnowledgeSeedBatchResponse, AdminKnowledgeSourceRemovalRequest, AdminKnowledgeSourceRemovalResponse, RequestPrincipal } from "@xuyenviet/contracts";
-import type { AdminKnowledgeIntakePort } from "@xuyenviet/domain";
+import { canonicalizeYoutubeVideoUrl, type AdminKnowledgeIntakePort } from "@xuyenviet/domain";
 import { getDb } from "./client";
 import { knowledgeSeedBatchItems, knowledgeSeedBatches, sources } from "./schema";
 import { safeAdminDisplayUrl } from "./admin-youtube-capture";
@@ -55,9 +55,11 @@ async function submit(actor: RequestPrincipal, input: AdminKnowledgeSeedBatchReq
 async function removeSource(_actor: RequestPrincipal, _sourceId: string, _input: AdminKnowledgeSourceRemovalRequest): Promise<AdminKnowledgeSourceRemovalResponse> { throw new Error("Source removal lifecycle transitions require the Story 15.3 command."); }
 
 export function normalizeIntakeUrl(value: string): { url: string; hostname: string; kind: "url" | "facebook" | "youtube" } | null {
+  const youtube = canonicalizeYoutubeVideoUrl(value);
+  if (youtube) return { url: youtube.canonicalUrl, hostname: "www.youtube.com", kind: "youtube" };
   try {
     const url = new URL(value);
-    if (url.protocol !== "https:" || url.username || url.password || !url.hostname) return null;
+    if (url.protocol !== "https:" || url.username || url.password || url.port || !url.hostname) return null;
     url.hostname = url.hostname.toLowerCase().replace(/\.+$/, "");
     if (url.hostname.length > 189) return null;
     url.hash = "";
@@ -68,16 +70,13 @@ export function normalizeIntakeUrl(value: string): { url: string; hostname: stri
     url.searchParams.sort();
     url.pathname = url.pathname.replace(/\/+$/, "") || "/";
     const hostname = url.hostname;
+    const isYoutubeHost = hostname === "youtube.com" || hostname.endsWith(".youtube.com") || hostname === "youtu.be";
     const kind = hostname === "facebook.com" || hostname.endsWith(".facebook.com") || hostname === "fb.com" || hostname === "fb.watch"
       ? "facebook"
-      : hostname === "youtube.com" || hostname.endsWith(".youtube.com") || hostname === "youtu.be"
+      : isYoutubeHost
         ? "youtube"
         : "url";
-    if (kind === "youtube") {
-      const videoId = hostname === "youtu.be" ? url.pathname.slice(1) : url.pathname === "/watch" ? url.searchParams.get("v") : null;
-      if (!videoId || !/^[A-Za-z0-9_-]{6,20}$/.test(videoId)) return null;
-      return { url: `https://www.youtube.com/watch?v=${videoId}`, hostname: "www.youtube.com", kind };
-    }
+    if (kind === "youtube") return null;
     return { url: url.toString(), hostname, kind };
   } catch {
     return null;
