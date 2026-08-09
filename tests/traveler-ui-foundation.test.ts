@@ -81,6 +81,16 @@ describe("traveler UI foundation", () => {
     expect(source).toContain('href={travelerUrl}');
   });
 
+  test("renders provenance disclosures only when safe traveler detail exists, while keeping withdrawn notices", () => {
+    const source = readFileSync("apps/web/src/features/ai/ai-ask-composer.tsx", "utf8");
+
+    expect(source).toContain('item.availability === "withdrawn" || (item.sourceCategory !== "general" && (Boolean(getSafeTravelerUrl(item.url)) || Boolean(getUsableProvenanceCheckedDate(item.checkedAt))))');
+    expect(source).toContain('const checkedDate = getUsableProvenanceCheckedDate(item.checkedAt);');
+    expect(source).toContain('if (!value || !/^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$/.test(value)) return null;');
+    expect(source).toContain('if (!Number.isFinite(date.getTime()) || date.toISOString() !== value) return null;');
+    expect(source).toContain("Thông tin tham khảo này hiện không còn mở được.");
+  });
+
   test("keeps stream failures, shell retries, and reduced-motion recovery controls bounded", () => {
     const composer = readFileSync("apps/web/src/features/ai/ai-ask-composer.tsx", "utf8");
     const shellLoader = readFileSync("apps/web/src/features/chat-trips/direct-shell-loader.tsx", "utf8");
@@ -106,7 +116,7 @@ describe("traveler UI foundation", () => {
     const source = readFileSync("apps/web/src/features/chat-trips/conversation-list.tsx", "utf8");
 
     expect(source).toContain('className="min-h-11 w-full rounded-lg');
-    expect(source).toContain('className="absolute right-1 top-1/2 grid min-h-11 min-w-11');
+    expect(source).toContain('className="absolute right-1 top-1/2 z-10 grid min-h-11 min-w-11');
   });
 
 });

@@ -3,7 +3,7 @@ import { AiAskAdmissionValidationError, type AiAskStreamAdmission, type AiAskStr
 import { consoleOperationalTelemetrySink, emitOperationalTelemetry, type AiAskStreamInput, type OperationalTelemetrySink, type RequestPrincipal } from "@xuyenviet/contracts";
 
 import { acquireAiAskCommand, finalizeAiAskCommand, readAiAskCommandTerminalResult, terminalizeAiAskCommand } from "./ai-ask-commands";
-import { ensureAiAskFreshnessWarning, requiresAiAskAnswerFinalization } from "./answer-freshness";
+import { ensureAiAskFreshnessWarning } from "./answer-freshness";
 import { getDb } from "./client";
 import { streamInitialAiAskAnswer } from "./gateway";
 import { getAiGatewayPricingSnapshot, selectActiveAiGatewayModel } from "./models";
@@ -42,7 +42,7 @@ type AuthenticatedSession = { userId: string; email: string };
 /** The HTTP adapters share this port; persistence remains in the original fenced command closure below. */
 export function createAiAskStreamExecutionPort(telemetry: OperationalTelemetrySink = consoleOperationalTelemetrySink): AiAskStreamExecutionPort {
   return {
-    async admit(input: AiAskStreamInput, principal: RequestPrincipal, correlationId: string, signal: AbortSignal): Promise<AiAskStreamAdmission> {
+    async admit(input: AiAskStreamInput, principal: RequestPrincipal, correlationId: string): Promise<AiAskStreamAdmission> {
       const acquisition = await acquireAiAskCommand({
         userId: principal.userId,
         idempotencyKey: input.idempotencyKey,
@@ -68,7 +68,10 @@ export function createAiAskStreamExecutionPort(telemetry: OperationalTelemetrySi
         return { kind: "admitted", execution: eventsFromTerminal(acquisition.commandId, "failed", result) };
       }
       const imageDataUrl = input.image ? `data:${input.image.mimeType};base64,${Buffer.from(input.image.bytes).toString("base64")}` : null;
-      return { kind: "admitted", execution: streamEvents({ abortSignal: signal, session: { userId: principal.userId, email: "" }, question: acquisition.question, tripProjectId: acquisition.tripProjectId ?? undefined, imageDataUrl, selectedModel, command: acquisition, correlationId, telemetry }) };
+      // A browser connection only owns its NDJSON relay. Once the command and user
+      // message are committed, generation must run to a durable terminal result even
+      // when navigation or a reload closes that relay.
+      return { kind: "admitted", execution: streamEvents({ abortSignal: new AbortController().signal, session: { userId: principal.userId, email: "" }, question: acquisition.question, tripProjectId: acquisition.tripProjectId ?? undefined, imageDataUrl, selectedModel, command: acquisition, correlationId, telemetry }) };
     },
   };
 }
@@ -175,19 +178,17 @@ async function streamAnswer({
       abortSignal,
     });
     const renderedSourceBundle = dependencies.buildSourceBundlePromptSection
-      ? { section: dependencies.buildSourceBundlePromptSection(sourceBundle), tripContext: { version: 1 as const, aggregateVersion: null, included: [], excluded: [], conflicts: [], serialization: "{}", promptDigest: "0".repeat(64) }, promptUsage: { tripProjectFactIndexes: [], chatFactIndexes: [], knowledgeCardIds: [], webRanks: [], generalReasoningUsed: false } }
+      ? { section: dependencies.buildSourceBundlePromptSection(sourceBundle), tripContext: { version: 1 as const, aggregateVersion: null, included: [], excluded: [], conflicts: [], serialization: "{}", promptDigest: "0".repeat(64) }, promptUsage: { tripProjectFactIndexes: [], chatFactIndexes: [], knowledgeCardIds: [], webRanks: [], generalReasoningUsed: false, sourceHandles: [] } }
       : dependencies.renderSourceBundlePromptSection(sourceBundle);
     const contextSection = renderedSourceBundle.section;
     const gatewayMessages = buildAiAskMessages({ question, history: saved.history, contextSection });
     const finalGatewayMessages = imageDataUrl ? attachImageToFinalUserMessage(gatewayMessages, imageDataUrl) : gatewayMessages;
-    const finalPolicyValidationRequired = requiresAiAskAnswerFinalization(sourceBundle);
     const gatewayResult = await streamInitialAiAskAnswer({
       model: selectedModel.gatewayModelName,
       messages: finalGatewayMessages,
       abortSignal,
       onDelta: async (content) => {
-        // Policy-constrained material must pass final answer guards before it reaches the traveler.
-        if (!finalPolicyValidationRequired) await sink.emit({ type: "delta", content });
+        await sink.emit({ type: "delta", content });
       },
     });
 
@@ -264,9 +265,7 @@ async function streamAnswer({
 
     const savedTurn = saved;
     const assistantContent = ensureAiAskFreshnessWarning(gatewayResult.content, sourceBundle);
-    if (finalPolicyValidationRequired) {
-      await sink.emit({ type: "delta", content: assistantContent.content });
-    } else if (assistantContent.appendedWarning) {
+    if (assistantContent.appendedWarning && !assistantContent.replacedUnsafeContent) {
       await sink.emit({ type: "delta", content: assistantContent.appendedWarning });
     }
     const finalization = await finalizeAiAskCommand(command.commandId, async (transaction, fencedCommand) => {
@@ -299,6 +298,7 @@ async function streamAnswer({
           tripAnswerContextSnapshotId: snapshot.id,
           sourceBundle,
           promptUsage: renderedSourceBundle.promptUsage,
+          reportedSourceHandles: gatewayResult.reportedSourceHandles,
         });
 
         await writeAiUsageEvent(transaction, {

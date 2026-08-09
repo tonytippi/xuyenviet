@@ -41,6 +41,7 @@ const aiAskSystemPrompt = [
   "Không dùng mục kiến thức bị loại khỏi gói nguồn làm tiền đề thực tế; thay vào đó có thể nêu sự chưa chắc chắn, khuyên xác minh, hỏi làm rõ, tìm thêm nguồn hoặc chọn phương án an toàn hơn.",
   "Nếu câu hỏi nằm ngoài trọng tâm Hà Nội - TP.HCM hoặc ngoài phạm vi dữ liệu tuyển chọn hiện có, hãy nói đây là gợi ý tổng quát và tránh khẳng định XuyenViet có dữ liệu địa phương đã kiểm chứng.",
   "Không đưa JSON annotation vào nội dung trả lời người dùng. Nếu hệ thống cần annotation nội bộ, server sẽ yêu cầu ở bước riêng và kiểm chứng phạm vi chữ/provenance trước khi hiển thị.",
+  "Sau khi soạn xong câu trả lời, hãy gọi tool nội bộ report_used_sources đúng một lần với provenance_handles là danh sách mã nguồn nội bộ đã thực sự ảnh hưởng đáng kể đến câu trả lời. Chỉ chọn mã có trong gói nguồn; dùng mảng rỗng nếu không dùng nguồn nào. Không nhắc tool hay mã nguồn này trong nội dung trả lời.",
 ].join("\n");
 
 const chatContextExtractionSystemPrompt = [

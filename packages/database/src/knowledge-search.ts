@@ -230,12 +230,14 @@ async function searchApprovedKnowledgeInternal(query: string | null | undefined,
 
   scoredDocuments.sort((left, right) => right.score - left.score || right.updatedAt.getTime() - left.updatedAt.getTime());
 
+  const candidates = await loadApprovedKnowledgeCandidates(db, scoredDocuments.map((document) => document.knowledgeCardId));
+
   for (const document of scoredDocuments) {
     if (!countAllCandidates && results.length >= limit) {
       break;
     }
 
-    const candidate = await loadApprovedKnowledgeCandidate(db, document.knowledgeCardId);
+    const candidate = candidates.get(document.knowledgeCardId) ?? emptyKnowledgeCandidate();
     const card = candidate.card;
 
     if (card && document.contentVersion === card.contentVersion) {
@@ -275,6 +277,22 @@ async function loadApprovedKnowledgeCandidate(db: Pick<KnowledgeSearchDb, "selec
   contentVersion: number | null;
   exclusion: { knowledgeState: string; verificationRequirement: string; reasons: KnowledgeTravelerPolicyReason[] } | null;
 }> {
+  return (await loadApprovedKnowledgeCandidates(db, [cardId], allowEvaluationFixture)).get(cardId) ?? emptyKnowledgeCandidate();
+}
+
+type ApprovedKnowledgeCandidate = {
+  card: Omit<KnowledgeSearchResult, "score"> | null;
+  contentVersion: number | null;
+  exclusion: { knowledgeState: string; verificationRequirement: string; reasons: KnowledgeTravelerPolicyReason[] } | null;
+};
+
+function emptyKnowledgeCandidate(): ApprovedKnowledgeCandidate {
+  return { card: null, contentVersion: null, exclusion: null };
+}
+
+async function loadApprovedKnowledgeCandidates(db: Pick<KnowledgeSearchDb, "select">, requestedCardIds: string[], allowEvaluationFixture = false): Promise<Map<string, ApprovedKnowledgeCandidate>> {
+  const cardIds = [...new Set(requestedCardIds.filter(Boolean))];
+  if (cardIds.length === 0) return new Map();
   const rows = await db
     .select({
       card: {
@@ -316,11 +334,22 @@ async function loadApprovedKnowledgeCandidate(db: Pick<KnowledgeSearchDb, "selec
     .from(knowledgeCards)
     .leftJoin(knowledgeCardSources, eq(knowledgeCardSources.knowledgeCardId, knowledgeCards.id))
     .leftJoin(sources, and(eq(sources.id, knowledgeCardSources.sourceId), eq(sources.eligibility, "eligible")))
-    .where(eq(knowledgeCards.id, cardId));
+    .where(inArray(knowledgeCards.id, cardIds));
+  const groupedCards = new Map(groupSearchRows(rows).map((card) => [card.id, card]));
+  const cards = new Map(rows.map((row) => [row.card.id, row.card]));
+  const evidenceByCardId = await loadActiveSupportingEvidenceByCardId(db, cardIds);
+  const candidates = new Map<string, ApprovedKnowledgeCandidate>();
 
-  const grouped = groupSearchRows(rows)[0];
-  const card = rows[0]?.card;
-  const evidence = await loadActiveSupportingEvidence(db, cardId);
+  for (const cardId of cardIds) {
+    const grouped = groupedCards.get(cardId);
+    const card = cards.get(cardId);
+    const evidence = evidenceByCardId.get(cardId) ?? null;
+    candidates.set(cardId, buildApprovedKnowledgeCandidate(grouped, card, evidence, allowEvaluationFixture));
+  }
+  return candidates;
+}
+
+function buildApprovedKnowledgeCandidate(grouped: Omit<KnowledgeSearchResult, "score" | "policy" | "policyReasons"> | undefined, card: KnowledgeCardStateForSearch & KnowledgeSearchCardSnapshot & { aiPromptVersion: string | null } | undefined, evidence: { activeTravelerSafeEvidenceCount: number; activeTravelerSafeIndependenceKeyCount: number; rows: ActiveSupportingEvidenceRow[] } | null, allowEvaluationFixture: boolean): ApprovedKnowledgeCandidate {
   const validatedSourceIds = new Set(evidence?.rows.map((row) => row.sourceId));
   const validatedSources = grouped?.sources.filter((source) => validatedSourceIds.has(source.id)) ?? [];
   const evaluationFixture = allowEvaluationFixture && card?.lifecycleState === "suppressed" && card.aiPromptVersion === "public_mvp_evaluation_fixture_v1";
@@ -329,25 +358,9 @@ async function loadApprovedKnowledgeCandidate(db: Pick<KnowledgeSearchDb, "selec
     ? evaluateKnowledgeTravelerPolicy({ ...policyCard, ...evidence })
     : { policy: "exclude" as const, reasons: ["missing_traveler_safe_evidence" as const] };
   if (!grouped || !card || !evidence || evaluation.policy === "exclude" || validatedSources.length === 0) {
-    return {
-      card: null,
-      contentVersion: card?.contentVersion ?? null,
-      exclusion: card ? { knowledgeState: card.knowledgeState, verificationRequirement: card.verificationRequirement, reasons: evaluation.reasons } : null,
-    };
+    return { card: null, contentVersion: card?.contentVersion ?? null, exclusion: card ? { knowledgeState: card.knowledgeState, verificationRequirement: card.verificationRequirement, reasons: evaluation.reasons } : null };
   }
-
-  return {
-    card: {
-      ...grouped,
-      ...(evaluationFixture ? { lifecycleState: "active" as const } : {}),
-      policy: evaluation.policy,
-      policyReasons: evaluation.reasons,
-      sources: validatedSources,
-      evidence: evidence.rows.map(toKnowledgeSearchEvidence),
-    },
-    contentVersion: card.contentVersion,
-    exclusion: null,
-  };
+  return { card: { ...grouped, ...(evaluationFixture ? { lifecycleState: "active" as const } : {}), policy: evaluation.policy, policyReasons: evaluation.reasons, sources: validatedSources, evidence: evidence.rows.map(toKnowledgeSearchEvidence) }, contentVersion: card.contentVersion, exclusion: null };
 }
 
 function emptyKnowledgeSearchPolicySummary(): KnowledgeSearchPolicySummary {
@@ -370,9 +383,10 @@ function recordExcludedCandidatePolicy(summary: KnowledgeSearchPolicySummary, ex
   }
 }
 
-async function loadActiveSupportingEvidence(db: Pick<KnowledgeSearchDb, "select">, cardId: string) {
+async function loadActiveSupportingEvidenceByCardId(db: Pick<KnowledgeSearchDb, "select">, cardIds: string[]) {
   const evidenceRows = await db
     .select({
+      cardId: knowledgeCardEvidence.knowledgeCardId,
       displayPolicy: knowledgeCardEvidence.displayPolicy,
       evidenceId: knowledgeCardEvidence.id,
       sourceId: knowledgeCardEvidence.sourceId,
@@ -399,7 +413,7 @@ async function loadActiveSupportingEvidence(db: Pick<KnowledgeSearchDb, "select"
         eq(sources.currentCaptureVersionId, knowledgeCardEvidence.captureVersionId),
       ))
     .where(and(
-      eq(knowledgeCardEvidence.knowledgeCardId, cardId),
+      inArray(knowledgeCardEvidence.knowledgeCardId, cardIds),
        eq(knowledgeCardEvidence.state, "active"),
        or(eq(knowledgeCardEvidence.supportLevel, "primary"), eq(knowledgeCardEvidence.supportLevel, "supporting")),
        or(eq(knowledgeCardEvidence.displayPolicy, "fact_only"), eq(knowledgeCardEvidence.displayPolicy, "traveler_visible")),
@@ -413,13 +427,9 @@ async function loadActiveSupportingEvidence(db: Pick<KnowledgeSearchDb, "select"
       asc(knowledgeCardEvidence.id),
     );
 
-  return evidenceRows.length > 0
-    ? {
-      activeTravelerSafeEvidenceCount: evidenceRows.length,
-      activeTravelerSafeIndependenceKeyCount: new Set(evidenceRows.map((row) => row.independenceKey)).size,
-      rows: evidenceRows,
-    }
-    : null;
+  const grouped = new Map<string, ActiveSupportingEvidenceRow[]>();
+  for (const row of evidenceRows) grouped.set(row.cardId, [...(grouped.get(row.cardId) ?? []), row]);
+  return new Map([...grouped].map(([cardId, rows]) => [cardId, { activeTravelerSafeEvidenceCount: rows.length, activeTravelerSafeIndependenceKeyCount: new Set(rows.map((row) => row.independenceKey)).size, rows }]));
 }
 
 function toKnowledgeSearchEvidence(row: ActiveSupportingEvidenceRow): KnowledgeSearchEvidence {

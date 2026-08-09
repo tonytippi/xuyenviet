@@ -39,6 +39,7 @@ export type AiGatewaySuccess = {
   latencyMs: number;
   usage: GatewayUsage;
   requestMetadata: GatewayRequestMetadata;
+  reportedSourceHandles?: string[] | null;
 };
 
 export type AiGatewayStreamFailure = {
@@ -106,6 +107,8 @@ export async function streamInitialAiAskAnswer({
         max_tokens: maxCompletionTokens,
         temperature: 0.3,
         stream: true,
+        tools: [reportedSourcesTool],
+        tool_choice: "auto",
       }),
     });
 
@@ -125,7 +128,11 @@ export async function streamInitialAiAskAnswer({
 
     const streamResult = await readOpenAiCompatibleStream(response.body, onDelta);
     const finalLatencyMs = Date.now() - startedAt;
-    const terminated = streamResult.done || streamResult.finishReason === "stop" || streamResult.finishReason === "length";
+    // Some OpenAI-compatible providers close an otherwise clean SSE response after
+    // its final content delta without emitting `[DONE]` or `finish_reason`.
+    // A clean EOF with content is sufficient for an answer; malformed frames and
+    // provider-declared errors remain failures below.
+    const terminated = streamResult.done || streamResult.finishReason === "stop" || streamResult.finishReason === "length" || streamResult.finishReason === "tool_calls" || streamResult.cleanEofWithContent;
 
     if (streamResult.failed || !terminated || !streamResult.content) {
       logGatewayFailure({ errorCode: "invalid_gateway_response", latencyMs: finalLatencyMs, model, timeoutMs: gatewayTimeoutMs, reason: streamResult.failed ? "stream_parse_failed" : streamResult.done ? "empty_stream_content" : "missing_terminal_signal" });
@@ -133,14 +140,15 @@ export async function streamInitialAiAskAnswer({
        return { ok: false, provider: "ai_gateway", model, latencyMs: finalLatencyMs, errorCode: streamResult.failed ? "gateway_stream_failed" : "invalid_gateway_response", requestMetadata: getGatewayRequestMetadata(response) };
     }
 
-    return {
+      return {
       ok: true,
       content: streamResult.content,
       provider: "ai_gateway",
       model: streamResult.model ?? model,
       latencyMs: finalLatencyMs,
        usage: streamResult.usage,
-       requestMetadata: getGatewayRequestMetadata(response),
+        requestMetadata: getGatewayRequestMetadata(response),
+        reportedSourceHandles: streamResult.reportedSourceHandles,
     };
   } catch (error) {
     const latencyMs = Date.now() - startedAt;
@@ -298,7 +306,8 @@ async function completeGatewayPrompt({
       model: parseModel(payload) ?? model,
       latencyMs,
        usage: parseUsage(payload),
-       requestMetadata: getGatewayRequestMetadata(response, payload),
+      requestMetadata: getGatewayRequestMetadata(response, payload),
+      reportedSourceHandles: null,
     };
   } catch (error) {
     const latencyMs = Date.now() - startedAt;
@@ -406,6 +415,21 @@ function parseUsage(payload: unknown): GatewayUsage {
   };
 }
 
+const reportedSourcesTool = {
+  type: "function",
+  function: {
+    name: "report_used_sources",
+    description: "Report the provided internal source handles that materially informed the completed answer.",
+    parameters: {
+      type: "object",
+      properties: { provenance_handles: { type: "array", items: { type: "string", minLength: 1, maxLength: 32 }, maxItems: 8 } },
+      required: ["provenance_handles"],
+      additionalProperties: false,
+    },
+  },
+} as const;
+const maxToolCallFragmentLength = 4_096;
+
 async function readOpenAiCompatibleStream(body: ReadableStream<Uint8Array>, onDelta: (delta: string) => Promise<void> | void) {
   const reader = body.getReader();
   const decoder = new TextDecoder();
@@ -416,6 +440,7 @@ async function readOpenAiCompatibleStream(body: ReadableStream<Uint8Array>, onDe
   let failed = false;
   let doneReceived = false;
   let finishReason: string | null = null;
+  const toolCalls = new Map<number, { name: string; arguments: string }>();
 
   while (true) {
     const { value, done } = await reader.read();
@@ -424,7 +449,7 @@ async function readOpenAiCompatibleStream(body: ReadableStream<Uint8Array>, onDe
     buffered = lines.pop() ?? "";
 
     for (const line of lines) {
-      const result = await processStreamLine(line, onDelta);
+      const result = await processStreamLine(line, onDelta, toolCalls);
       content += result.content;
       model = result.model ?? model;
       usage = mergeUsage(usage, result.usage);
@@ -439,7 +464,7 @@ async function readOpenAiCompatibleStream(body: ReadableStream<Uint8Array>, onDe
   }
 
   if (buffered.trim()) {
-    const result = await processStreamLine(buffered, onDelta);
+    const result = await processStreamLine(buffered, onDelta, toolCalls);
     content += result.content;
     model = result.model ?? model;
     usage = mergeUsage(usage, result.usage);
@@ -448,10 +473,11 @@ async function readOpenAiCompatibleStream(body: ReadableStream<Uint8Array>, onDe
     finishReason = result.finishReason ?? finishReason;
   }
 
-  return { content: content.trim(), model, usage, failed, done: doneReceived, finishReason };
+  const trimmedContent = content.trim();
+  return { content: trimmedContent, model, usage, failed, done: doneReceived, finishReason, cleanEofWithContent: !failed && !doneReceived && finishReason === null && trimmedContent.length > 0, reportedSourceHandles: parseReportedSourceHandles(toolCalls) };
 }
 
-async function processStreamLine(line: string, onDelta: (delta: string) => Promise<void> | void) {
+async function processStreamLine(line: string, onDelta: (delta: string) => Promise<void> | void, toolCalls: Map<number, { name: string; arguments: string }>) {
   const emptyUsage: GatewayUsage = { promptTokens: null, completionTokens: null, totalTokens: null, cachedPromptTokens: null, cacheWritePromptTokens: null };
   const trimmed = line.trim();
 
@@ -482,6 +508,8 @@ async function processStreamLine(line: string, onDelta: (delta: string) => Promi
 
     const delta = parseStreamDelta(payload);
 
+    collectStreamToolCalls(payload, toolCalls);
+
     if (delta) {
       await onDelta(delta);
     }
@@ -496,6 +524,36 @@ async function processStreamLine(line: string, onDelta: (delta: string) => Promi
     };
   } catch {
     return { content: "", model: null, usage: emptyUsage, failed: true, done: false, finishReason: null };
+  }
+}
+
+function collectStreamToolCalls(payload: unknown, toolCalls: Map<number, { name: string; arguments: string }>) {
+  if (!isRecord(payload) || !Array.isArray(payload.choices)) return;
+  const [choice] = payload.choices;
+  if (!isRecord(choice) || !isRecord(choice.delta) || !Array.isArray(choice.delta.tool_calls)) return;
+  for (const item of choice.delta.tool_calls) {
+    if (!isRecord(item) || !isRecord(item.function)) continue;
+    const index = item.index;
+    if (typeof index !== "number" || !Number.isSafeInteger(index) || index < 0) continue;
+    const current = toolCalls.get(index) ?? { name: "", arguments: "" };
+    if (typeof item.function.name === "string" && current.name.length + item.function.name.length <= maxToolCallFragmentLength) current.name += item.function.name;
+    else if (typeof item.function.name === "string") current.name = "[invalid]";
+    if (typeof item.function.arguments === "string" && current.arguments.length + item.function.arguments.length <= maxToolCallFragmentLength) current.arguments += item.function.arguments;
+    else if (typeof item.function.arguments === "string") current.arguments = "[invalid]";
+    toolCalls.set(index, current);
+  }
+}
+
+function parseReportedSourceHandles(toolCalls: Map<number, { name: string; arguments: string }>) {
+  if (toolCalls.size !== 1) return null;
+  const [toolCall] = toolCalls.values();
+  if (toolCall.name !== "report_used_sources") return null;
+  try {
+    const parsed = JSON.parse(toolCall.arguments) as unknown;
+    if (!isRecord(parsed) || Object.keys(parsed).length !== 1 || !Array.isArray(parsed.provenance_handles) || parsed.provenance_handles.length > 8 || !parsed.provenance_handles.every((handle) => typeof handle === "string" && handle.length > 0 && handle.length <= 32)) return null;
+    return parsed.provenance_handles;
+  } catch {
+    return null;
   }
 }
 

@@ -494,7 +494,11 @@ function normalizeForMatch(value: string) {
 
 export type TripContextReference = { kind: "anchor" | "plan_item" | "constraint" | "conversation_fact"; id: string; version: number | null };
 export type TripContextExclusion = TripContextReference & { reason: "prompt_cap" | "not_rendered" | "snapshot_bound" };
-export type PromptUsageLedger = { tripProjectFactIndexes: number[]; chatFactIndexes: number[]; knowledgeCardIds: string[]; webRanks: number[]; generalReasoningUsed: boolean };
+export type RenderedSourceHandle =
+  | { handle: string; sourceCategory: "knowledge"; cardId: string }
+  | { handle: string; sourceCategory: "web"; rank: number };
+
+export type PromptUsageLedger = { tripProjectFactIndexes: number[]; chatFactIndexes: number[]; knowledgeCardIds: string[]; webRanks: number[]; generalReasoningUsed: boolean; sourceHandles: RenderedSourceHandle[] };
 export type RenderedSourceBundle = { section: string; tripContext: { version: 1; aggregateVersion: number | null; included: TripContextReference[]; excluded: TripContextExclusion[]; conflicts: TripAnswerContext["conflicts"]; serialization: string; promptDigest: string }; promptUsage: PromptUsageLedger };
 
 export function renderSourceBundlePromptSection(bundle: ContextPrioritySourceBundle): RenderedSourceBundle {
@@ -529,7 +533,7 @@ export function renderSourceBundlePromptSection(bundle: ContextPrioritySourceBun
 
 export function buildSourceBundlePromptSection(bundle: ContextPrioritySourceBundle) { return renderSourceBundlePromptSection(bundle).section; }
 
-function buildRenderedSourceBundle(bundle: ContextPrioritySourceBundle, section: string, selection: { contextLimit: number; conflicts: AnswerContextDigest["conflicts"]; knowledgeCardIds: string[]; web: NormalizedWebSearchResult[] }): RenderedSourceBundle {
+function buildRenderedSourceBundle(bundle: ContextPrioritySourceBundle, initialSection: string, selection: { contextLimit: number; conflicts: AnswerContextDigest["conflicts"]; knowledgeCardIds: string[]; web: NormalizedWebSearchResult[] }): RenderedSourceBundle {
   const { contextLimit } = selection;
   const context = bundle.tripAnswerContext ?? { version: 1 as const, hasProjectScope: false, tripProjectId: null, aggregateVersion: null, primaryConversationId: null, anchors: bundle.chatTripContext.tripProjectFacts, planItems: [], constraints: null, currentConversationFacts: bundle.chatTripContext.chatFacts, conflicts: bundle.chatTripContext.conflicts };
   const references: TripContextReference[] = [
@@ -559,17 +563,45 @@ function buildRenderedSourceBundle(bundle: ContextPrioritySourceBundle, section:
     return { field: conflict.field, canonicalValue, lowerPriorityValue, projectValue: canonicalValue, conversationValue: lowerPriorityValue, source: conflict.source ?? "conversation_chat", priority: conflict.priority ?? "lower", material: conflict.material ?? true };
   });
   const serialization = boundSnapshotSerialization({ version: context.version, aggregateVersion: context.aggregateVersion, primaryConversationId: boundSnapshotId(context.primaryConversationId), anchors: context.anchors, planItems: context.planItems, constraints: context.constraints, currentConversationFacts: context.currentConversationFacts, conflicts });
+  const promptUsage = {
+    tripProjectFactIndexes: selectedFactIndexes(bundle.chatTripContext.tripProjectFacts, renderedTripFacts),
+    chatFactIndexes: selectedFactIndexes(bundle.chatTripContext.chatFacts, renderedChatFacts),
+    knowledgeCardIds: selection.knowledgeCardIds,
+    webRanks: selection.web.map((item) => item.rank),
+    generalReasoningUsed: true,
+  };
+  const sourceHandles = issueRenderedSourceHandles(promptUsage, initialSection.length);
+  const handleSection = sourceHandles.length > 0
+    ? `\nMã nguồn nội bộ cho báo cáo sử dụng (không hiển thị cho người dùng):\n${sourceHandles.map((entry) => `- ${entry.handle}: ${describeRenderedSourceHandle(entry)}`).join("\n")}`
+    : "";
+  const section = initialSection.replace("\nEND_CONTEXT_PRIORITY_SOURCE_BUNDLE", `${handleSection}\nEND_CONTEXT_PRIORITY_SOURCE_BUNDLE`);
   return {
     section,
     tripContext: { version: 1, aggregateVersion: context.aggregateVersion, included, excluded, conflicts, serialization, promptDigest: createHash("sha256").update(section).digest("hex") },
-    promptUsage: {
-      tripProjectFactIndexes: selectedFactIndexes(bundle.chatTripContext.tripProjectFacts, renderedTripFacts),
-      chatFactIndexes: selectedFactIndexes(bundle.chatTripContext.chatFacts, renderedChatFacts),
-      knowledgeCardIds: selection.knowledgeCardIds,
-      webRanks: selection.web.map((item) => item.rank),
-      generalReasoningUsed: true,
-    },
+    promptUsage: { ...promptUsage, sourceHandles },
   };
+}
+
+function issueRenderedSourceHandles(promptUsage: Omit<PromptUsageLedger, "sourceHandles">, initialSectionLength: number): RenderedSourceHandle[] {
+  const entries: Omit<RenderedSourceHandle, "handle">[] = [
+    ...promptUsage.knowledgeCardIds.map((cardId) => ({ sourceCategory: "knowledge" as const, cardId })),
+    ...promptUsage.webRanks.map((rank) => ({ sourceCategory: "web" as const, rank })),
+  ].slice(0, 8);
+  const availableCharacters = maxSourceBundleSectionLength - initialSectionLength;
+  const handles: RenderedSourceHandle[] = [];
+  for (const entry of entries) {
+    const handle = `source_${String(handles.length + 1).padStart(2, "0")}`;
+    const candidate = { ...entry, handle } as RenderedSourceHandle;
+    const requiredCharacters = (handles.length === 0 ? 82 : 0) + `\n- ${handle}: ${describeRenderedSourceHandle(candidate)}`.length;
+    if (availableCharacters < handles.reduce((total, item) => total + `\n- ${item.handle}: ${describeRenderedSourceHandle(item)}`.length, 0) + requiredCharacters) break;
+    handles.push(candidate);
+  }
+  return handles;
+}
+
+function describeRenderedSourceHandle(handle: RenderedSourceHandle) {
+  if (handle.sourceCategory === "knowledge") return "mục kiến thức Xuyên Việt tương ứng";
+  return `nguồn web rank=${handle.rank}`;
 }
 
 function selectedFactIndexes(facts: AnswerContextFact[], rendered: AnswerContextFact[]) {

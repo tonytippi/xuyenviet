@@ -2,7 +2,7 @@
 title: XuyenViet AI Travel Information MVP PRD
 status: final
 created: 2026-07-04
-updated: 2026-08-06
+updated: 2026-08-09
 ---
 
 # XuyenViet AI Travel Information MVP PRD
@@ -147,6 +147,7 @@ Internal owner or future small operations team member who collects travel inform
 - FR-6A: The system shall stream AI Ask assistant responses when the selected Gateway model and orchestration path support streaming, but only after required context, source-bundle, and provenance inputs are assembled.
 - FR-6B: The system shall allow authenticated users to submit supported image inputs with AI Ask messages when using an image-capable Gateway model.
 - FR-6C: The system shall validate image inputs for size, type, ownership, and safety before any provider call, and invalid image submissions shall not create provider calls.
+- FR-6D: Once an AI Ask request is admitted and its user message is persisted, browser reloads, chat switches, or HTTP stream disconnects shall not cancel answer generation while the API process remains alive; the browser stream is a best-effort relay and the persisted terminal answer is authoritative when the traveler returns to the conversation.
 - FR-7: The system shall format travel answers as a calm Vietnamese conversation with suggested plan/options, rationale, practical tips, concise verification guidance when relevant, and next steps. Technical source/provenance, reasoning, audit, processing, and provider information shall not occupy the default traveler reading path.
 
 ### 8.2 User Authentication, Chats, And Trips
@@ -216,6 +217,8 @@ Internal owner or future small operations team member who collects travel inform
 - FR-30: The system shall prioritize answer context in this order: selected trip project context, current chat session context, active XuyenViet knowledge, web search fallback, and general AI knowledge.
 - FR-31: The system shall use web search fallback when active knowledge is missing, sparse, freshness-sensitive, unavailable because it is pending operator work, or conflicted.
 - FR-32: The system shall persist and make auditable whether answer information came from chat/trip context, XuyenViet knowledge cards, web search, or general AI reasoning. This classification is not default traveler-facing copy.
+- FR-32A: The system may ask the answer-generation model, in the same server-side request, to report which rendered knowledge or web source handles materially informed the answer. The server shall validate those handles against the same-turn source bundle and persist only validated attribution as `citedInAnswer`; missing or malformed attribution shall not fail a valid answer.
+- FR-32B: `citedInAnswer` is not the same as source availability or prompt use. The system shall preserve `usedInPrompt` for sources rendered into the answer prompt and `citedInAnswer` only for sources explicitly reported by the model through the validated internal attribution tool.
 - FR-33: The system shall warn users to verify changing details before acting or booking.
 - FR-34: The system shall avoid presenting unverified collected information as guaranteed fact.
 - FR-35: Web search results used in answers shall be shown as external/unverified unless ingested into an active knowledge card that meets the applicable publication policy.
@@ -255,8 +258,10 @@ Internal owner or future small operations team member who collects travel inform
 - FR-55: The system shall provide a stable API error contract with machine-readable code, safe message, request/correlation ID, and applicable safe field violations without sensitive internals.
 - FR-56: The system shall document versioned health/version and protected-capability API contracts, including validation, authorization, ownership, pagination/stable ordering, streaming semantics where applicable, and browser-session/CSRF admission requirements.
 - FR-57: The system shall run continuous background work in a dedicated worker runtime and bounded sweeps as scheduled one-shot commands using existing PostgreSQL job, claim, lease, fencing, and idempotency protocols.
+- FR-57A: Post-answer enrichment such as chat/trip context extraction, answer text-range annotations, and Trip Change Proposal drafting shall remain worker-owned outbox consumers. These consumers may add context, `messages.answer_annotations`, or user-confirmable proposal actions, but they shall not change the completed answer content, terminal command result, initial provenance, or successful-answer usage.
 - FR-58: The system shall preserve one writer per aggregate command during migration; route each request to exactly one transport owner and never dual-write product state.
 - FR-59: The system shall move AI Ask streaming to the versioned API while preserving `preparing`, `delta`, `done`, and `error` NDJSON events, abort behavior, and atomic terminal persistence.
+- FR-59A: OpenAI-compatible streamed providers that return answer content and then close the stream without `[DONE]` or `finish_reason` may be treated as successful only when the stream is otherwise well-formed, non-empty, and contains no provider-declared error or parse failure.
 - FR-60: The system shall retire Auth.js, legacy Next.js domain route handlers, server-action writers, BFF transport, and the legacy `/admin` operational surface before public launch.
 
 ## 9. Non-Functional Requirements

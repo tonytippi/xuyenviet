@@ -59,6 +59,7 @@ export async function persistAssistantAnswerProvenance(db: ProvenanceDb, input: 
   tripAnswerContextSnapshotId?: string | null;
   sourceBundle: ContextPrioritySourceBundle;
   promptUsage?: PromptUsageLedger;
+  reportedSourceHandles?: string[] | null;
 }) {
   // This boundary must own a transaction even for root-DB callers: its writer
   // admission, locks, classification, and insert must share one session.
@@ -73,8 +74,9 @@ async function persistAssistantAnswerProvenanceInTransaction(db: Exclude<Provena
   tripAnswerContextSnapshotId?: string | null;
   sourceBundle: ContextPrioritySourceBundle;
   promptUsage?: PromptUsageLedger;
+  reportedSourceHandles?: string[] | null;
 }) {
-  const { userId, conversationId, userMessageId, assistantMessageId, tripAnswerContextSnapshotId, sourceBundle, promptUsage } = input;
+  const { userId, conversationId, userMessageId, assistantMessageId, tripAnswerContextSnapshotId, sourceBundle, promptUsage, reportedSourceHandles } = input;
 
   // The migration takes this same key exclusively. It drains coordinated
   // finalization before cutover while its table lock fences legacy inserts.
@@ -101,7 +103,7 @@ async function persistAssistantAnswerProvenanceInTransaction(db: Exclude<Provena
     knowledgePolicySnapshot: sourceBundle.retrievalDecision.knowledgePolicySummary ?? null,
   });
 
-  const rows = buildProvenanceRows({ userId, conversationId, userMessageId, assistantMessageId, tripAnswerContextSnapshotId, sourceBundle, promptUsage });
+  const rows = buildProvenanceRows({ userId, conversationId, userMessageId, assistantMessageId, tripAnswerContextSnapshotId, sourceBundle, promptUsage, reportedSourceHandles });
 
   if (rows.length > 0) {
     await classifyAssistantProvenanceRowsForInsertion(db, rows);
@@ -113,6 +115,17 @@ async function persistAssistantAnswerProvenanceInTransaction(db: Exclude<Provena
   }
 
   return [];
+}
+
+function resolveReportedSourceReferences(promptUsage: PromptUsageLedger | undefined, reportedHandles: string[] | null | undefined) {
+  if (!promptUsage || !reportedHandles || new Set(reportedHandles).size !== reportedHandles.length) return [];
+  const referenced = new Set(reportedHandles);
+  const handles = promptUsage.sourceHandles;
+  if (!handles || handles.length > 8 || [...referenced].some((handle) => !handles.some((candidate) => candidate.handle === handle))) return [];
+  return handles.flatMap((handle) => {
+    if (!referenced.has(handle.handle)) return [];
+    return [handle];
+  });
 }
 
 export function formatAssistantMessageProvenance(rows: AssistantProvenanceRow[]): AssistantMessageProvenanceItem[] {
@@ -154,6 +167,7 @@ function buildProvenanceRows({
   tripAnswerContextSnapshotId,
   sourceBundle,
   promptUsage,
+  reportedSourceHandles,
 }: {
   userId: string;
   conversationId: string;
@@ -162,9 +176,11 @@ function buildProvenanceRows({
   tripAnswerContextSnapshotId?: string | null;
   sourceBundle: ContextPrioritySourceBundle;
   promptUsage?: PromptUsageLedger;
+  reportedSourceHandles?: string[] | null;
 }) {
   const rows: Array<typeof assistantResponseProvenance.$inferInsert> = [];
   let rank = 1;
+  const citedSources = resolveReportedSourceReferences(promptUsage, reportedSourceHandles);
 
   for (const [index, fact] of sourceBundle.chatTripContext.tripProjectFacts.entries()) {
     rows.push(createRow({ userId, conversationId, userMessageId, assistantMessageId, tripAnswerContextSnapshotId, rank: rank++, sourceCategory: "trip_context", verificationStatus: "verified", sourceType: fact.field, usedInPrompt: promptUsage?.tripProjectFactIndexes.includes(index) ?? false, sourceSnapshot: { field: fact.field, source: fact.source } }));
@@ -190,6 +206,7 @@ function buildProvenanceRows({
       sourceType: result.type,
         verificationStatus: result.verificationRequirement === "operator_required" || result.evidence.some((evidence) => evidence.verificationStatus === "unverified") ? "unverified" : "verified",
       usedInPrompt: promptUsage?.knowledgeCardIds.includes(result.cardId) ?? false,
+      citedInAnswer: citedSources.some((handle) => handle.sourceCategory === "knowledge" && handle.cardId === result.cardId),
       sourceSnapshot: buildStateAwareKnowledgeSnapshot(result),
     }));
   }
@@ -209,6 +226,7 @@ function buildProvenanceRows({
       sourceType: result.sourceType,
       verificationStatus: "unverified",
       usedInPrompt: promptUsage?.webRanks.includes(result.rank) ?? false,
+      citedInAnswer: citedSources.some((handle) => handle.sourceCategory === "web" && handle.rank === result.rank),
       sourceSnapshot: {
         title: getSafeWebTitle(result.title),
         url: getSafeTravelerUrl(result.url),
@@ -286,6 +304,7 @@ function createRow(input: {
   sourceType?: string | null;
   verificationStatus: "unverified" | "verified";
   usedInPrompt?: boolean;
+  citedInAnswer?: boolean;
   sourceSnapshot: Record<string, unknown>;
 }): typeof assistantResponseProvenance.$inferInsert {
   return {
@@ -302,7 +321,7 @@ function createRow(input: {
     sourceType: input.sourceType ?? null,
     verificationStatus: input.verificationStatus,
     usedInPrompt: input.usedInPrompt ?? true,
-    citedInAnswer: false,
+    citedInAnswer: input.citedInAnswer ?? false,
     sourceSnapshot: boundSnapshot(input.sourceSnapshot),
   };
 }

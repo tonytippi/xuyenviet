@@ -20,11 +20,12 @@ describe("direct shell proposal actions", () => {
     expect(source).not.toContain("parse answer text");
   });
 
-  test("keeps project management in navigation and recovers stale scoped shells safely", () => {
+  test("keeps project management in navigation and preserves stale scoped URLs safely", () => {
     const loader = readFileSync("apps/web/src/features/chat-trips/direct-shell-loader.tsx", "utf8");
     const composer = readFileSync("apps/web/src/features/ai/ai-ask-composer.tsx", "utf8");
-    expect(loader).toContain('router.replace("/ai-ask")');
     expect(loader).toContain("Không thể mở chuyến đi này. Bạn có thể chọn một chuyến đi khác hoặc tiếp tục hỏi XuyenViet.");
+    expect(loader).toContain("Replacing unmounts an active composer and aborts its stream.");
+    expect(loader).not.toContain('router.replace("/ai-ask")');
     expect(composer).toContain("Tạo chuyến đi");
     expect(composer).toContain("Xóa chuyến đi này");
     expect(composer).toContain("focusAfterNavigationRef.current = \"composer\"");

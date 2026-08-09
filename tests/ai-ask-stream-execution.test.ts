@@ -18,7 +18,9 @@ describe("AI Ask stream execution", () => {
     const [project] = await testDb.insert(tripProjects).values({ userId: "user-1", title: "Huế" }).returning({ id: tripProjects.id });
     const [conversation] = await testDb.insert(conversations).values({ userId: "user-1", tripProjectId: project.id }).returning({ id: conversations.id });
     await testDb.update(tripProjects).set({ primaryConversationId: conversation.id }).where(eq(tripProjects.id, project.id));
-    const bundle = sourceBundle();
+    const bundle = sourceBundle({
+      web: [{ query: "Đi đâu?", title: "Nguồn web", url: "https://example.com", snippet: "Thông tin tham khảo", provider: "tavily", checkedAt: new Date("2026-08-07T00:00:00.000Z"), sourceType: "official", confidence: "unverified", triggerReason: "no_active_knowledge", rank: 1 }],
+    });
     const rendered = renderSourceBundlePromptSection(bundle);
     setAiAskStreamTestDependencies({ assembleContextPrioritySourceBundle: vi.fn().mockResolvedValue(bundle) });
     mockGateway();
@@ -41,6 +43,131 @@ describe("AI Ask stream execution", () => {
     expect(provenance).toHaveLength(3);
     expect(provenance.every((row) => row.tripAnswerContextSnapshotId === snapshot.id)).toBe(true);
     expect(provenance.map((row) => row.usedInPrompt)).toEqual([true, true, true]);
+  });
+
+  test("persists only valid fragmented source attribution and keeps tool metadata out of answer deltas", async () => {
+    await seedUserAndModel();
+    const [conversation] = await testDb.insert(conversations).values({ userId: "user-1" }).returning({ id: conversations.id });
+    const bundle = sourceBundle();
+    const rendered = renderSourceBundlePromptSection(bundle);
+    setAiAskStreamTestDependencies({ assembleContextPrioritySourceBundle: vi.fn().mockResolvedValue(bundle) });
+    mockGatewayWithToolCalls([
+      { index: 0, function: { name: "report_used_", arguments: "{\"provenance_" } },
+      { index: 0, function: { name: "sources", arguments: "handles\":[\"source_01\"]}" } },
+    ]);
+
+    const events = await collect(await port().admit({ question: "Đi đâu?", idempotencyKey: "source_attribution_test".padEnd(24, "x"), conversationId: conversation.id }, principal(), "request-1", new AbortController().signal));
+    const provenance = await testDb.select().from(assistantResponseProvenance);
+    const request = JSON.parse((vi.mocked(fetch).mock.calls[0]?.[1] as RequestInit).body as string);
+
+    expect(request.tools).toEqual([expect.objectContaining({ function: expect.objectContaining({ name: "report_used_sources" }) })]);
+    expect(request.tool_choice).toBe("auto");
+    expect(rendered.promptUsage.sourceHandles.map((item) => item.handle)).toEqual(["source_01"]);
+    expect(events).toContainEqual({ type: "delta", content: "Gợi ý an toàn." });
+    expect(JSON.stringify(events)).not.toContain("report_used_sources");
+    expect(JSON.stringify(events)).not.toContain("source_01");
+    expect(provenance.map((row) => row.citedInAnswer)).toEqual([false, false, true, false]);
+  });
+
+  test.each([
+    [[{ index: 0, function: { name: "other_tool", arguments: "{\"provenance_handles\":[\"source_01\"]}" } }]],
+    [[{ index: 0, function: { name: "report_used_sources", arguments: "{\"provenance_handles\":[\"unknown\"]}" } }]],
+    [[{ index: 0, function: { name: "report_used_sources", arguments: "{\"provenance_handles\":[\"source_01\",\"source_01\"]}" } }]],
+    [[{ index: 0, function: { name: "report_used_sources", arguments: "not-json" } }]],
+  ])("completes without citations for invalid source attribution metadata", async (toolCalls) => {
+    await seedUserAndModel();
+    const [conversation] = await testDb.insert(conversations).values({ userId: "user-1" }).returning({ id: conversations.id });
+    setAiAskStreamTestDependencies({ assembleContextPrioritySourceBundle: vi.fn().mockResolvedValue(sourceBundle()) });
+    mockGatewayWithToolCalls(toolCalls);
+
+    const events = await collect(await port().admit({ question: "Đi đâu?", idempotencyKey: `invalid_source_${Math.random()}`.padEnd(24, "x"), conversationId: conversation.id }, principal(), "request-1", new AbortController().signal));
+    const provenance = await testDb.select().from(assistantResponseProvenance);
+
+    expect(events.at(-1)).toMatchObject({ type: "done" });
+    expect(provenance.every((row) => !row.citedInAnswer)).toBe(true);
+  });
+
+  test.each([
+    { warning: "web_search_load_failed" as const, reason: "no_active_knowledge" as const },
+    { warning: "web_search_low_quality" as const, reason: "insufficient_active_knowledge" as const },
+  ])("retains broad planning guidance with a bounded warning when $warning follows $reason", async ({ warning, reason }) => {
+    await seedUserAndModel();
+    const [conversation] = await testDb.insert(conversations).values({ userId: "user-1" }).returning({ id: conversations.id });
+    setAiAskStreamTestDependencies({ assembleContextPrioritySourceBundle: vi.fn().mockResolvedValue(sourceBundle({
+      warnings: [warning],
+      retrievalDecision: { broadPlanningQuestion: true, webSearchTriggered: true, webSearchTriggerReasons: [reason] },
+    })) });
+    mockGateway("Chia hành trình thành các chặng ngắn và dành thời gian nghỉ hợp lý.");
+
+    const events = await collect(await port().admit({ question: "Gợi ý lịch trình road trip 5 ngày", idempotencyKey: "general_fallback_test".padEnd(24, "x"), conversationId: conversation.id }, principal(), "request-1", new AbortController().signal));
+    const [assistantMessage] = await testDb.select().from(messages).where(eq(messages.role, "assistant"));
+
+    expect(events).toContainEqual({ type: "delta", content: "Chia hành trình thành các chặng ngắn và dành thời gian nghỉ hợp lý." });
+    expect(assistantMessage?.content).toContain("Chia hành trình thành các chặng ngắn");
+    expect(assistantMessage?.content).toContain("Mình chưa thể xác minh các thông tin hiện tại từ nguồn bên ngoài.");
+  });
+
+  test("replaces unsupported output for a freshness-sensitive request when web fallback fails", async () => {
+    await seedUserAndModel();
+    const [conversation] = await testDb.insert(conversations).values({ userId: "user-1" }).returning({ id: conversations.id });
+    setAiAskStreamTestDependencies({ assembleContextPrioritySourceBundle: vi.fn().mockResolvedValue(sourceBundle({
+      warnings: ["web_search_low_quality"],
+      retrievalDecision: { freshnessRequired: true, webSearchTriggered: true, webSearchTriggerReasons: ["freshness_sensitive_request"] },
+    })) });
+    mockGateway("Giá vé hôm nay là 100.000 đồng.");
+
+    const events = await collect(await port().admit({ question: "Giá vé hôm nay bao nhiêu?", idempotencyKey: "dynamic_fallback_test".padEnd(24, "x"), conversationId: conversation.id }, principal(), "request-1", new AbortController().signal));
+    const [assistantMessage] = await testDb.select().from(messages).where(eq(messages.role, "assistant"));
+
+    expect(events).toContainEqual({ type: "delta", content: "Giá vé hôm nay là 100.000 đồng." });
+    expect(events).not.toContainEqual(expect.objectContaining({ type: "delta", content: expect.stringContaining("Mình chưa thể xác minh thông tin hiện tại") }));
+    expect(assistantMessage?.content).toContain("Mình chưa thể xác minh thông tin hiện tại từ nguồn bên ngoài.");
+    expect(assistantMessage?.content).not.toContain("Giá vé hôm nay là 100.000 đồng.");
+  });
+
+  test("persists an answer after the browser stops consuming an admitted stream", async () => {
+    await seedUserAndModel();
+    const [conversation] = await testDb.insert(conversations).values({ userId: "user-1" }).returning({ id: conversations.id });
+    let releaseBundle!: () => void;
+    const bundlePending = new Promise<void>((resolve) => { releaseBundle = resolve; });
+    const receivedSignals: AbortSignal[] = [];
+    setAiAskStreamTestDependencies({
+      assembleContextPrioritySourceBundle: vi.fn().mockImplementation(async (input) => {
+        receivedSignals.push(input.abortSignal!);
+        await bundlePending;
+        return sourceBundle();
+      }),
+    });
+    mockGateway();
+    const browser = new AbortController();
+    const admission = await port().admit({ question: "Đi đâu?", idempotencyKey: "persist_after_disconnect".padEnd(24, "x"), conversationId: conversation.id }, principal(), "request-1", browser.signal);
+    expect(admission.kind).toBe("admitted");
+    const iterator = (admission as Extract<typeof admission, { kind: "admitted" }>).execution[Symbol.asyncIterator]();
+
+    await expect(iterator.next()).resolves.toMatchObject({ value: { type: "preparing" } });
+    browser.abort();
+    await iterator.return?.();
+    releaseBundle();
+
+    await vi.waitFor(async () => {
+      const assistantMessages = await testDb.select().from(messages).where(eq(messages.role, "assistant"));
+      expect(assistantMessages).toHaveLength(1);
+    });
+    expect(receivedSignals).toHaveLength(1);
+    expect(receivedSignals[0]?.aborted).toBe(false);
+    await expect(testDb.select({ status: aiAskCommands.status }).from(aiAskCommands)).resolves.toEqual([{ status: "completed" }]);
+  });
+
+  test("persists a clean gateway EOF without provider terminal metadata", async () => {
+    await seedUserAndModel();
+    const [conversation] = await testDb.insert(conversations).values({ userId: "user-1" }).returning({ id: conversations.id });
+    setAiAskStreamTestDependencies({ assembleContextPrioritySourceBundle: vi.fn().mockResolvedValue(sourceBundle()) });
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response('data: {"model":"test/answer","choices":[{"delta":{"content":"Gợi ý an toàn."}}]}\n\n', { status: 200, headers: { "content-type": "text/event-stream" } })));
+
+    const events = await collect(await port().admit({ question: "Đi đâu?", idempotencyKey: "clean_gateway_eof".padEnd(24, "x"), conversationId: conversation.id }, principal(), "request-1", new AbortController().signal));
+
+    expect(events.at(-1)).toMatchObject({ type: "done", assistantMessage: { content: "Gợi ý an toàn." } });
+    await expect(testDb.select({ status: aiAskCommands.status }).from(aiAskCommands)).resolves.toEqual([{ status: "completed" }]);
   });
 
   test.each(["aggregate", "deletion"])("does not persist a partial snapshot or completed answer when the %s fence changes during generation", async (race) => {
@@ -149,17 +276,23 @@ async function seedUserAndModel() {
   await testDb.insert(aiGatewayModels).values({ id: "answer-model", gatewayModelName: "test/answer", displayLabel: "Test", purpose: "ai_ask_initial_answer", defaultForPurpose: true, supportsTextInput: true, supportsStreaming: true });
 }
 
-function sourceBundle(): ContextPrioritySourceBundle {
+function sourceBundle(overrides?: { warnings?: ContextPrioritySourceBundle["warnings"]; retrievalDecision?: Partial<ContextPrioritySourceBundle["retrievalDecision"]>; web?: ContextPrioritySourceBundle["web"] }): ContextPrioritySourceBundle {
   return {
     tripAnswerContext: { version: 1, hasProjectScope: true, tripProjectId: "project", aggregateVersion: 1, primaryConversationId: "conversation", anchors: [{ field: "destination", value: "Huế", source: "trip_project" }], planItems: [], constraints: null, currentConversationFacts: [{ field: "budget", value: "5 triệu", source: "conversation" }], conflicts: [{ field: "destination", canonicalValue: "Huế", lowerPriorityValue: "Đà Lạt", projectValue: "Huế", conversationValue: "Đà Lạt", source: "conversation_chat", priority: "lower", material: true }] },
     chatTripContext: { tripProjectFacts: [{ field: "destination", value: "Huế", source: "trip_project" }], chatFacts: [{ field: "budget", value: "5 triệu", source: "conversation" }], conflicts: [{ field: "destination", canonicalValue: "Huế", lowerPriorityValue: "Đà Lạt", projectValue: "Huế", conversationValue: "Đà Lạt", source: "conversation_chat", priority: "lower", material: true }] },
-    knowledge: [], web: [], general: { available: true }, warnings: [],
-    retrievalDecision: { approvedKnowledgeCandidateCount: 0, approvedKnowledgeSelectedCount: 0, approvedKnowledgeTargetCount: 3, approvedKnowledgeRelevanceThreshold: 1, broadPlanningQuestion: false, freshnessRequired: false, conflictDetected: false, webSearchTriggered: false, webSearchTriggerReasons: [], generalReasoningUsed: true },
+    knowledge: [], web: overrides?.web ?? [], general: { available: true },
+    retrievalDecision: { approvedKnowledgeCandidateCount: 0, approvedKnowledgeSelectedCount: 0, approvedKnowledgeTargetCount: 3, approvedKnowledgeRelevanceThreshold: 1, broadPlanningQuestion: false, freshnessRequired: false, conflictDetected: false, webSearchTriggered: false, webSearchTriggerReasons: [], generalReasoningUsed: true, ...overrides?.retrievalDecision },
+    warnings: overrides?.warnings ?? [],
   };
 }
 
-function mockGateway() {
-  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response('data: {"model":"test/answer","choices":[{"delta":{"content":"Gợi ý an toàn."}}]}\n\ndata: {"choices":[{"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n', { status: 200, headers: { "content-type": "text/event-stream" } })));
+function mockGateway(content = "Gợi ý an toàn.") {
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(`data: {"model":"test/answer","choices":[{"delta":{"content":${JSON.stringify(content)}}}]}\n\ndata: {"choices":[{"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n`, { status: 200, headers: { "content-type": "text/event-stream" } })));
+}
+
+function mockGatewayWithToolCalls(toolCalls: unknown[]) {
+  const toolDeltas = toolCalls.map((toolCall) => `data: ${JSON.stringify({ choices: [{ delta: { tool_calls: [toolCall] } }] })}\n\n`).join("");
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(`data: {"model":"test/answer","choices":[{"delta":{"content":"Gợi ý an toàn."}}]}\n\n${toolDeltas}data: {"choices":[{"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n`, { status: 200, headers: { "content-type": "text/event-stream" } })));
 }
 
 async function collect(admission: Awaited<ReturnType<ReturnType<typeof port>["admit"]>>) {

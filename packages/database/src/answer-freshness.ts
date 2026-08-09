@@ -7,10 +7,15 @@ export function ensureAiAskFreshnessWarning(content: string, sourceBundle: Await
   const caveatWarningRequired = caveatOnlyKnowledge.length > 0;
   const externalVerificationRequired = sourceBundle.retrievalDecision.webSearchTriggered
     && (sourceBundle.warnings.includes("web_search_load_failed") || sourceBundle.warnings.includes("web_search_low_quality"));
+  const retainGeneralPlanningContent = externalVerificationRequired
+    && sourceBundle.retrievalDecision.broadPlanningQuestion
+    && sourceBundle.retrievalDecision.webSearchTriggerReasons.length > 0
+    && sourceBundle.retrievalDecision.webSearchTriggerReasons.every(isMissingKnowledgeCoverageReason)
+    && !freshnessWarningRequired;
   const successfulWebFallbackVerificationRequired = sourceBundle.web.length > 0
     && sourceBundle.retrievalDecision.webSearchTriggerReasons.some(requiresWebFallbackVerificationGuidance);
 
-  if (externalVerificationRequired) {
+  if (externalVerificationRequired && !retainGeneralPlanningContent) {
     const fallback = `Cảnh báo cần kiểm tra\nMình chưa thể xác minh thông tin hiện tại từ nguồn bên ngoài. Hãy xác nhận trực tiếp với nguồn chính thức hoặc nhà cung cấp trước khi đi, hành động hoặc đặt dịch vụ.${caveatWarningRequired ? ` ${formatCaveatVerificationInstruction(caveatOnlyKnowledge)}` : ""}`;
     return { content: fallback, appendedWarning: fallback, replacedUnsafeContent: true };
   }
@@ -23,6 +28,11 @@ export function ensureAiAskFreshnessWarning(content: string, sourceBundle: Await
   if (conditionalKnowledge.some((item) => !hasEveryMaterialCondition(content, item.conditions))) {
     const fallback = `Điều kiện cần giữ\nMình chưa thể dùng thông tin có điều kiện để khuyến nghị hoặc chốt lịch trình khi thiếu điều kiện vật chất. ${formatConditionalUseInstruction(conditionalKnowledge)}`;
     return { content: fallback, appendedWarning: fallback, replacedUnsafeContent: true };
+  }
+
+  if (retainGeneralPlanningContent) {
+    const appendedWarning = "\n\nCảnh báo cần kiểm tra\nMình chưa thể xác minh các thông tin hiện tại từ nguồn bên ngoài. Hãy xác nhận trực tiếp với nguồn chính thức hoặc nhà cung cấp trước khi đi, hành động hoặc đặt dịch vụ.";
+    return { content: `${content.trimEnd()}${appendedWarning}`, appendedWarning, replacedUnsafeContent: false };
   }
 
   if (!freshnessWarningRequired && !caveatWarningRequired && !externalVerificationRequired && !successfulWebFallbackVerificationRequired) {
@@ -72,11 +82,8 @@ function getVerificationTarget(item: Awaited<ReturnType<typeof assembleContextPr
   return `tình trạng hiện tại của "${title}"`;
 }
 
-export function requiresAiAskAnswerFinalization(sourceBundle: Awaited<ReturnType<typeof assembleContextPrioritySourceBundle>>) {
-  return sourceBundle.warnings.includes("web_search_load_failed")
-    || sourceBundle.warnings.includes("web_search_low_quality")
-    || (sourceBundle.web.length > 0 && sourceBundle.retrievalDecision.webSearchTriggerReasons.some(requiresWebFallbackVerificationGuidance))
-    || sourceBundle.knowledge.some((item) => item.policy === "caveat_only" || item.verificationRequirement === "operator_required" || (item.policy === "contextual_use" && item.knowledgeState === "conditional" && item.conditions.length > 0));
+function isMissingKnowledgeCoverageReason(reason: string) {
+  return reason === "no_active_knowledge" || reason === "insufficient_active_knowledge";
 }
 
 function requiresWebFallbackVerificationGuidance(reason: string) {

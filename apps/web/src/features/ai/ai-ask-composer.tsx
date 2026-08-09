@@ -543,7 +543,7 @@ function getAnnotationClassName(annotation: AnswerAnnotation) {
 }
 
 export function AssistantProvenanceBlock({ provenance, selectedEntityId, detailPanelIds, onSelectEntity }: { provenance?: AssistantMessageProvenanceItem[]; selectedEntityId?: string; detailPanelIds?: string; onSelectEntity?: (entity: AnswerEntityDescriptor, trigger: HTMLElement) => void }) {
-  const visibleItems = provenance?.filter((item): item is AvailableAssistantMessageProvenanceItem | Extract<AssistantMessageProvenanceItem, { availability: "withdrawn" }> => item.availability === "withdrawn" || (item.sourceCategory !== "general" && (item.freshnessSensitive || item.verificationStatus === "unverified" || Boolean(getSafeTravelerUrl(item.url))))) ?? [];
+  const visibleItems = provenance?.filter((item): item is AvailableAssistantMessageProvenanceItem | Extract<AssistantMessageProvenanceItem, { availability: "withdrawn" }> => item.availability === "withdrawn" || (item.sourceCategory !== "general" && (Boolean(getSafeTravelerUrl(item.url)) || Boolean(getUsableProvenanceCheckedDate(item.checkedAt))))) ?? [];
 
   if (visibleItems.length === 0) {
     return null;
@@ -2422,8 +2422,9 @@ function createProvenanceAnswerEntityDescriptor(item: AvailableAssistantMessageP
     detail["URL"] = travelerUrl;
   }
 
-  if (item.checkedAt) {
-    detail["Ngày kiểm tra"] = formatProvenanceDate(item.checkedAt);
+  const checkedDate = getUsableProvenanceCheckedDate(item.checkedAt);
+  if (checkedDate) {
+    detail["Ngày kiểm tra"] = checkedDate;
   }
 
   return {
@@ -2464,6 +2465,13 @@ function formatProvenanceDate(value: string) {
   }
 
   return date.toLocaleDateString("vi-VN");
+}
+
+function getUsableProvenanceCheckedDate(value: string | null) {
+  if (!value || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value)) return null;
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime()) || date.toISOString() !== value) return null;
+  return formatProvenanceDate(value);
 }
 
 function getSafeTravelerUrl(value: string | null | undefined) {
