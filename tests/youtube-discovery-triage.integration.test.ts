@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, test } from "vitest";
 import { eq } from "drizzle-orm";
 
-import { aiGatewayModels, aiUsageEvents, claimNextYoutubeDiscoveryRun, createSystemAuditActor, createUserAuditActor, createYoutubeDiscoveryPolicyVersion, createYoutubeDiscoveryQueryProposal, createYoutubeDiscoveryRun, persistYoutubeDiscoveryCandidates, persistYoutubeDiscoveryEnrichment, persistYoutubeDiscoveryTriage, retainYoutubeDiscoveryRecords, selectYoutubeDiscoveryTriageModel, youtubeDiscoveryCandidates, youtubeDiscoveryRuns, youtubeDiscoveryTriages } from "@xuyenviet/database";
+import { aiGatewayModels, aiUsageEvents, claimNextYoutubeDiscoveryRun, createSystemAuditActor, createUserAuditActor, createYoutubeDiscoveryPolicyVersion, createYoutubeDiscoveryQueryProposal, createYoutubeDiscoveryRun, getYoutubeDiscoveryTriageBundle, persistYoutubeDiscoveryCandidates, persistYoutubeDiscoveryEnrichment, persistYoutubeDiscoveryTriage, retainYoutubeDiscoveryRecords, selectYoutubeDiscoveryTriageModel, youtubeDiscoveryCandidates, youtubeDiscoveryCommentSignals, youtubeDiscoveryRuns, youtubeDiscoveryTriages } from "@xuyenviet/database";
 import { resetTestDatabase, seedTestOperator, testDb } from "./helpers/db";
 
 const videoId = "abcDEF12345";
@@ -48,12 +48,24 @@ describe.sequential("YouTube Discovery metadata triage persistence", () => {
     await expect(testDb.select().from(aiUsageEvents)).resolves.toHaveLength(1);
   });
 
+  test("uses only the claimed run's unexpired signal bundle with bounded metrics", async () => {
+    const { claim, candidateId, policy } = await claimedCandidate();
+    const otherRun = await createYoutubeDiscoveryRun({ policyVersionId: policy.id }, testDb);
+    await testDb.insert(youtubeDiscoveryCommentSignals).values({ id: "other-run-signal", candidateId, runId: otherRun.id, policyVersionId: policy.id, signal: "commercial_risk", count: 9, score: 90, derivedAt: new Date(0), expiresAt: new Date("2030-01-01T00:00:00Z") });
+    await testDb.update(youtubeDiscoveryCommentSignals).set({ derivedAt: new Date(0), expiresAt: new Date(1) }).where(eq(youtubeDiscoveryCommentSignals.runId, claim.id));
+
+    await expect(getYoutubeDiscoveryTriageBundle(claim, videoId, testDb)).resolves.toMatchObject({ signals: [] });
+
+    await testDb.update(youtubeDiscoveryCommentSignals).set({ expiresAt: new Date("2030-01-01T00:00:00Z") }).where(eq(youtubeDiscoveryCommentSignals.runId, claim.id));
+    await expect(getYoutubeDiscoveryTriageBundle(claim, videoId, testDb)).resolves.toMatchObject({ signals: [{ signal: "practical_question_demand", count: 2, score: 20 }] });
+  });
+
   test("records no-model and invalid-output failures without assessment values", async () => {
     const { claim, candidateId } = await claimedCandidate();
     expect(await persistYoutubeDiscoveryTriage(claim, { candidateId, status: "no_eligible_model", model: null, provider: "unavailable", modelName: "unavailable", latencyMs: null, errorCode: "no_eligible_model" }, testDb)).toBe("completed");
     const [failure] = await testDb.select().from(youtubeDiscoveryTriages);
     expect(failure).toMatchObject({ status: "no_eligible_model", relevanceScore: null, expectedValueScore: null, freshnessFitScore: null, commercialRiskScore: null, duplicateRiskScore: null, signals: null, aiGatewayModelId: null });
-    await expect(testDb.select().from(aiUsageEvents)).resolves.toMatchObject([{ status: "failure", provider: "unavailable", model: "unavailable", aiGatewayModelId: null, pricingCurrency: null }]);
+    await expect(testDb.select().from(aiUsageEvents)).resolves.toMatchObject([{ status: "failure", provider: "unavailable", model: "unavailable", aiGatewayModelId: null, pricingCurrency: null, errorCode: "no_eligible_model" }]);
   });
 
   test("does not write triage or Usage for a candidate without an appearance in the claimed run", async () => {

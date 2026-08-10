@@ -72,7 +72,7 @@ export async function runYoutubeDiscoveryPoll(workerId: string): Promise<WorkerP
                 if (stored !== "completed") throw new Error("youtube_enrichment_contended");
                 const triage = await runYoutubeDiscoveryTriage(activeClaim, candidate.videoId, controller.signal, executionDeadlineAt);
                 if (triage === "cancelled") return observationFor(activeClaim, "success");
-                if (triage !== "completed") throw new Error(triage === "deadline_exhausted" ? "youtube_triage_deadline_exhausted" : "youtube_triage_contended");
+                if (triage !== "completed") throw new Error(triage === "deadline_exhausted" ? "youtube_triage_deadline_exhausted" : triage === "retry" ? "youtube_triage_transient" : "youtube_triage_contended");
               }
               stageResult = "complete";
             }
@@ -90,7 +90,7 @@ export async function runYoutubeDiscoveryPoll(workerId: string): Promise<WorkerP
   return observationFor(claim.claim, disposition === "completed" ? "success" : disposition === "retrying" ? "retry" : disposition === "failed" ? "failure" : disposition === "cancelled" ? "success" : "contended");
 }
 
-async function runYoutubeDiscoveryTriage(claim: NonNullable<Awaited<ReturnType<typeof claimNextYoutubeDiscoveryRun>>["claim"]>, videoId: string, signal: AbortSignal, executionDeadlineAt: number): Promise<"completed" | "cancelled" | "contended" | "deadline_exhausted"> {
+async function runYoutubeDiscoveryTriage(claim: NonNullable<Awaited<ReturnType<typeof claimNextYoutubeDiscoveryRun>>["claim"]>, videoId: string, signal: AbortSignal, executionDeadlineAt: number): Promise<"completed" | "cancelled" | "contended" | "deadline_exhausted" | "retry"> {
   if ((await cancelYoutubeDiscoveryRunIfDisabled(claim, undefined, true)) !== "active") return "cancelled";
   const bundle = await getYoutubeDiscoveryTriageBundle(claim, videoId);
   if (bundle === "succeeded") return "completed";
@@ -102,18 +102,29 @@ async function runYoutubeDiscoveryTriage(claim: NonNullable<Awaited<ReturnType<t
   const controller = new AbortController();
   const abort = () => controller.abort();
   signal.addEventListener("abort", abort, { once: true });
-  const timeout = setTimeout(() => controller.abort(), triageTimeoutMs);
+  const timedOut = Symbol("youtube_discovery_triage_timeout");
+  let timeout: ReturnType<typeof setTimeout> | undefined;
   let response: Awaited<ReturnType<typeof completeYoutubeDiscoveryTriage>>;
   try {
-    response = await youtubeTriageCompletion({ model: model.gatewayModelName, abortSignal: controller.signal, messages: [{ role: "system", content: "Return strict JSON only with exactly relevanceScore, expectedValueScore, freshnessFitScore, commercialRiskScore, duplicateRiskScore, signals. Scores are finite 0..1. signals may contain only supplied signal codes, without duplicates. Do not include explanation, recommendation, or any other key." }, { role: "user", content: JSON.stringify({ query: bundle.queryText, candidate: bundle.candidate, signals: bundle.signals }) }] });
+    const completion = youtubeTriageCompletion({ model: model.gatewayModelName, abortSignal: controller.signal, messages: [{ role: "system", content: "Return strict JSON only with exactly relevanceScore, expectedValueScore, freshnessFitScore, commercialRiskScore, duplicateRiskScore, signals. Scores are finite 0..1. signals may contain only supplied signal codes, without duplicates. Do not include explanation, recommendation, or any other key." }, { role: "user", content: JSON.stringify({ query: bundle.queryText, candidate: bundle.candidate, signals: bundle.signals }) }] });
+    const result = await Promise.race([completion, new Promise<typeof timedOut>((resolve) => { timeout = setTimeout(() => { controller.abort(); resolve(timedOut); }, triageTimeoutMs); })]);
+    if (result === timedOut) {
+      const persisted = await persistYoutubeDiscoveryTriage(claim, { candidateId: bundle.candidateId, status: "gateway_failed", model, provider: "ai_gateway", modelName: model.gatewayModelName, latencyMs: triageTimeoutMs, errorCode: "client_stream_aborted" });
+      return persisted === "completed" ? "retry" : persisted;
+    }
+    response = result;
   } finally {
-    clearTimeout(timeout);
+    if (timeout) clearTimeout(timeout);
     signal.removeEventListener("abort", abort);
   }
-  if (!response.ok) return persistYoutubeDiscoveryTriage(claim, { candidateId: bundle.candidateId, status: "gateway_failed", model, provider: response.provider, modelName: response.model, latencyMs: response.latencyMs, errorCode: response.errorCode, providerRequestId: response.requestMetadata.providerRequestId });
+  if (!response.ok) {
+    const persisted = await persistYoutubeDiscoveryTriage(claim, { candidateId: bundle.candidateId, status: "gateway_failed", model, provider: response.provider, modelName: response.model, latencyMs: response.latencyMs, errorCode: response.errorCode, providerRequestId: response.requestMetadata.providerRequestId });
+    return persisted === "completed" ? "retry" : persisted;
+  }
   let parsed: unknown = null; try { parsed = JSON.parse(response.content); } catch { /* invalid output is deliberately not retained */ }
-  const assessment = parseYoutubeDiscoveryTriageAssessment(parsed, bundle.signals);
-  return persistYoutubeDiscoveryTriage(claim, assessment ? { candidateId: bundle.candidateId, status: "succeeded", assessment, model, provider: response.provider, modelName: response.model, latencyMs: response.latencyMs, ...response.usage, providerRequestId: response.requestMetadata.providerRequestId } : { candidateId: bundle.candidateId, status: "invalid_output", model, provider: response.provider, modelName: response.model, latencyMs: response.latencyMs, errorCode: "invalid_output", ...response.usage, providerRequestId: response.requestMetadata.providerRequestId });
+  const assessment = parseYoutubeDiscoveryTriageAssessment(parsed, bundle.signals.map((signal) => signal.signal));
+  const persisted = await persistYoutubeDiscoveryTriage(claim, assessment ? { candidateId: bundle.candidateId, status: "succeeded", assessment, model, provider: response.provider, modelName: response.model, latencyMs: response.latencyMs, ...response.usage, providerRequestId: response.requestMetadata.providerRequestId } : { candidateId: bundle.candidateId, status: "invalid_output", model, provider: response.provider, modelName: response.model, latencyMs: response.latencyMs, errorCode: "invalid_output", ...response.usage, providerRequestId: response.requestMetadata.providerRequestId });
+  return !assessment && persisted === "completed" ? "retry" : persisted;
 }
 
 async function runYoutubeDiscoveryExecutionStage(claim: NonNullable<Awaited<ReturnType<typeof claimNextYoutubeDiscoveryRun>>["claim"]>, queryText: string, signal: AbortSignal) {

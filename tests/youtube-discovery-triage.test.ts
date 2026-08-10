@@ -14,7 +14,7 @@ describe("YouTube Discovery AI metadata triage contract", () => {
     expect(parseYoutubeDiscoveryTriageAssessment({ ...assessment, explanation: "retain this" }, allowedSignals)).toBeNull();
     expect(parseYoutubeDiscoveryTriageAssessment({ ...assessment, relevanceScore: Number.NaN }, allowedSignals)).toBeNull();
     expect(parseYoutubeDiscoveryTriageAssessment({ ...assessment, signals: ["commercial_risk", "commercial_risk"] }, allowedSignals)).toBeNull();
-    expect(parseYoutubeDiscoveryTriageAssessment({ ...assessment, signals: [] }, allowedSignals)).toBeNull();
+    expect(parseYoutubeDiscoveryTriageAssessment({ ...assessment, signals: [] }, allowedSignals)).toEqual({ ...assessment, signals: [] });
     expect(parseYoutubeDiscoveryTriageAssessment({ ...assessment, signals: ["creator_responsiveness"] }, allowedSignals)).toBeNull();
   });
 });

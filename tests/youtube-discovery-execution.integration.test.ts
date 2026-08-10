@@ -3,7 +3,7 @@ import { and, eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 
-import { aiGatewayModels, auditEvents, cancelYoutubeDiscoveryRunIfDisabled, claimNextYoutubeDiscoveryRun, claimYoutubeDiscoveryPlanning, createAiAskDiscoveryQuerySignalPort, createKnowledgeDiscoveryQuerySignalPort, createSystemAuditActor, createUserAuditActor, createYoutubeDiscoveryPolicyVersion, createYoutubeDiscoveryQueryProposal, createYoutubeDiscoveryRun, finishYoutubeDiscoveryRun, refreshYoutubeDiscoverySystemProposals, retryYoutubeDiscoveryRun, schema, youtubeDiscoveryAppearances, youtubeDiscoveryCandidates, youtubeDiscoveryRankingHistory, youtubeDiscoveryPlanningLeases, youtubeDiscoveryPlanningOutcomes, youtubeDiscoveryQueryProposals, youtubeDiscoveryRuns } from "@xuyenviet/database";
+import { aiGatewayModels, auditEvents, cancelYoutubeDiscoveryRunIfDisabled, claimNextYoutubeDiscoveryRun, claimYoutubeDiscoveryPlanning, createAiAskDiscoveryQuerySignalPort, createKnowledgeDiscoveryQuerySignalPort, createSystemAuditActor, createUserAuditActor, createYoutubeDiscoveryPolicyVersion, createYoutubeDiscoveryQueryProposal, createYoutubeDiscoveryRun, finishYoutubeDiscoveryRun, refreshYoutubeDiscoverySystemProposals, retryYoutubeDiscoveryRun, schema, youtubeDiscoveryAppearances, youtubeDiscoveryCandidates, youtubeDiscoveryRankingHistory, youtubeDiscoveryPlanningLeases, youtubeDiscoveryPlanningOutcomes, youtubeDiscoveryQueryProposals, youtubeDiscoveryRuns, youtubeDiscoveryTriages } from "@xuyenviet/database";
 import { resetTestDatabase, seedTestOperator, testDb } from "./helpers/db";
 import { bindYoutubeDiscoveryExecutionPorts, runYoutubeDiscoveryPoll, setYoutubeDiscoveryEnrichmentForTest, setYoutubeDiscoveryExecutionStageForTest, setYoutubeDiscoveryExecutionTimeoutForTest, setYoutubeDiscoveryPlanningPortsForTest, setYoutubeDiscoveryTriageCompletionForTest } from "../packages/worker-domain/src/features/youtube-discovery/execution";
 
@@ -321,6 +321,22 @@ describe.sequential("YouTube Discovery run execution", () => {
     await expect(runYoutubeDiscoveryPoll("discovery-triage-deadline")).resolves.toMatchObject({ resultCode: "retry", durableId: run.id });
     expect(triageCalls).toBe(0);
     await expect(testDb.select({ state: youtubeDiscoveryRuns.state, safeErrorCode: youtubeDiscoveryRuns.safeErrorCode }).from(youtubeDiscoveryRuns).where(eq(youtubeDiscoveryRuns.id, run.id))).resolves.toEqual([{ state: "retrying", safeErrorCode: "stage_transient" }]);
+  });
+
+  test("persists a Gateway triage failure and retries the run", async () => {
+    await seedTestOperator();
+    const policy = await createYoutubeDiscoveryPolicyVersion({ version: 1, isCurrent: true, policy: { maxRetryAttempts: 2 }, actor: createSystemAuditActor("system-youtube-discovery") }, testDb);
+    const proposal = await createYoutubeDiscoveryQueryProposal({ origin: "operator", reason: "operator_request", priority: 50, queryText: "Da Lat route", cadenceMinutes: 15, actor: createUserAuditActor({ userId: "operator", email: "operator@example.com" }) }, testDb);
+    const run = await createYoutubeDiscoveryRun({ policyVersionId: policy.id, queryProposalId: proposal.id }, testDb);
+    await completeDuePlanning();
+    await testDb.insert(aiGatewayModels).values({ id: "retry-triage-model", gatewayModelName: "test/triage", displayLabel: "Triage", purpose: "youtube_discovery_triage", active: true, defaultForPurpose: true, supportsTextInput: true, supportsExtraction: true, pricingUnitTokens: 1_000_000 });
+    bindYoutubeDiscoveryExecutionPorts({ check: async () => "eligible" }, async () => [{ videoId: "abcDEF12345", canonicalUrl: "https://www.youtube.com/watch?v=abcDEF12345", resultOrdinal: 0 }], "test-key");
+    setYoutubeDiscoveryEnrichmentForTest(async () => ({ videoId: "abcDEF12345", title: "Da Lat route", signals: [] }));
+    setYoutubeDiscoveryTriageCompletionForTest(async () => ({ ok: false, provider: "ai_gateway", model: "test/triage", latencyMs: 1, errorCode: "gateway_network_error", requestMetadata: { providerRequestId: null } }));
+
+    await expect(runYoutubeDiscoveryPoll("discovery-triage-retry")).resolves.toMatchObject({ resultCode: "retry", durableId: run.id });
+    await expect(testDb.select({ state: youtubeDiscoveryRuns.state, safeErrorCode: youtubeDiscoveryRuns.safeErrorCode }).from(youtubeDiscoveryRuns).where(eq(youtubeDiscoveryRuns.id, run.id))).resolves.toEqual([{ state: "retrying", safeErrorCode: "stage_transient" }]);
+    await expect(testDb.select({ status: youtubeDiscoveryTriages.status }).from(youtubeDiscoveryTriages)).resolves.toEqual([{ status: "gateway_failed" }]);
   });
 
   test("cancels after provider results and before persistence without graph writes", async () => {

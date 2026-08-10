@@ -4,8 +4,8 @@ type: 'feature'
 created: '2026-08-10'
 status: 'done'
 baseline_revision: 'a02dd92'
-review_loop_iteration: 0
-followup_review_recommended: true
+review_loop_iteration: 1
+followup_review_recommended: false
 implementation_revision: 'ccdb538'
 context:
   - '/home/sonnh/projects/xuyenviet/_bmad-output/project-context.md'
@@ -61,6 +61,15 @@ warnings: []
 - [x] `packages/worker-domain/src/features/youtube-discovery/execution.ts` -- invoke bounded triage after enrichment with abort/deadline/fence/retry behavior and injectable completion -- provider work remains outside transactions and no new Worker capability is created.
 - [x] `tests/youtube-discovery-triage.test.ts`, `tests/youtube-discovery-triage.integration.test.ts`, and relevant existing Discovery/Usage/ownership suites -- verify every matrix scenario, forbidden-data absence, model/admin constraints, atomic rollback, terminal audit behavior, and no Knowledge access -- prove privacy and operational safety.
 
+### Review Findings
+
+- [x] [Review][Patch] Failed triage Usage events discard their safe failure category [packages/database/src/youtube-discovery/index.ts:398]
+- [x] [Review][Patch] Triage can use expired or another run's signals and omits signal count/score input [packages/database/src/youtube-discovery/index.ts:373]
+- [x] [Review][Patch] Gateway and invalid-output triage failures complete the run instead of consuming the retry policy [packages/worker-domain/src/features/youtube-discovery/execution.ts:113]
+- [x] [Review][Patch] A non-cooperative Gateway completion can outlive the triage timeout and run lease [packages/worker-domain/src/features/youtube-discovery/execution.ts:105]
+- [x] [Review][Patch] Empty safe enrichment signals make every schema-valid triage response fail [packages/database/src/youtube-discovery/index.ts:359]
+- [x] [Review][Patch] Triage persistence does not durably link the appearance or enforce run-policy provenance [drizzle/migrations/0054_add_discovery_ai_metadata_triage.sql:5]
+
 **Acceptance Criteria:**
 - Given Discovery triage selects a model, when the catalog and Usage contract are evaluated, then only an active default model supporting text input and extraction is valid and every attempt is attributed to `youtube_discovery_triage`, `youtube_discovery_triage_v1`, `system-youtube-discovery`, and its Discovery run.
 - Given a Gateway response, when triage persists it, then only the five finite bounded scores and bounded deduplicated input-derived signal codes may exist on a successful row; all failure rows have no assessment values and no response can create a recommendation or Knowledge state.
@@ -81,6 +90,10 @@ warnings: []
   - `[high] [patch]` Added a bounded triage timeout and outer-deadline admission check, preventing a Gateway call when the finite run cannot accommodate it.
   - `[medium] [patch]` Verified the candidate appearance belongs to the active claimed run before Usage or triage persistence.
   - `[medium] [patch]` Validated succeeded persistence input at runtime and normalized malformed hostile success input to a safe `invalid_output` failure.
+
+### 2026-08-10 — Follow-up review repair
+- All six independent review findings were repaired: failure Usage preserves safe categories; triage uses only current unexpired signal snapshots with bounded metrics; Gateway and invalid-output outcomes consume the existing retry policy; a non-cooperative completion is race-bounded; empty signal assessments are valid; and migration `0055` enforces appearance/run and run/policy provenance.
+- Verification passed: 11 focused unit tests, 38 focused serial integration tests, `pnpm typecheck`, `pnpm lint` (0 errors, 45 pre-existing warnings), `pnpm build`, and `git diff --check`.
 
 ## Design Notes
 
