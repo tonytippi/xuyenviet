@@ -73,7 +73,7 @@ The core PRD supplies the inherited product and platform contract. Discovery sco
 - D-FR-2: Use only documented YouTube Data API endpoints to discover canonical individual video URLs and bounded video/channel/comment metadata.
 - D-FR-3: Normalize an eligible HTTPS `youtube.com` or `youtu.be` individual-video URL to one canonical URL and deduplicate candidate identity by video ID.
 - D-FR-4: Persist only bounded, safe candidate, query-proposal, run, audit, priority, and decision data; derive and sanitize comment signals before optional triage use.
-- D-FR-5: Submit bounded candidate metadata and Discovery context to a dedicated AI metadata-triage purpose; schema-validate its typed `skip | defer | consider` recommendation and scores.
+- D-FR-5: Submit bounded candidate metadata and Discovery context to a dedicated AI metadata-triage purpose; schema-validate its bounded metadata assessment. Deterministic policy separately derives the typed `skip | defer | consider` recommendation.
 - D-FR-6: Apply deterministic hard eligibility and scoring policy so popularity cannot override commercial risk, duplication, stale content, invalid scope, or unsuitable duration.
 - D-FR-7: Present ranked candidates with safe metadata, score factors, penalties, query reason, derived comment signals, and prior safe capture outcome.
 - D-FR-8: Allow an authorized operator to accept, defer, or skip a Discovery candidate through audited commands.

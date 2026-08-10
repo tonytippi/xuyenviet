@@ -271,7 +271,7 @@ YTD-FR5: Search documented YouTube Data API endpoints and create one canonical c
 
 YTD-FR6: Enrich candidates only with bounded safe video/channel metadata and sanitized derived comment signals; comments remain triage-only and never become evidence, capture material, cards, source bundles, or traveler content.
 
-YTD-FR7: Use AI Gateway metadata triage under the dedicated `youtube_discovery_triage` model purpose and versioned prompt; validate typed output and combine it with deterministic eligibility/ranking into `skip`, `defer`, or `consider` recommendations.
+YTD-FR7: Use AI Gateway metadata triage under the dedicated `youtube_discovery_triage` model purpose and versioned prompt; validate bounded typed metadata assessment and combine it with deterministic eligibility/ranking into `skip`, `defer`, or `consider` recommendations.
 
 YTD-FR8: Expose operators to a ranked, one-at-a-time candidate review queue with safe metadata, plain-language recommendation, concise factors/penalties, derived signals, and prior safe capture outcome.
 
@@ -2444,7 +2444,7 @@ So that candidate recommendations are explainable operational input rather than 
 **Given** a Discovery triage invocation records AI usage
 **When** the Usage writer persists the event
 **Then** it records `youtube_discovery_triage` model purpose, prompt version, `system-youtube-discovery` executor, and the linked Discovery run
-**And** missing or invalid attribution prevents a successful triage record.
+**And** selected-model attempts retain selected model/pricing attribution, while the sole `no_eligible_model` failure shape uses safe unavailable provider/model values with null model/pricing attribution.
 
 **Given** model selection, provider invocation, or output validation fails
 **When** Discovery processes the result
@@ -2455,6 +2455,21 @@ So that candidate recommendations are explainable operational input rather than 
 **When** persistence-level safety tests inspect the resulting triage, usage, and run rows
 **Then** they prove raw comments, prompts/responses, provider payloads, transcripts, media, credentials, cookies, raw source material, evidence spans, and traveler content cannot be stored
 **And** only the bounded safe operational schema and required triage attribution are retained.
+
+**Given** a schema-valid triage response
+**When** Discovery persists a metadata assessment
+**Then** it retains only finite `0..1` relevance, expected-value, freshness-fit, commercial-risk, and duplicate-risk scores plus a bounded deduplicated list of closed input-derived signal codes
+**And** it retains no recommendation, free-text reason, arbitrary JSON, or candidate decision state; Story 19.2 owns immutable `skip | defer | consider` recommendation.
+
+**Given** a candidate/run/prompt invocation has already succeeded
+**When** the run retries
+**Then** a stable invocation key prevents another Gateway call and duplicate successful triage/Usage records
+**And** failed attempts use only closed safe statuses under the existing run retry policy.
+
+**Given** Discovery retention expires a candidate
+**When** its candidate graph is removed
+**Then** Discovery deletes associated triage rows before the candidate
+**And** generic Usage events remain under their existing independent retention policy.
 
 ### Story 19.2: Produce Deterministic Candidate Recommendations
 

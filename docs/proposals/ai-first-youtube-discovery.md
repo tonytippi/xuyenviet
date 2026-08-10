@@ -1,6 +1,6 @@
 # AI-First YouTube Discovery Proposal
 
-**Status:** Proposed and outside the active MVP scope. The active PRD excludes fully automated scraping at scale and contains no YouTube-discovery requirement. This proposal automates discovery and ranking only. It produces a ranked list of canonical video URLs for operator review; an operator accepts a URL through the existing Knowledge intake API, then `youtube:capture` remains manual. Discovery never writes or owns a Knowledge `source`.
+**Status:** Approved Discovery scope. The active PRD addendum ratifies this bounded URL-only capability. The PRD continues to exclude fully automated scraping at scale: Discovery uses only documented YouTube Data API metadata and bounded AI triage. It produces a ranked list of canonical video URLs for operator review; an operator accepts a URL through the existing Knowledge intake API, then `youtube:capture` remains manual. Discovery never writes or owns a Knowledge `source`.
 
 ## Purpose
 
@@ -120,30 +120,26 @@ Use documented YouTube Data API endpoints and retain only bounded, safe operatio
 
 - Video: canonical video ID/URL, title, bounded description, channel ID/name, published time, duration, category/tags when available, views, likes, comment count, thumbnail reference, and discovery query/proposal identity.
 - Channel: subscriber count when publicly available, published-video count, and XuyenViet's own historical source-quality signals. Subscriber count is a weak credibility signal, never proof.
-- Comments: bounded aggregate signals and a small sanitized sample only when needed by triage. Signals may identify recency discussion, stale/changed warnings, practical-question demand, creator responsiveness, commercial-risk, or contradictory discussion.
+- Comments: bounded derived aggregate signals only. Signals may identify recency discussion, stale/changed warnings, practical-question demand, creator responsiveness, commercial-risk, or contradictory discussion. No comment text or reconstructed comment summary reaches triage.
 
-Comments are adversarial, unverified user input. Strip or neutralize links, instruction-like content, excessive text, personally identifying content, and unsupported markup before model use. Prefer derived aggregate features or a structured summary over raw comment text. Do not retain comments as capture material and do not pass them to extraction, evidence, retrieval, or traveler UI.
+Comments are adversarial, unverified user input. Derive only closed aggregate features before model use; do not pass sanitized samples, summaries, raw text, links, or instruction-like content to triage. Do not retain comments as capture material and do not pass them to extraction, evidence, retrieval, or traveler UI.
 
 ### 3. AI Candidate Triage
 
-AI triage receives the bounded candidate bundle and the discovery context. It produces typed, validated output such as:
+AI triage receives the bounded candidate bundle and the discovery context. It produces a typed, validated metadata assessment only:
 
 ```ts
 type YoutubeCandidateTriage = {
-  decision: "skip" | "defer" | "consider";
   relevanceScore: number;
   expectedValueScore: number;
   freshnessFitScore: number;
-  firstHandLikelihood: number;
-  visualEvidenceLikelihood: number;
   commercialRiskScore: number;
   duplicateRiskScore: number;
-  reasons: string[];
-  commentSignals: string[];
+  derivedSignalCodes: DiscoveryCommentSignal[];
 };
 ```
 
-The scores rank candidates and explain the recommendation; they do not establish fact correctness, source verification, publication eligibility, evidence, or permission to invoke Gemini. Model output must be schema-validated, bounded, and treated as untrusted operational input.
+Each score is finite and within `0..1`; derived-signal codes are a bounded deduplicated subset of the closed signal vocabulary already supplied to the model. No model decision, free-text reason, raw response, arbitrary JSON, or recommendation explanation is persisted. The scores inform later deterministic policy; they do not establish fact correctness, source verification, publication eligibility, evidence, or permission to invoke Gemini. Model output must be schema-validated, bounded, and treated as untrusted operational input.
 
 ### 4. Deterministic Recommendation And Operator Review
 

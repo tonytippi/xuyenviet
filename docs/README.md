@@ -4,11 +4,11 @@
 
 ## Source Of Truth
 
-The active MVP requirements source is the [PRD](../_bmad-output/planning-artifacts/prds/prd-xuyenviet-2026-07-04/prd.md). Its approved scope is implemented through the linked architecture, epics, stories, and [sprint status](../_bmad-output/implementation-artifacts/sprint-status.yaml) under `_bmad-output/`.
+The active MVP requirements sources are the [PRD](../_bmad-output/planning-artifacts/prds/prd-xuyenviet-2026-07-04/prd.md) and its [approved addendum](../_bmad-output/planning-artifacts/prds/prd-xuyenviet-2026-07-04/addendum.md). Their approved scope is implemented through the linked architecture, epics, stories, and [sprint status](../_bmad-output/implementation-artifacts/sprint-status.yaml) under `_bmad-output/`.
 
 When documents disagree, use this order:
 
-1. Active PRD for product scope and requirements.
+1. Active PRD and approved addenda for product scope and requirements.
 2. Active architecture and epics/stories for technical and delivery decisions.
 3. Code and runbooks for implemented behavior and operations.
 4. Proposals and roadmaps only as future planning input.
@@ -24,11 +24,11 @@ Runbooks document implemented commands and their operational limits. They must m
 
 ## Proposals
 
-Proposals record active ideas for future work outside the approved MVP scope. They do not authorize implementation and must first be promoted through the BMad workflow. Superseded plans and historical implementation evidence belong under `_bmad-output/`, not here.
+Proposals record product direction and planning context. A proposal does not authorize implementation unless its status says it has been promoted through the BMad workflow; the active PRD, architecture, epics, and stories remain authoritative. Superseded plans and historical implementation evidence belong under `_bmad-output/`, not here.
 
 | Document | Status | Planning use |
 |---|---|---|
-| [AI-First YouTube Discovery](./proposals/ai-first-youtube-discovery.md) | Proposed; blocked on architecture-policy reconciliation | Future discovery, auto-capture, and control-tower planning. |
+| [AI-First YouTube Discovery](./proposals/ai-first-youtube-discovery.md) | Approved bounded URL-only Discovery scope; implementation in Epics 18-20 | Requirements context for documented-API Discovery, manual capture handoff, and control-tower delivery. |
 | [Trip Project Product Direction](./proposals/trip-project-product-direction.md) | Proposed beyond the implemented basic single-owner project | Future structured trip planning. |
 | [Place Intelligence And Accommodation Enrichment](./proposals/place-intelligence-and-accommodation-enrichment.md) | Proposed; Maps, OTA, booking, and provider enrichment are MVP non-goals | Future opt-in, chat-first accommodation-decision assistance and place identity planning. |
 

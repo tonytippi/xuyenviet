@@ -25,6 +25,8 @@
 - Trip Home focus policy: pending expiring proposal, pending proposal, defined confirmed-item gap, next dated planned/confirmed leg, then preparation. Explicit lifecycle phases and on-trip today focus remain deferred.
 - `confirmed` means owner confirmation or a supplied real constraint, not booking/provider validation; booking and availability remain out of scope.
 - Proposal application uses aggregate/item version fences and structural preconditions; a stale proposal applies nothing and returns a safe refresh-required result.
+- YouTube Discovery is an approved bounded operator capability: it uses documented YouTube Data API metadata to discover canonical individual-video URLs, derives only closed aggregate comment signals, performs attributable bounded AI metadata triage, and presents deterministic recommendations for operator review. It never scrapes browsers or transcripts, downloads media, creates a Knowledge source, capture version, ingestion job, evidence, or card, or invokes/schedules/retries manual `youtube:capture` or Gemini analysis. Discovery acceptance may call only the existing Knowledge intake API with a canonical URL.
+- Discovery triage uses an AI Gateway model purpose `youtube_discovery_triage`, a versioned prompt, `system-youtube-discovery` execution attribution, safe usage/audit records, and bounded validated operational output. No raw comments, prompts/responses, provider payloads, credentials, cookies, source material, evidence, traveler data, or arbitrary JSON may be persisted or exposed. Detailed requirements and delivery sequencing are authoritative in the Discovery architecture, UX, and Epics 18-20.
 
 ## Provisional Assumptions For Architecture
 
