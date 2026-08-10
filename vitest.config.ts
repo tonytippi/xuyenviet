@@ -32,6 +32,7 @@ const unitTests = [
   "tests/web-search-quality.test.ts",
     "tests/youtube-seed-urls.test.ts",
     "tests/youtube-discovery-policy.test.ts",
+    "tests/youtube-discovery-recommendations.test.ts",
     "tests/youtube-discovery-ownership.test.ts",
     "tests/youtube-discovery-worker.test.ts",
     "tests/youtube-discovery-execution.test.ts",

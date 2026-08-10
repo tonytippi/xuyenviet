@@ -57,6 +57,8 @@
     { "idx": 52, "version": "7", "when": 1786809600000, "tag": "0052_reject_discovery_thumbnail_controls", "breakpoints": true },
     { "idx": 53, "version": "7", "when": 1786896000000, "tag": "0053_harden_discovery_metadata_constraints", "breakpoints": true },
     { "idx": 54, "version": "7", "when": 1786982400000, "tag": "0054_add_discovery_ai_metadata_triage", "breakpoints": true },
-    { "idx": 55, "version": "7", "when": 1787068800000, "tag": "0055_harden_discovery_triage_provenance", "breakpoints": true }
+    { "idx": 55, "version": "7", "when": 1787068800000, "tag": "0055_harden_discovery_triage_provenance", "breakpoints": true },
+    { "idx": 56, "version": "7", "when": 1787155200000, "tag": "0056_add_discovery_recommendations", "breakpoints": true },
+    { "idx": 57, "version": "7", "when": 1787241600000, "tag": "0057_harden_discovery_recommendation_invariants", "breakpoints": true }
   ]
 }

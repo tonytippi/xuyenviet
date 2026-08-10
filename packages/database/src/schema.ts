@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { type AnyPgColumn, boolean, check, foreignKey, index, integer, jsonb, pgTable, primaryKey, real, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
+import { type AnyPgColumn, boolean, check, foreignKey, index, integer, jsonb, numeric, pgTable, primaryKey, real, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
 
 export const userRoleValues = ["traveler", "operator", "admin"] as const;
 export type UserRole = (typeof userRoleValues)[number];
@@ -371,6 +371,13 @@ export const youtubeDiscoveryPolicyVersions = pgTable(
     minimumCandidateScore: real("minimum_candidate_score").notNull(),
     priorityScoreWeight: real("priority_score_weight").notNull(),
     freshnessScoreWeight: real("freshness_score_weight").notNull(),
+    relevanceWeight: numeric("relevance_weight", { precision: 7, scale: 6 }).notNull(),
+    expectedValueWeight: numeric("expected_value_weight", { precision: 7, scale: 6 }).notNull(),
+    freshnessFitWeight: numeric("freshness_fit_weight", { precision: 7, scale: 6 }).notNull(),
+    commercialRiskWeight: numeric("commercial_risk_weight", { precision: 7, scale: 6 }).notNull(),
+    duplicateRiskWeight: numeric("duplicate_risk_weight", { precision: 7, scale: 6 }).notNull(),
+    deferMinimum: numeric("defer_minimum", { precision: 7, scale: 6 }).notNull(),
+    considerMinimum: numeric("consider_minimum", { precision: 7, scale: 6 }).notNull(),
     cadenceMinutes: integer("cadence_minutes").notNull(),
     retentionDays: integer("retention_days").notNull(),
     commentSignalTtlDays: integer("comment_signal_ttl_days").notNull(),
@@ -384,6 +391,7 @@ export const youtubeDiscoveryPolicyVersions = pgTable(
     uniqueIndex("youtube_discovery_policy_versions_one_current_idx").on(policy.isCurrent).where(sql`${policy.isCurrent}`),
     check("youtube_discovery_policy_versions_version_check", sql`${policy.version} >= 1`),
     check("youtube_discovery_policy_versions_score_check", sql`${policy.minimumCandidateScore} >= 0 and ${policy.minimumCandidateScore} <= 1 and ${policy.priorityScoreWeight} >= 0 and ${policy.priorityScoreWeight} <= 1 and ${policy.freshnessScoreWeight} >= 0 and ${policy.freshnessScoreWeight} <= 1`),
+    check("youtube_discovery_policy_versions_ranking_check", sql`${policy.relevanceWeight} between 0 and 1 and ${policy.expectedValueWeight} between 0 and 1 and ${policy.freshnessFitWeight} between 0 and 1 and ${policy.commercialRiskWeight} between 0 and 1 and ${policy.duplicateRiskWeight} between 0 and 1 and ${policy.relevanceWeight} + ${policy.expectedValueWeight} + ${policy.freshnessFitWeight} + ${policy.commercialRiskWeight} + ${policy.duplicateRiskWeight} = 1.000000 and ${policy.deferMinimum} >= 0 and ${policy.deferMinimum} < ${policy.considerMinimum} and ${policy.considerMinimum} <= 1`),
     check("youtube_discovery_policy_versions_cadence_check", sql`${policy.cadenceMinutes} between 15 and 10080`),
     check("youtube_discovery_policy_versions_retention_check", sql`${policy.retentionDays} between 1 and 365 and ${policy.commentSignalTtlDays} between 1 and ${policy.retentionDays} - 1`),
     check("youtube_discovery_policy_versions_execution_check", sql`${policy.maxConcurrentRuns} between 1 and 20 and ${policy.maxRetryAttempts} between 0 and 10 and ${policy.retryDelayMinutes} between 1 and 1440`),
@@ -510,9 +518,27 @@ export const youtubeDiscoveryAppearances = pgTable(
 
 export const youtubeDiscoveryRankingHistory = pgTable(
   "youtube_discovery_ranking_history",
-  { id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()), candidateId: text("candidate_id").notNull().references(() => youtubeDiscoveryCandidates.id, { onDelete: "restrict" }), appearanceId: text("appearance_id").references(() => youtubeDiscoveryAppearances.id, { onDelete: "restrict" }), runId: text("run_id").notNull().references(() => youtubeDiscoveryRuns.id, { onDelete: "restrict" }), policyVersionId: text("policy_version_id").notNull().references(() => youtubeDiscoveryPolicyVersions.id, { onDelete: "restrict" }), stage: text("stage").$type<"discovered" | "enriched" | "triaged">().notNull(), createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull() },
-  (history) => [index("youtube_discovery_ranking_history_candidate_created_idx").on(history.candidateId, history.createdAt), foreignKey({ columns: [history.appearanceId, history.candidateId, history.runId], foreignColumns: [youtubeDiscoveryAppearances.id, youtubeDiscoveryAppearances.candidateId, youtubeDiscoveryAppearances.runId], name: "youtube_discovery_ranking_history_appearance_provenance_fk" }).onDelete("restrict"), foreignKey({ columns: [history.runId, history.policyVersionId], foreignColumns: [youtubeDiscoveryRuns.id, youtubeDiscoveryRuns.policyVersionId], name: "youtube_discovery_ranking_history_run_policy_fk" }).onDelete("restrict"), check("youtube_discovery_ranking_history_stage_check", sql`${history.stage} in ('discovered', 'enriched', 'triaged')`), check("youtube_discovery_ranking_history_discovered_appearance_check", sql`${history.stage} <> 'discovered' or ${history.appearanceId} is not null`)],
+  { id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()), candidateId: text("candidate_id").notNull().references(() => youtubeDiscoveryCandidates.id, { onDelete: "restrict" }), appearanceId: text("appearance_id").references(() => youtubeDiscoveryAppearances.id, { onDelete: "restrict" }), runId: text("run_id").notNull().references(() => youtubeDiscoveryRuns.id, { onDelete: "restrict" }), policyVersionId: text("policy_version_id").notNull().references(() => youtubeDiscoveryPolicyVersions.id, { onDelete: "restrict" }), stage: text("stage").$type<"discovered" | "enriched" | "triaged" | "recommended">().notNull(), recommendationId: text("recommendation_id"), createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull() },
+  (history) => [index("youtube_discovery_ranking_history_candidate_created_idx").on(history.candidateId, history.createdAt), uniqueIndex("youtube_discovery_ranking_history_recommendation_idx").on(history.recommendationId).where(sql`${history.recommendationId} is not null`), foreignKey({ columns: [history.appearanceId, history.candidateId, history.runId], foreignColumns: [youtubeDiscoveryAppearances.id, youtubeDiscoveryAppearances.candidateId, youtubeDiscoveryAppearances.runId], name: "youtube_discovery_ranking_history_appearance_provenance_fk" }).onDelete("restrict"), foreignKey({ columns: [history.runId, history.policyVersionId], foreignColumns: [youtubeDiscoveryRuns.id, youtubeDiscoveryRuns.policyVersionId], name: "youtube_discovery_ranking_history_run_policy_fk" }).onDelete("restrict"), check("youtube_discovery_ranking_history_stage_check", sql`${history.stage} in ('discovered', 'enriched', 'triaged', 'recommended')`), check("youtube_discovery_ranking_history_discovered_appearance_check", sql`${history.stage} <> 'discovered' or ${history.appearanceId} is not null`), check("youtube_discovery_ranking_history_recommendation_check", sql`(${history.stage} = 'recommended' and ${history.recommendationId} is not null) or (${history.stage} <> 'recommended' and ${history.recommendationId} is null)`)],
 );
+
+export const youtubeDiscoveryRecommendations = pgTable("youtube_discovery_recommendations", {
+  id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+  candidateId: text("candidate_id").notNull().references(() => youtubeDiscoveryCandidates.id, { onDelete: "restrict" }),
+  appearanceId: text("appearance_id").notNull().references(() => youtubeDiscoveryAppearances.id, { onDelete: "restrict" }),
+  runId: text("run_id").notNull().references(() => youtubeDiscoveryRuns.id, { onDelete: "restrict" }),
+  policyVersionId: text("policy_version_id").notNull().references(() => youtubeDiscoveryPolicyVersions.id, { onDelete: "restrict" }),
+  triageId: text("triage_id").notNull(),
+  score: numeric("score", { precision: 7, scale: 6 }).notNull(), relevanceScore: numeric("relevance_score", { precision: 7, scale: 6 }).notNull(), expectedValueScore: numeric("expected_value_score", { precision: 7, scale: 6 }).notNull(), freshnessFitScore: numeric("freshness_fit_score", { precision: 7, scale: 6 }).notNull(), commercialRiskScore: numeric("commercial_risk_score", { precision: 7, scale: 6 }).notNull(), duplicateRiskScore: numeric("duplicate_risk_score", { precision: 7, scale: 6 }).notNull(),
+  recommendation: text("recommendation").$type<"skip" | "defer" | "consider">().notNull(), factors: text("factors").array().default([]).notNull(), penalties: text("penalties").array().default([]).notNull(), reason: text("reason").$type<"eligible_score_band" | "below_defer_band" | "between_defer_and_consider_band" | "already_compatible" | "canonical_mismatch" | "not_current_run_enriched">().notNull(), signals: text("signals").array().default([]).notNull(), createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
+}, (recommendation) => [
+  uniqueIndex("youtube_discovery_recommendations_provenance_idx").on(recommendation.candidateId, recommendation.appearanceId, recommendation.runId, recommendation.policyVersionId, recommendation.triageId),
+  foreignKey({ columns: [recommendation.appearanceId, recommendation.candidateId, recommendation.runId], foreignColumns: [youtubeDiscoveryAppearances.id, youtubeDiscoveryAppearances.candidateId, youtubeDiscoveryAppearances.runId], name: "youtube_discovery_recommendations_appearance_provenance_fk" }).onDelete("restrict"),
+  foreignKey({ columns: [recommendation.triageId, recommendation.candidateId, recommendation.appearanceId, recommendation.runId, recommendation.policyVersionId], foreignColumns: [youtubeDiscoveryTriages.id, youtubeDiscoveryTriages.candidateId, youtubeDiscoveryTriages.appearanceId, youtubeDiscoveryTriages.runId, youtubeDiscoveryTriages.policyVersionId], name: "youtube_discovery_recommendations_triage_provenance_fk" }).onDelete("restrict"),
+  foreignKey({ columns: [recommendation.runId, recommendation.policyVersionId], foreignColumns: [youtubeDiscoveryRuns.id, youtubeDiscoveryRuns.policyVersionId], name: "youtube_discovery_recommendations_run_policy_fk" }).onDelete("restrict"),
+  check("youtube_discovery_recommendations_scores_check", sql`${recommendation.score} between 0 and 1 and ${recommendation.relevanceScore} between 0 and 1 and ${recommendation.expectedValueScore} between 0 and 1 and ${recommendation.freshnessFitScore} between 0 and 1 and ${recommendation.commercialRiskScore} between 0 and 1 and ${recommendation.duplicateRiskScore} between 0 and 1`),
+  check("youtube_discovery_recommendations_codes_check", sql`${recommendation.recommendation} in ('skip','defer','consider') and ${recommendation.factors} <@ array['relevance','expected_value','freshness_fit']::text[] and youtube_discovery_text_array_unique(${recommendation.factors}) and ${recommendation.penalties} <@ array['commercial_risk','duplicate_risk']::text[] and youtube_discovery_text_array_unique(${recommendation.penalties}) and cardinality(${recommendation.factors}) + cardinality(${recommendation.penalties}) <= 5 and ${recommendation.reason} in ('eligible_score_band','below_defer_band','between_defer_and_consider_band','already_compatible','canonical_mismatch','not_current_run_enriched') and ${recommendation.signals} <@ array['recent_discussion','stale_or_changed_warning','practical_question_demand','creator_responsiveness','commercial_risk','contradictory_discussion']::text[] and youtube_discovery_text_array_unique(${recommendation.signals}) and cardinality(${recommendation.signals}) <= 6`),
+]);
 
 export const sources = pgTable(
   "sources",

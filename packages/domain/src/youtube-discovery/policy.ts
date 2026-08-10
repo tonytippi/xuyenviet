@@ -3,6 +3,13 @@ export type YoutubeDiscoveryPolicy = Readonly<{
   minimumCandidateScore: number;
   priorityScoreWeight: number;
   freshnessScoreWeight: number;
+  relevanceWeight: number;
+  expectedValueWeight: number;
+  freshnessFitWeight: number;
+  commercialRiskWeight: number;
+  duplicateRiskWeight: number;
+  deferMinimum: number;
+  considerMinimum: number;
   cadenceMinutes: number;
   retentionDays: number;
   commentSignalTtlDays: number;
@@ -16,6 +23,13 @@ export const defaultYoutubeDiscoveryPolicy: YoutubeDiscoveryPolicy = Object.free
   minimumCandidateScore: 0.5,
   priorityScoreWeight: 0.6,
   freshnessScoreWeight: 0.4,
+  relevanceWeight: 0.3,
+  expectedValueWeight: 0.3,
+  freshnessFitWeight: 0.2,
+  commercialRiskWeight: 0.1,
+  duplicateRiskWeight: 0.1,
+  deferMinimum: 0.35,
+  considerMinimum: 0.65,
   cadenceMinutes: 1440,
   retentionDays: 180,
   commentSignalTtlDays: 30,
@@ -36,10 +50,78 @@ export function parseYoutubeDiscoveryPolicy(input: unknown): YoutubeDiscoveryPol
     throw new YoutubeDiscoveryPolicyValidationError();
   }
   const policy = { ...defaultYoutubeDiscoveryPolicy, ...input };
-  if (typeof policy.enabled !== "boolean" || !score(policy.minimumCandidateScore) || !score(policy.priorityScoreWeight) || !score(policy.freshnessScoreWeight) || !integerBetween(policy.cadenceMinutes, 15, 10_080) || !integerBetween(policy.retentionDays, 1, 365) || !integerBetween(policy.commentSignalTtlDays, 1, policy.retentionDays - 1) || !integerBetween(policy.maxConcurrentRuns, 1, 20) || !integerBetween(policy.maxRetryAttempts, 0, 10) || !integerBetween(policy.retryDelayMinutes, 1, 1_440)) {
+  if (typeof policy.enabled !== "boolean" || !score(policy.minimumCandidateScore) || !score(policy.priorityScoreWeight) || !score(policy.freshnessScoreWeight) || !rankingPolicy(policy) || !integerBetween(policy.cadenceMinutes, 15, 10_080) || !integerBetween(policy.retentionDays, 1, 365) || !integerBetween(policy.commentSignalTtlDays, 1, policy.retentionDays - 1) || !integerBetween(policy.maxConcurrentRuns, 1, 20) || !integerBetween(policy.maxRetryAttempts, 0, 10) || !integerBetween(policy.retryDelayMinutes, 1, 1_440)) {
     throw new YoutubeDiscoveryPolicyValidationError();
   }
   return Object.freeze(policy);
+}
+
+export const youtubeDiscoveryRecommendationValues = ["skip", "defer", "consider"] as const;
+export type YoutubeDiscoveryRecommendation = (typeof youtubeDiscoveryRecommendationValues)[number];
+export const youtubeDiscoveryRecommendationFactorValues = ["relevance", "expected_value", "freshness_fit"] as const;
+export const youtubeDiscoveryRecommendationPenaltyValues = ["commercial_risk", "duplicate_risk"] as const;
+export const youtubeDiscoveryRecommendationReasonValues = ["eligible_score_band", "below_defer_band", "between_defer_and_consider_band", "already_compatible", "canonical_mismatch", "not_current_run_enriched"] as const;
+export type YoutubeDiscoveryRecommendationReason = (typeof youtubeDiscoveryRecommendationReasonValues)[number];
+
+export type YoutubeDiscoveryRecommendationAssessment = Readonly<{
+  relevanceScore: number;
+  expectedValueScore: number;
+  freshnessFitScore: number;
+  commercialRiskScore: number;
+  duplicateRiskScore: number;
+  signals: readonly string[];
+}>;
+export type YoutubeDiscoveryRecommendationGates = Readonly<{ canonical: boolean; currentRunEnriched: boolean; eligibility: "eligible" | "already_compatible" }>;
+export type YoutubeDiscoveryRecommendationResult = Readonly<{ score: number; recommendation: YoutubeDiscoveryRecommendation; factors: string[]; penalties: string[]; reason: YoutubeDiscoveryRecommendationReason; signals: string[]; scores: YoutubeDiscoveryRecommendationAssessment }>;
+
+/** The ranking result contains only finite codes and normalized operational inputs. */
+export function evaluateYoutubeDiscoveryRecommendation(policy: YoutubeDiscoveryPolicy, assessment: YoutubeDiscoveryRecommendationAssessment, gates: YoutubeDiscoveryRecommendationGates): YoutubeDiscoveryRecommendationResult {
+  const scores = { ...assessment, relevanceScore: round6(assessment.relevanceScore), expectedValueScore: round6(assessment.expectedValueScore), freshnessFitScore: round6(assessment.freshnessFitScore), commercialRiskScore: round6(assessment.commercialRiskScore), duplicateRiskScore: round6(assessment.duplicateRiskScore), signals: [...new Set(assessment.signals)].sort().slice(0, 6) };
+  const factors = youtubeDiscoveryRecommendationFactorValues.filter((code, index) => [scores.relevanceScore, scores.expectedValueScore, scores.freshnessFitScore][index]! > 0);
+  const penalties = youtubeDiscoveryRecommendationPenaltyValues.filter((code, index) => [scores.commercialRiskScore, scores.duplicateRiskScore][index]! > 0);
+  const explanation = [...factors, ...penalties].slice(0, 5);
+  const boundedFactors = explanation.filter((code) => (youtubeDiscoveryRecommendationFactorValues as readonly string[]).includes(code));
+  const boundedPenalties = explanation.filter((code) => (youtubeDiscoveryRecommendationPenaltyValues as readonly string[]).includes(code));
+  const quality = scores.relevanceScore * policy.relevanceWeight + scores.expectedValueScore * policy.expectedValueWeight + scores.freshnessFitScore * policy.freshnessFitWeight;
+  const risk = scores.commercialRiskScore * policy.commercialRiskWeight + scores.duplicateRiskScore * policy.duplicateRiskWeight;
+  const score = round6(quality * (1 - risk));
+  if (!gates.canonical) return { score, recommendation: "skip", factors: boundedFactors, penalties: boundedPenalties, reason: "canonical_mismatch", signals: scores.signals, scores };
+  if (!gates.currentRunEnriched) return { score, recommendation: "skip", factors: boundedFactors, penalties: boundedPenalties, reason: "not_current_run_enriched", signals: scores.signals, scores };
+  if (gates.eligibility === "already_compatible") return { score, recommendation: "skip", factors: boundedFactors, penalties: boundedPenalties, reason: "already_compatible", signals: scores.signals, scores };
+  const recommendation = score >= policy.considerMinimum ? "consider" : score >= policy.deferMinimum ? "defer" : "skip";
+  return { score, recommendation, factors: boundedFactors, penalties: boundedPenalties, reason: recommendation === "consider" ? "eligible_score_band" : recommendation === "defer" ? "between_defer_and_consider_band" : "below_defer_band", signals: scores.signals, scores };
+}
+
+export function round6(value: number): number {
+  if (!Number.isFinite(value)) throw new YoutubeDiscoveryPolicyValidationError();
+  const [integerPart, fractionalPart = ""] = decimalParts(value);
+  const retained = fractionalPart.slice(0, 6).padEnd(6, "0");
+  const rounded = Number(`${integerPart}${retained}`) + (fractionalPart[6] !== undefined && fractionalPart[6] >= "5" ? 1 : 0);
+  return rounded / 1_000_000;
+}
+
+function rankingPolicy(policy: YoutubeDiscoveryPolicy): boolean {
+  const weights = [policy.relevanceWeight, policy.expectedValueWeight, policy.freshnessFitWeight, policy.commercialRiskWeight, policy.duplicateRiskWeight];
+  return weights.every(score) && weights.every(sixDecimal) && sixDecimal(policy.deferMinimum) && sixDecimal(policy.considerMinimum) && round6(weights.reduce((total, weight) => total + weight, 0)) === 1 && score(policy.deferMinimum) && score(policy.considerMinimum) && policy.deferMinimum < policy.considerMinimum;
+}
+
+function sixDecimal(value: number): boolean {
+  return round6(value) === value;
+}
+
+/** Expands JavaScript's shortest decimal representation without binary arithmetic. */
+function decimalParts(value: number): [string, string] {
+  if (value < 0) throw new YoutubeDiscoveryPolicyValidationError();
+  const [coefficient, exponentText] = value.toString().toLowerCase().split("e");
+  const exponent = exponentText === undefined ? 0 : Number(exponentText);
+  const [whole = "0", fraction = ""] = coefficient!.split(".");
+  const rawDigits = `${whole}${fraction}`;
+  const leadingZeroes = rawDigits.match(/^0+(?=\d)/)?.[0].length ?? 0;
+  const digits = rawDigits.slice(leadingZeroes) || "0";
+  const decimalAt = whole.length + exponent - leadingZeroes;
+  if (decimalAt <= 0) return ["0", `${"0".repeat(-decimalAt)}${digits}`];
+  if (decimalAt >= digits.length) return [`${digits}${"0".repeat(decimalAt - digits.length)}`, ""];
+  return [digits.slice(0, decimalAt), digits.slice(decimalAt)];
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

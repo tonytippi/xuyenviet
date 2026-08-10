@@ -1,4 +1,4 @@
-import { cancelYoutubeDiscoveryRunIfDisabled, claimNextYoutubeDiscoveryRun, claimYoutubeDiscoveryPlanning, completeYoutubeDiscoveryTriage, finishYoutubeDiscoveryRun, getYoutubeDiscoveryRunQuery, getYoutubeDiscoveryTriageBundle, parseYoutubeDiscoveryTriageAssessment, persistYoutubeDiscoveryCandidates, persistYoutubeDiscoveryEnrichment, persistYoutubeDiscoveryTriage, refreshYoutubeDiscoverySystemProposals, retainYoutubeDiscoveryRecords, retryYoutubeDiscoveryRun, scheduleYoutubeDiscoveryDueRuns, selectYoutubeDiscoveryTriageModel } from "@xuyenviet/database";
+import { cancelYoutubeDiscoveryRunIfDisabled, claimNextYoutubeDiscoveryRun, claimYoutubeDiscoveryPlanning, completeYoutubeDiscoveryTriage, finishYoutubeDiscoveryRun, getYoutubeDiscoveryRecommendationBundle, getYoutubeDiscoveryRunQuery, getYoutubeDiscoveryTriageBundle, parseYoutubeDiscoveryTriageAssessment, persistYoutubeDiscoveryCandidates, persistYoutubeDiscoveryEnrichment, persistYoutubeDiscoveryRecommendation, persistYoutubeDiscoveryTriage, refreshYoutubeDiscoverySystemProposals, retainYoutubeDiscoveryRecords, retryYoutubeDiscoveryRun, scheduleYoutubeDiscoveryDueRuns, selectYoutubeDiscoveryTriageModel } from "@xuyenviet/database";
 import type { WorkerPollObservation } from "@xuyenviet/contracts";
 import { createUnavailableAiAskDiscoveryQuerySignalPort, createUnavailableKnowledgeDiscoveryQuerySignalPort, type AiAskDiscoveryQuerySignalPort, type DiscoveryQuerySignalPortResult, type KnowledgeDiscoveryQuerySignalPort, type YoutubeCaptureEligibilityPort } from "@xuyenviet/domain";
 import { searchYoutubeVideos } from "./youtube-search";
@@ -73,6 +73,20 @@ export async function runYoutubeDiscoveryPoll(workerId: string): Promise<WorkerP
                 const triage = await runYoutubeDiscoveryTriage(activeClaim, candidate.videoId, controller.signal, executionDeadlineAt);
                 if (triage === "cancelled") return observationFor(activeClaim, "success");
                 if (triage !== "completed") throw new Error(triage === "deadline_exhausted" ? "youtube_triage_deadline_exhausted" : triage === "retry" ? "youtube_triage_transient" : "youtube_triage_contended");
+                // Check durable idempotency before crossing the opaque owner-port boundary.
+                const bundle = await getYoutubeDiscoveryRecommendationBundle(activeClaim, candidate.videoId);
+                if (bundle === "completed") continue;
+                if (bundle === "cancelled") return observationFor(activeClaim, "success");
+                if (bundle === "contended") throw new Error("youtube_recommendation_contended");
+                if (executionDeadlineAt <= Date.now() || controller.signal.aborted) throw new Error("youtube_recommendation_deadline_exhausted");
+                const eligibility = await youtubeCaptureEligibilityPort!.check(candidate.videoId, controller.signal);
+                if (eligibility === "unavailable" || controller.signal.aborted) throw new Error("youtube_capture_eligibility_unavailable");
+                const active = await cancelYoutubeDiscoveryRunIfDisabled(activeClaim, undefined, true);
+                if (active === "cancelled") return observationFor(activeClaim, "success");
+                if (active === "contended") throw new Error("youtube_eligibility_contended");
+                const recommendation = await runYoutubeDiscoveryRecommendation(activeClaim, bundle, eligibility, controller.signal, executionDeadlineAt);
+                if (recommendation === "cancelled") return observationFor(activeClaim, "success");
+                if (recommendation !== "completed") throw new Error(recommendation === "deadline_exhausted" ? "youtube_recommendation_deadline_exhausted" : recommendation === "retry" ? "youtube_recommendation_transient" : "youtube_recommendation_contended");
               }
               stageResult = "complete";
             }
@@ -88,6 +102,12 @@ export async function runYoutubeDiscoveryPoll(workerId: string): Promise<WorkerP
   if (stageResult === "cancelled") return observationFor(claim.claim, "success");
   const disposition = stageResult === "complete" ? await finishYoutubeDiscoveryRun(claim.claim) : await retryYoutubeDiscoveryRun(claim.claim);
   return observationFor(claim.claim, disposition === "completed" ? "success" : disposition === "retrying" ? "retry" : disposition === "failed" ? "failure" : disposition === "cancelled" ? "success" : "contended");
+}
+
+async function runYoutubeDiscoveryRecommendation(claim: NonNullable<Awaited<ReturnType<typeof claimNextYoutubeDiscoveryRun>>["claim"]>, bundle: Exclude<Awaited<ReturnType<typeof getYoutubeDiscoveryRecommendationBundle>>, "completed" | "cancelled" | "contended">, eligibility: "eligible" | "already_compatible", signal: AbortSignal, executionDeadlineAt: number): Promise<"completed" | "cancelled" | "contended" | "deadline_exhausted" | "retry"> {
+  if (executionDeadlineAt <= Date.now() || signal.aborted) return "deadline_exhausted";
+  const persisted = await persistYoutubeDiscoveryRecommendation(claim, bundle, eligibility);
+  return persisted;
 }
 
 async function runYoutubeDiscoveryTriage(claim: NonNullable<Awaited<ReturnType<typeof claimNextYoutubeDiscoveryRun>>["claim"]>, videoId: string, signal: AbortSignal, executionDeadlineAt: number): Promise<"completed" | "cancelled" | "contended" | "deadline_exhausted" | "retry"> {
@@ -136,14 +156,7 @@ async function runYoutubeDiscoveryExecutionStage(claim: NonNullable<Awaited<Retu
   };
   await requireActive();
   const results = await youtubeSearch(queryText, youtubeDataApiKey, undefined, signal);
-  const eligible = [];
-  for (const result of results) {
-    await requireActive();
-    const status = await youtubeCaptureEligibilityPort!.check(result.videoId, signal);
-    if (status === "unavailable" || signal.aborted) throw new Error("youtube_capture_eligibility_unavailable");
-    if (status === "eligible") eligible.push(result);
-  }
-  return eligible;
+  return results;
 }
 
 function observationFor(claim: NonNullable<Awaited<ReturnType<typeof claimNextYoutubeDiscoveryRun>>["claim"]>, resultCode: WorkerPollObservation["resultCode"]): WorkerPollObservation {

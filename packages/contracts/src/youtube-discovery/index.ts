@@ -4,6 +4,13 @@ export type YoutubeDiscoveryPolicyAuditSummary = Readonly<{
   minimumCandidateScore: number;
   priorityScoreWeight: number;
   freshnessScoreWeight: number;
+  relevanceWeight: number;
+  expectedValueWeight: number;
+  freshnessFitWeight: number;
+  commercialRiskWeight: number;
+  duplicateRiskWeight: number;
+  deferMinimum: number;
+  considerMinimum: number;
   cadenceMinutes: number;
   retentionDays: number;
   commentSignalTtlDays: number;

@@ -1,5 +1,5 @@
 # generated: 2026-07-25
-# last_updated: 2026-08-10 (Story 19.2 deterministic Discovery recommendation guide validation fixes applied.)
+# last_updated: 2026-08-10 (Story 19.2 ready for review; focused verification passed.)
 # project: xuyenviet
 # project_key: NOKEY
 # tracking_system: file-system
@@ -33,7 +33,7 @@
 #   - done: Completed
 
 generated: 2026-07-25
-last_updated: 2026-08-10 (Story 19.2 deterministic Discovery recommendation guide validation fixes applied.)
+last_updated: 2026-08-10 (Story 19.2 ready for review; focused verification passed.)
 project: xuyenviet
 project_key: NOKEY
 tracking_system: file-system
@@ -429,7 +429,8 @@ development_status:
   epic-19: in-progress
   # 2026-08-10: Completed governed Discovery metadata triage. A single forward migration adds the bounded triage assessment and Discovery-run Usage linkage; Worker triage runs only after enrichment, under existing fencing/retry rules. Focused verification: migration apply, 11 unit tests, 43 serial integration tests, typecheck, build, and diff check passed; lint has 0 errors and 45 pre-existing warnings. Independent review repairs covered empty signals, deadline admission, run provenance, and malformed success input.
   19-1-register-discovery-ai-metadata-triage: done
-  19-2-produce-deterministic-candidate-recommendations: ready-for-dev
+  # 2026-08-10: Deterministic policy and immutable recommendation provenance implemented. Focused unit tests (5), serial integration tests (42), typecheck, build, and diff check passed; lint has 0 errors and 45 existing warnings. Worker regression coverage proves deadline exhaustion skips eligibility and policy revocation after eligibility writes no recommendation/history while retaining one terminal audit.
+  19-2-produce-deterministic-candidate-recommendations: review
   19-3-review-one-ranked-candidate-at-a-time: backlog
   19-4-accept-a-candidate-through-knowledge-intake: backlog
   19-5-defer-skip-and-verify-candidate-decision-safety: backlog
