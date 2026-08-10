@@ -1,5 +1,5 @@
 # generated: 2026-07-25
-# last_updated: 2026-08-10 (Story 19.4 completed after final independent review.)
+# last_updated: 2026-08-10 (Story 19.5 validated and ready for development.)
 # project: xuyenviet
 # project_key: NOKEY
 # tracking_system: file-system
@@ -33,7 +33,7 @@
 #   - done: Completed
 
 generated: 2026-07-25
-last_updated: 2026-08-10 (Story 19.4 completed after final independent review.)
+last_updated: 2026-08-10 (Story 19.5 validated and ready for development.)
 project: xuyenviet
 project_key: NOKEY
 tracking_system: file-system
@@ -434,7 +434,7 @@ development_status:
   19-2-produce-deterministic-candidate-recommendations: done
   19-3-review-one-ranked-candidate-at-a-time: done
   19-4-accept-a-candidate-through-knowledge-intake: done
-  19-5-defer-skip-and-verify-candidate-decision-safety: backlog
+  19-5-defer-skip-and-verify-candidate-decision-safety: ready-for-dev
   epic-19-retrospective: optional
 
   epic-20: backlog
