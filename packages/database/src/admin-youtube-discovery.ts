@@ -6,7 +6,7 @@ import type { YoutubeCaptureEligibilityPort } from "@xuyenviet/domain";
 import { getDb } from "./client";
 import { createUserAuditActor } from "./actors";
 import { recordAuditEvent } from "./audit-writers";
-import { users, youtubeDiscoveryCandidateReviewStates, youtubeDiscoveryCandidates, youtubeDiscoveryKnowledgeHandoffs, youtubeDiscoveryPolicyVersions, youtubeDiscoveryQueryProposals, youtubeDiscoveryRecommendations, youtubeDiscoveryRuns } from "./schema";
+import { youtubeDiscoveryCandidateReviewStates, youtubeDiscoveryCandidates, youtubeDiscoveryKnowledgeHandoffs, youtubeDiscoveryPolicyVersions, youtubeDiscoveryQueryProposals, youtubeDiscoveryRecommendations, youtubeDiscoveryRuns } from "./schema";
 
 const validText = (value: unknown) => typeof value === "string" && value.trim() === value && /^[\p{L}\p{N} '-]{1,240}$/u.test(value);
 const validPriority = (value: unknown) => Number.isSafeInteger(value) && (value as number) >= 1 && (value as number) <= 100;
@@ -49,7 +49,6 @@ export function createPostgresAdminYoutubeDiscoveryPort(captureEligibility: Yout
     },
     async acceptReview(principal, recommendationId) {
       if (!validId(recommendationId)) throw new Error("Invalid YouTube Discovery review.");
-      await reconcileActiveReviews(db, handoff, principal, recommendationId);
       const admission = await db.transaction(async (transaction) => {
         const [row] = await transaction.select({ candidateId: youtubeDiscoveryCandidateReviewStates.candidateId, canonicalUrl: youtubeDiscoveryCandidates.canonicalUrl }).from(youtubeDiscoveryCandidateReviewStates)
           .innerJoin(youtubeDiscoveryRecommendations, and(eq(youtubeDiscoveryRecommendations.id, youtubeDiscoveryCandidateReviewStates.recommendationId), eq(youtubeDiscoveryRecommendations.candidateId, youtubeDiscoveryCandidateReviewStates.candidateId)))
@@ -57,15 +56,14 @@ export function createPostgresAdminYoutubeDiscoveryPort(captureEligibility: Yout
           .innerJoin(youtubeDiscoveryRuns, and(eq(youtubeDiscoveryRuns.id, youtubeDiscoveryRecommendations.runId), eq(youtubeDiscoveryRuns.policyVersionId, youtubeDiscoveryRecommendations.policyVersionId)))
           .where(and(eq(youtubeDiscoveryCandidateReviewStates.state, "pending"), eq(youtubeDiscoveryRecommendations.recommendation, "consider"), sql`${youtubeDiscoveryRuns.queryProposalId} is not null`, eq(youtubeDiscoveryRecommendations.id, recommendationId))).limit(1).for("update");
         if (!row) return null;
-        const [existing] = await transaction.select({ reference: youtubeDiscoveryKnowledgeHandoffs.reference, actorUserId: youtubeDiscoveryKnowledgeHandoffs.actorUserId }).from(youtubeDiscoveryKnowledgeHandoffs).where(eq(youtubeDiscoveryKnowledgeHandoffs.candidateId, row.candidateId)).limit(1);
+        const [existing] = await transaction.select({ reference: youtubeDiscoveryKnowledgeHandoffs.reference }).from(youtubeDiscoveryKnowledgeHandoffs).where(eq(youtubeDiscoveryKnowledgeHandoffs.candidateId, row.candidateId)).limit(1);
         const reference = existing?.reference ?? crypto.randomUUID();
-        const actorUserId = existing?.actorUserId ?? principal.userId;
-        if (!existing) await transaction.insert(youtubeDiscoveryKnowledgeHandoffs).values({ candidateId: row.candidateId, recommendationId, reference, actorUserId, reconciling: true });
-        return { ...row, reference, actorUserId, newReference: !existing };
+        if (!existing) await transaction.insert(youtubeDiscoveryKnowledgeHandoffs).values({ candidateId: row.candidateId, recommendationId, reference, reconciling: true });
+        return { ...row, reference, newReference: !existing };
       });
-      if (!admission) return storedTerminalOutcome(db, recommendationId);
+      if (!admission) return null;
       const outcome = admission.newReference
-        ? await boundedHandoff(() => handoff.submit({ reference: admission.reference, canonicalUrl: admission.canonicalUrl, actorUserId: admission.actorUserId }))
+        ? await boundedHandoff(() => handoff.submit({ reference: admission.reference, canonicalUrl: admission.canonicalUrl, actorUserId: principal.userId }))
         : await resolveHandoff(handoff, admission);
       if (outcome === "failed" || outcome === "reconciling") {
         if (outcome === "failed") await db.delete(youtubeDiscoveryKnowledgeHandoffs).where(eq(youtubeDiscoveryKnowledgeHandoffs.reference, admission.reference));
@@ -76,7 +74,7 @@ export function createPostgresAdminYoutubeDiscoveryPort(captureEligibility: Yout
         await db.update(youtubeDiscoveryKnowledgeHandoffs).set({ reconciling: true }).where(eq(youtubeDiscoveryKnowledgeHandoffs.reference, admission.reference));
         return { outcome: "reconciling" };
       }
-      return { outcome: await finalizeAcceptedReview(db, admission.candidateId, recommendationId, admission.actorUserId, outcome) };
+      return { outcome: await finalizeAcceptedReview(db, admission.candidateId, recommendationId, principal, outcome) };
     },
     async create(principal, input) {
       if (!validText(input.queryText) || !validPriority(input.priority) || !validCadence(input.cadenceMinutes)) throw new Error("Invalid YouTube Discovery query proposal.");
@@ -104,7 +102,7 @@ function queueItem(row: { recommendationId: string; canonicalUrl: string; title:
 function displayText(value: string | null) { const normalized = value?.trim(); return normalized || null; }
 function validId(value: string) { return value.trim() === value && value.length > 0 && value.length <= 128; }
 async function reconcileActiveReviews(db: AdminYoutubeDiscoveryDatabase, handoff: NonNullable<AdminYoutubeDiscoveryDependencies["knowledgeHandoff"]>, principal: RequestPrincipal, recommendationId?: string, after?: ReturnType<typeof or>) {
-  const references = await db.select({ candidateId: youtubeDiscoveryCandidateReviewStates.candidateId, recommendationId: youtubeDiscoveryCandidateReviewStates.recommendationId, canonicalUrl: youtubeDiscoveryCandidates.canonicalUrl, reference: youtubeDiscoveryKnowledgeHandoffs.reference, actorUserId: youtubeDiscoveryKnowledgeHandoffs.actorUserId }).from(youtubeDiscoveryCandidateReviewStates)
+  const references = await db.select({ candidateId: youtubeDiscoveryCandidateReviewStates.candidateId, recommendationId: youtubeDiscoveryCandidateReviewStates.recommendationId, canonicalUrl: youtubeDiscoveryCandidates.canonicalUrl, reference: youtubeDiscoveryKnowledgeHandoffs.reference }).from(youtubeDiscoveryCandidateReviewStates)
     .innerJoin(youtubeDiscoveryRecommendations, and(eq(youtubeDiscoveryRecommendations.id, youtubeDiscoveryCandidateReviewStates.recommendationId), eq(youtubeDiscoveryRecommendations.candidateId, youtubeDiscoveryCandidateReviewStates.candidateId)))
     .innerJoin(youtubeDiscoveryCandidates, eq(youtubeDiscoveryCandidates.id, youtubeDiscoveryCandidateReviewStates.candidateId))
     .innerJoin(youtubeDiscoveryRuns, and(eq(youtubeDiscoveryRuns.id, youtubeDiscoveryRecommendations.runId), eq(youtubeDiscoveryRuns.policyVersionId, youtubeDiscoveryRecommendations.policyVersionId)))
@@ -114,7 +112,7 @@ async function reconcileActiveReviews(db: AdminYoutubeDiscoveryDatabase, handoff
     .limit(recommendationId ? 1 : adminYoutubeDiscoveryReviewPageSize);
   await Promise.all(references.map((reference) => reconcileReference(db, handoff, principal, reference)));
 }
-async function reconcileReference(db: AdminYoutubeDiscoveryDatabase, handoff: NonNullable<AdminYoutubeDiscoveryDependencies["knowledgeHandoff"]>, principal: RequestPrincipal, reference: { candidateId: string; recommendationId: string; canonicalUrl: string; reference: string; actorUserId: string }) {
+async function reconcileReference(db: AdminYoutubeDiscoveryDatabase, handoff: NonNullable<AdminYoutubeDiscoveryDependencies["knowledgeHandoff"]>, principal: RequestPrincipal, reference: { candidateId: string; recommendationId: string; canonicalUrl: string; reference: string }) {
   const outcome = await resolveHandoff(handoff, reference);
   if (outcome === "reconciling") return;
   await db.transaction(async (transaction) => {
@@ -122,9 +120,7 @@ async function reconcileReference(db: AdminYoutubeDiscoveryDatabase, handoff: No
     if (!locked || locked.reference !== reference.reference || locked.state !== "pending") return;
     if (outcome === "failed") { await transaction.delete(youtubeDiscoveryKnowledgeHandoffs).where(eq(youtubeDiscoveryKnowledgeHandoffs.candidateId, reference.candidateId)); return; }
     if (!terminalOutcome(outcome)) { await transaction.update(youtubeDiscoveryKnowledgeHandoffs).set({ reconciling: true }).where(eq(youtubeDiscoveryKnowledgeHandoffs.candidateId, reference.candidateId)); return; }
-    const [originalActor] = await transaction.select({ email: users.email }).from(users).where(eq(users.id, reference.actorUserId)).limit(1);
-    if (!originalActor?.email) throw new Error("Original handoff audit actor unavailable.");
-    const actor = createUserAuditActor({ userId: reference.actorUserId, email: originalActor.email });
+    const actor = actorFor(principal);
     const [updated] = await transaction.update(youtubeDiscoveryCandidateReviewStates).set({ state: "accepted" }).where(and(eq(youtubeDiscoveryCandidateReviewStates.candidateId, reference.candidateId), eq(youtubeDiscoveryCandidateReviewStates.recommendationId, reference.recommendationId), eq(youtubeDiscoveryCandidateReviewStates.state, "pending"))).returning({ candidateId: youtubeDiscoveryCandidateReviewStates.candidateId });
     if (updated) {
       await recordAuditEvent({ actor, operation: "update", targetType: "youtube_discovery_candidate_review", targetId: reference.recommendationId, afterSummary: JSON.stringify({ decision: "accepted", intakeOutcome: outcome }) }, transaction);
@@ -133,9 +129,8 @@ async function reconcileReference(db: AdminYoutubeDiscoveryDatabase, handoff: No
   });
 }
 function terminalOutcome(outcome: unknown): outcome is "submitted" | "duplicate" { return outcome === "submitted" || outcome === "duplicate"; }
-async function resolveHandoff(handoff: NonNullable<AdminYoutubeDiscoveryDependencies["knowledgeHandoff"]>, reference: { reference: string; canonicalUrl: string; actorUserId: string }) {
-  const input = { reference: reference.reference, canonicalUrl: reference.canonicalUrl, actorUserId: reference.actorUserId };
-  const outcome = await boundedHandoff(() => handoff.lookup(input));
+async function resolveHandoff(handoff: NonNullable<AdminYoutubeDiscoveryDependencies["knowledgeHandoff"]>, reference: { reference: string }) {
+  const outcome = await boundedHandoff(() => handoff.lookup(reference.reference));
   return outcome === "missing" ? "reconciling" : outcome;
 }
 async function boundedHandoff(operation: () => Promise<unknown>): Promise<"submitted" | "duplicate" | "failed" | "reconciling" | "missing"> {
@@ -144,23 +139,17 @@ async function boundedHandoff(operation: () => Promise<unknown>): Promise<"submi
   catch { return "reconciling"; }
   finally { if (timeout) clearTimeout(timeout); }
 }
-async function finalizeAcceptedReview(db: AdminYoutubeDiscoveryDatabase, candidateId: string, recommendationId: string, actorUserId: string, outcome: "submitted" | "duplicate") {
+async function finalizeAcceptedReview(db: AdminYoutubeDiscoveryDatabase, candidateId: string, recommendationId: string, principal: RequestPrincipal, outcome: "submitted" | "duplicate") {
   return db.transaction(async (transaction) => {
     const [handoff] = await transaction.select({ outcome: youtubeDiscoveryKnowledgeHandoffs.outcome }).from(youtubeDiscoveryKnowledgeHandoffs).where(and(eq(youtubeDiscoveryKnowledgeHandoffs.candidateId, candidateId), eq(youtubeDiscoveryKnowledgeHandoffs.recommendationId, recommendationId))).limit(1).for("update");
     if (terminalOutcome(handoff?.outcome)) return handoff.outcome;
-    const [originalActor] = await transaction.select({ email: users.email }).from(users).where(eq(users.id, actorUserId)).limit(1);
-    if (!originalActor?.email) throw new Error("Original handoff audit actor unavailable.");
-    const actor = createUserAuditActor({ userId: actorUserId, email: originalActor.email });
+    const actor = actorFor(principal);
     const [updated] = await transaction.update(youtubeDiscoveryCandidateReviewStates).set({ state: "accepted" }).where(and(eq(youtubeDiscoveryCandidateReviewStates.candidateId, candidateId), eq(youtubeDiscoveryCandidateReviewStates.recommendationId, recommendationId), eq(youtubeDiscoveryCandidateReviewStates.state, "pending"))).returning({ candidateId: youtubeDiscoveryCandidateReviewStates.candidateId });
     if (!updated) return "reconciling";
     await recordAuditEvent({ actor, operation: "update", targetType: "youtube_discovery_candidate_review", targetId: recommendationId, afterSummary: JSON.stringify({ decision: "accepted", intakeOutcome: outcome }) }, transaction);
     await transaction.update(youtubeDiscoveryKnowledgeHandoffs).set({ outcome, reconciling: false }).where(and(eq(youtubeDiscoveryKnowledgeHandoffs.candidateId, candidateId), eq(youtubeDiscoveryKnowledgeHandoffs.recommendationId, recommendationId)));
     return outcome;
   });
-}
-async function storedTerminalOutcome(db: AdminYoutubeDiscoveryDatabase, recommendationId: string) {
-  const [handoff] = await db.select({ outcome: youtubeDiscoveryKnowledgeHandoffs.outcome }).from(youtubeDiscoveryKnowledgeHandoffs).where(eq(youtubeDiscoveryKnowledgeHandoffs.recommendationId, recommendationId)).limit(1);
-  return terminalOutcome(handoff?.outcome) ? { outcome: handoff.outcome } : null;
 }
 async function mutate(db: AdminYoutubeDiscoveryDatabase, principal: RequestPrincipal, id: string, values: Record<string, unknown>, valid: boolean, origin?: "operator") {
   if (!valid || !id.trim() || id.length > 128) throw new Error("Invalid YouTube Discovery query proposal.");

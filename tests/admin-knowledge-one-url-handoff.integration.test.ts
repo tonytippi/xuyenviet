@@ -4,7 +4,6 @@ import { createPostgresAdminKnowledgeIntakePort, knowledgeOneUrlHandoffs, source
 import { resetTestDatabase, seedTestOperator, testDb } from "./helpers/db";
 
 const actor: RequestPrincipal = { userId: "operator", email: "operator@example.com", roles: ["operator"], sessionId: "session-operator", authorizationVersion: 1 };
-const otherActor: RequestPrincipal = { userId: "operator-two", email: "operator-two@example.com", roles: ["operator"], sessionId: "session-operator-two", authorizationVersion: 1 };
 const canonicalUrl = "https://www.youtube.com/watch?v=abcDEF12345";
 
 describe.sequential("Knowledge one-URL handoff ledger", () => {
@@ -13,10 +12,8 @@ describe.sequential("Knowledge one-URL handoff ledger", () => {
   test("binds opaque references to the original actor and canonical URL and returns only closed outcomes", async () => {
     const handoff = createPostgresAdminKnowledgeIntakePort().handoff;
     await expect(handoff.submit({ reference: "handoff-1", canonicalUrl, actorUserId: actor.userId })).resolves.toBe("submitted");
-    await expect(handoff.lookup({ reference: "handoff-1", canonicalUrl, actorUserId: actor.userId })).resolves.toBe("submitted");
+    await expect(handoff.lookup("handoff-1")).resolves.toBe("submitted");
     await expect(handoff.submit({ reference: "handoff-1", canonicalUrl, actorUserId: actor.userId })).resolves.toBe("submitted");
-    await expect(handoff.lookup({ reference: "handoff-1", canonicalUrl, actorUserId: otherActor.userId })).resolves.toBe("reconciling");
-    await expect(handoff.lookup({ reference: "handoff-1", canonicalUrl: "https://www.youtube.com/watch?v=otherABC123", actorUserId: actor.userId })).resolves.toBe("reconciling");
     expect(await testDb.select().from(knowledgeOneUrlHandoffs)).toHaveLength(1);
     expect(await testDb.select().from(sources)).toHaveLength(1);
   });
@@ -25,7 +22,7 @@ describe.sequential("Knowledge one-URL handoff ledger", () => {
     const handoff = createPostgresAdminKnowledgeIntakePort().handoff;
     await handoff.submit({ reference: "handoff-original", canonicalUrl, actorUserId: actor.userId });
     await expect(handoff.submit({ reference: "handoff-duplicate", canonicalUrl, actorUserId: actor.userId })).resolves.toBe("duplicate");
-    await expect(handoff.lookup({ reference: "handoff-duplicate", canonicalUrl, actorUserId: actor.userId })).resolves.toBe("duplicate");
+    await expect(handoff.lookup("handoff-duplicate")).resolves.toBe("duplicate");
   });
 
   test("returns the durable outcome to simultaneous submissions of a new reference", async () => {
@@ -33,7 +30,7 @@ describe.sequential("Knowledge one-URL handoff ledger", () => {
     const input = { reference: "handoff-concurrent", canonicalUrl, actorUserId: actor.userId };
 
     await expect(Promise.all([handoff.submit(input), handoff.submit(input)])).resolves.toEqual(["submitted", "submitted"]);
-    await expect(handoff.lookup(input)).resolves.toBe("submitted");
+    await expect(handoff.lookup(input.reference)).resolves.toBe("submitted");
     expect(await testDb.select().from(knowledgeOneUrlHandoffs)).toHaveLength(1);
     expect(await testDb.select().from(sources)).toHaveLength(1);
   });

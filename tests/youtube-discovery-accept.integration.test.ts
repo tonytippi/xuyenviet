@@ -38,6 +38,14 @@ describe.sequential("YouTube Discovery Accept reconciliation", () => {
     expect(intake.submit).not.toHaveBeenCalled();
   });
 
+  test("does not disclose a retained terminal outcome after the review becomes inactive", async () => {
+    const review = await seedReview();
+    const port = createPostgresAdminYoutubeDiscoveryPort(undefined, testDb, handoff("submitted"));
+
+    await expect(port.acceptReview(principal, review.recommendationId)).resolves.toEqual({ outcome: "submitted" });
+    await expect(port.acceptReview(principal, review.recommendationId)).resolves.toBeNull();
+  });
+
   test("reconciles an original duplicate ledger result on a fresh detail read once", async () => {
     const review = await seedReview();
     await persistDiscoveryHandoff(review, "duplicate-reference");
@@ -63,7 +71,7 @@ describe.sequential("YouTube Discovery Accept reconciliation", () => {
     expect(intake.submit).not.toHaveBeenCalled();
   });
 
-  test("returns the stored terminal result to concurrent finalizers and writes one audit", async () => {
+  test("returns the stored terminal result to concurrent finalizers, then hides an accepted review", async () => {
     const review = await seedReview();
     const intake = handoff("submitted");
     const port = createPostgresAdminYoutubeDiscoveryPort(undefined, testDb, intake);
@@ -73,18 +81,19 @@ describe.sequential("YouTube Discovery Accept reconciliation", () => {
     expect(intake.submit).toHaveBeenCalledOnce();
     await expect(testDb.select({ id: auditEvents.id }).from(auditEvents).where(eq(auditEvents.targetId, review.recommendationId))).resolves.toHaveLength(1);
 
+    await expect(port.acceptReview(principal, review.recommendationId)).resolves.toBeNull();
     await expect(port.acceptReview(principal, "missing-review")).resolves.toBeNull();
     expect(intake.submit).toHaveBeenCalledOnce();
   });
 
-  test("returns the original terminal result when a timeout retry follows finalization", async () => {
+  test("reconciles a timeout retry once, then hides the accepted review", async () => {
     const review = await seedReview();
     const intake = { submit: vi.fn().mockResolvedValue("reconciling"), lookup: vi.fn().mockResolvedValue("submitted") };
     const port = createPostgresAdminYoutubeDiscoveryPort(undefined, testDb, intake);
 
     await expect(port.acceptReview(principal, review.recommendationId)).resolves.toEqual({ outcome: "reconciling" });
     await expect(port.acceptReview(principal, review.recommendationId)).resolves.toEqual({ outcome: "submitted" });
-    await expect(port.acceptReview(principal, review.recommendationId)).resolves.toEqual({ outcome: "submitted" });
+    await expect(port.acceptReview(principal, review.recommendationId)).resolves.toBeNull();
     await expect(testDb.select({ outcome: youtubeDiscoveryKnowledgeHandoffs.outcome }).from(youtubeDiscoveryKnowledgeHandoffs).where(eq(youtubeDiscoveryKnowledgeHandoffs.candidateId, review.candidateId))).resolves.toEqual([{ outcome: "submitted" }]);
     await expect(testDb.select({ id: auditEvents.id }).from(auditEvents).where(eq(auditEvents.targetId, review.recommendationId))).resolves.toHaveLength(1);
   });
@@ -97,7 +106,7 @@ describe.sequential("YouTube Discovery Accept reconciliation", () => {
     const port = createPostgresAdminYoutubeDiscoveryPort(undefined, testDb, intake);
 
     await expect(port.listReview(secondPrincipal, null)).resolves.toMatchObject({ items: [{ recommendationId: review.recommendationId, actionAvailability: "reconciling" }] });
-    expect(intake.lookup).toHaveBeenCalledWith({ reference: "missing-reference", canonicalUrl: review.canonicalUrl, actorUserId: principal.userId });
+    expect(intake.lookup).toHaveBeenCalledWith("missing-reference");
     expect(intake.submit).not.toHaveBeenCalled();
     await expect(port.acceptReview(secondPrincipal, review.recommendationId)).resolves.toEqual({ outcome: "reconciling" });
     await expect(decisionState(review)).resolves.toBe("pending");
@@ -181,7 +190,7 @@ async function seedReview() {
   return { candidateId: candidate.id, canonicalUrl: candidate.canonicalUrl, recommendationId: recommendation.id };
 }
 async function persistDiscoveryHandoff(review: Awaited<ReturnType<typeof seedReview>>, reference: string) {
-  await testDb.insert(youtubeDiscoveryKnowledgeHandoffs).values({ candidateId: review.candidateId, recommendationId: review.recommendationId, reference, actorUserId: principal.userId, reconciling: true });
+  await testDb.insert(youtubeDiscoveryKnowledgeHandoffs).values({ candidateId: review.candidateId, recommendationId: review.recommendationId, reference, reconciling: true });
 }
 async function decisionState(review: Awaited<ReturnType<typeof seedReview>>) {
   return (await testDb.select({ state: youtubeDiscoveryCandidateReviewStates.state }).from(youtubeDiscoveryCandidateReviewStates).where(eq(youtubeDiscoveryCandidateReviewStates.candidateId, review.candidateId)))[0]?.state;

@@ -89,7 +89,7 @@ describe.sequential("YouTube Discovery review read model", () => {
        await expect(port.listReview(principal, { ...anchor, recommendationId: "fabricated-recommendation" })).rejects.toBeInstanceOf(YoutubeDiscoveryReviewCursorValidationError);
        const [anchorCandidate] = await transaction.select({ candidateId: youtubeDiscoveryCandidateReviewStates.candidateId }).from(youtubeDiscoveryCandidateReviewStates).where(eq(youtubeDiscoveryCandidateReviewStates.recommendationId, anchor.recommendationId));
        if (!anchorCandidate) throw new Error("expected cursor candidate");
-       await transaction.insert(youtubeDiscoveryKnowledgeHandoffs).values({ candidateId: anchorCandidate.candidateId, recommendationId: anchor.recommendationId, reference: "cursor-reconcile", actorUserId: principal.userId, reconciling: true });
+        await transaction.insert(youtubeDiscoveryKnowledgeHandoffs).values({ candidateId: anchorCandidate.candidateId, recommendationId: anchor.recommendationId, reference: "cursor-reconcile", reconciling: true });
        const reconcilingPort = createPostgresAdminYoutubeDiscoveryPort(eligibility, transaction, { submit: vi.fn(), lookup: vi.fn().mockResolvedValue("submitted" as const) });
        await expect(reconcilingPort.listReview(principal, anchor)).resolves.toMatchObject({ items: expect.any(Array) });
        await transaction.update(youtubeDiscoveryCandidateReviewStates).set({ state: "deferred" }).where(eq(youtubeDiscoveryCandidateReviewStates.recommendationId, anchor.recommendationId));

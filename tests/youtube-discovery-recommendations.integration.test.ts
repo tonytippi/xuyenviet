@@ -42,7 +42,7 @@ describe.sequential("YouTube Discovery recommendation persistence", () => {
 
     await expect(testDb.update(youtubeDiscoveryRecommendations).set({ reason: "below_defer_band" }).where(eq(youtubeDiscoveryRecommendations.id, (await testDb.select({ id: youtubeDiscoveryRecommendations.id }).from(youtubeDiscoveryRecommendations))[0]!.id))).rejects.toThrow();
     await expect(testDb.delete(youtubeDiscoveryRecommendations)).rejects.toThrow();
-    await testDb.insert(youtubeDiscoveryKnowledgeHandoffs).values({ candidateId: candidate.id, recommendationId: initialReviewState!.recommendationId, reference: "retention-handoff", actorUserId: "operator", reconciling: true });
+    await testDb.insert(youtubeDiscoveryKnowledgeHandoffs).values({ candidateId: candidate.id, recommendationId: initialReviewState!.recommendationId, reference: "retention-handoff", reconciling: true });
     await testDb.update(youtubeDiscoveryCandidates).set({ updatedAt: new Date(0) }).where(eq(youtubeDiscoveryCandidates.id, candidate.id));
     expect(await retainYoutubeDiscoveryRecords(testDb)).toBe(1);
     await expect(testDb.select().from(youtubeDiscoveryRecommendations)).resolves.toEqual([]);

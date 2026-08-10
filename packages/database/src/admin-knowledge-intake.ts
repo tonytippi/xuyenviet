@@ -72,17 +72,17 @@ async function submitHandoff(input: { reference: string; canonicalUrl: string; a
   } catch {
     // A competing insert can lose the unique-reference race after the winner commits.
     // Read its owner-bound durable result rather than turning that completed admission into ambiguity.
-    const outcome = await lookupHandoff(input);
+    const outcome = await lookupHandoff(input.reference);
     return outcome === "missing" ? "reconciling" : outcome;
   }
 }
 
-async function lookupHandoff(input: { reference: string; canonicalUrl: string; actorUserId: string }): Promise<"submitted" | "duplicate" | "failed" | "reconciling" | "missing"> {
-  if (!validReference(input.reference) || !validReference(input.actorUserId) || canonicalizeYoutubeVideoUrl(input.canonicalUrl)?.canonicalUrl !== input.canonicalUrl) return "reconciling";
+async function lookupHandoff(reference: string): Promise<"submitted" | "duplicate" | "failed" | "reconciling" | "missing"> {
+  if (!validReference(reference)) return "reconciling";
   try {
-    const [row] = await getDb().select({ actorUserId: knowledgeOneUrlHandoffs.actorUserId, canonicalUrl: knowledgeOneUrlHandoffs.canonicalUrl, outcome: knowledgeOneUrlHandoffs.outcome }).from(knowledgeOneUrlHandoffs).where(eq(knowledgeOneUrlHandoffs.reference, input.reference)).limit(1);
+    const [row] = await getDb().select({ outcome: knowledgeOneUrlHandoffs.outcome }).from(knowledgeOneUrlHandoffs).where(eq(knowledgeOneUrlHandoffs.reference, reference)).limit(1);
     if (!row) return "missing";
-    return row.actorUserId === input.actorUserId && row.canonicalUrl === input.canonicalUrl && row.outcome ? row.outcome : "reconciling";
+    return row.outcome ?? "reconciling";
   } catch { return "reconciling"; }
 }
 

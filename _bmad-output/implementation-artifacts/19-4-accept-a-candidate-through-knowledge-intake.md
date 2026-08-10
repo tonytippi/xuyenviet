@@ -177,6 +177,8 @@ gpu4ai/gpt-5.6-terra
 - Retry-semantics repair: terminal submitted/duplicate finalization now retains only the Discovery opaque reference and closed outcome until normal retention cleanup. Timeout retries and concurrent finalizers return that stored terminal outcome, while a pending unresolved marker alone protects the candidate graph from retention. Focused regressions cover stable retry, one audit, and terminal marker cleanup.
 - Verification after retry-semantics repair: focused serial integration test passed (1 file, 11 tests); `pnpm typecheck`, `pnpm lint` (0 errors, 46 existing warnings), `pnpm build`, and `git diff --check` passed.
 - Concurrent-ledger repair: a submit transaction that loses the new opaque-reference unique race now re-reads the Knowledge-owned ledger after rollback. It returns only the durable terminal outcome for the same actor/canonical-URL binding; missing, incomplete, mismatched, or unavailable records remain reconciling. Serial integration coverage verifies simultaneous same-reference submission returns `submitted` to both callers with one ledger and source row.
+- Post-review repair: inactive accepted-review retries now return no terminal result; the Discovery marker retains only its opaque reference/reconciling state while Knowledge owns actor/URL binding; and a browser failure after dispatch enters reconciling then reloads server state. Added migration `0060` to remove the formerly persisted Discovery actor column.
+- Verification after post-review repair: focused unit tests passed (2 files, 6 tests); focused serial integration tests passed (4 files, 20 tests); `pnpm typecheck` and `git diff --check` passed; `pnpm lint` completed with 0 errors and 47 existing warnings.
 
 ### File List
 
@@ -188,6 +190,7 @@ gpu4ai/gpt-5.6-terra
 - apps/api/src/main.ts
 - drizzle/migrations/0058_add_discovery_knowledge_handoffs.sql
 - drizzle/migrations/0059_retain_discovery_terminal_handoff_outcomes.sql
+- drizzle/migrations/0060_remove_discovery_handoff_actor.sql
 - drizzle/migrations/meta/_journal.json
 - packages/contracts/src/youtube-discovery/index.ts
 - packages/database/src/admin-knowledge-intake.ts
@@ -204,3 +207,4 @@ gpu4ai/gpt-5.6-terra
 ## Change Log
 
 - 2026-08-10: Implemented Knowledge handoff-backed Discovery Accept workflow and focused verification.
+- 2026-08-10: Resolved all post-implementation BMad review findings and re-verified focused seams.

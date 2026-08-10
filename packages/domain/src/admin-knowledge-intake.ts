@@ -1,7 +1,7 @@
 import type { AdminKnowledgeIntake, AdminKnowledgeIntakeQuery, AdminKnowledgeSeedBatchRequest, AdminKnowledgeSeedBatchResponse, AdminKnowledgeSourceRemovalRequest, AdminKnowledgeSourceRemovalResponse, RequestPrincipal } from "@xuyenviet/contracts";
 
 export type KnowledgeOneUrlHandoffOutcome = "submitted" | "duplicate" | "failed" | "reconciling";
-export type KnowledgeOneUrlHandoff = { submit(input: { reference: string; canonicalUrl: string; actorUserId: string }): Promise<KnowledgeOneUrlHandoffOutcome>; lookup(input: { reference: string; canonicalUrl: string; actorUserId: string }): Promise<KnowledgeOneUrlHandoffOutcome | "missing">; };
+export type KnowledgeOneUrlHandoff = { submit(input: { reference: string; canonicalUrl: string; actorUserId: string }): Promise<KnowledgeOneUrlHandoffOutcome>; lookup(reference: string): Promise<KnowledgeOneUrlHandoffOutcome | "missing">; };
 
 export type AdminKnowledgeIntakePort = {
   list(input: AdminKnowledgeIntakeQuery): Promise<AdminKnowledgeIntake>;

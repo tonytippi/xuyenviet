@@ -80,11 +80,13 @@ export function YoutubeDiscoveryReview() {
     if (!detail || isAccepting || isReconciling || detail.actionAvailability === "reconciling") return;
     const recommendationId = detail.recommendationId;
     const requestId = ++acceptRequestId.current;
+    let dispatched = false;
     setIsAccepting(true); setStatus(youtubeDiscoveryReviewCopy.accept.pending);
     try {
       const csrf = await request("/auth/csrf");
       const nonce = csrf.body && typeof csrf.body === "object" && !Array.isArray(csrf.body) && typeof (csrf.body as Record<string, unknown>).csrfToken === "string" ? (csrf.body as Record<string, string>).csrfToken : null;
       if (!csrf.response.ok || !nonce) throw new Error("unsafe csrf");
+      dispatched = true;
       const response = await fetch(`${origin()}/v1/admin/knowledge/youtube-discovery/review/${encodeURIComponent(recommendationId)}/accept`, { method: "POST", credentials: "include", headers: { "content-type": "application/json", "x-request-id": crypto.randomUUID(), "x-xuyenviet-csrf": nonce, Origin: window.location.origin }, body: "{}", cache: "no-store" });
       if (response.status === 401) { signIn(); throw new Error("signin"); }
       const result = parseAdminYoutubeDiscoveryAcceptReviewResult(await response.json().catch(() => null));
@@ -93,7 +95,12 @@ export function YoutubeDiscoveryReview() {
       setStatus(youtubeDiscoveryReviewCopy.accept[result.outcome]);
       if (result.outcome === "reconciling") setIsReconciling(true);
       if (result.outcome === "submitted" || result.outcome === "duplicate") { setIsAccepting(false); selectedId.current = null; selectionGeneration.current += 1; setSelected(null); setDetail(null); await load(null, true, true); }
-    } catch { if (requestId === acceptRequestId.current && recommendationId === selectedId.current) setStatus(youtubeDiscoveryReviewCopy.accept.failed); }
+    } catch {
+      if (requestId !== acceptRequestId.current || recommendationId !== selectedId.current) return;
+      if (!dispatched) { setStatus(youtubeDiscoveryReviewCopy.accept.failed); return; }
+      setIsReconciling(true); setStatus(youtubeDiscoveryReviewCopy.accept.reconciling);
+      void loadDetail(recommendationId, true);
+    }
     finally { if (requestId === acceptRequestId.current && recommendationId === selectedId.current) setIsAccepting(false); }
   }
 

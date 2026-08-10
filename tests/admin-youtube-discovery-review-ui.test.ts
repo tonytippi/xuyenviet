@@ -54,6 +54,11 @@ describe("admin YouTube Discovery review UI boundary", () => {
     expect(source).toContain('actionAvailability === "reconciling"');
     expect(source).toContain('const [isReconciling, setIsReconciling] = useState(false)');
     expect(source).toContain('if (result.outcome === "reconciling") setIsReconciling(true);');
+    expect(source).toContain('let dispatched = false;');
+    expect(source).toContain('dispatched = true;');
+    expect(source).toContain('if (!dispatched) { setStatus(youtubeDiscoveryReviewCopy.accept.failed); return; }');
+    expect(source).toContain('setIsReconciling(true); setStatus(youtubeDiscoveryReviewCopy.accept.reconciling);');
+    expect(source).toContain('void loadDetail(recommendationId, true);');
     expect(source).toContain('disabled={isAccepting || isReconciling || detail.actionAvailability === "reconciling"}');
     expect(source).toContain('youtubeDiscoveryReviewCopy.accept[result.outcome]');
     expect(source).toContain('await load(null, true, true);');

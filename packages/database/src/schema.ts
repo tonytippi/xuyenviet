@@ -557,7 +557,6 @@ export const youtubeDiscoveryKnowledgeHandoffs = pgTable("youtube_discovery_know
   candidateId: text("candidate_id").primaryKey().references(() => youtubeDiscoveryCandidates.id, { onDelete: "restrict" }),
   recommendationId: text("recommendation_id").notNull(),
   reference: text("reference").notNull(),
-  actorUserId: text("actor_user_id").notNull().references(() => users.id, { onDelete: "restrict" }),
   reconciling: boolean("reconciling").default(false).notNull(),
   outcome: text("outcome").$type<"submitted" | "duplicate">(),
   createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),

@@ -68,6 +68,12 @@ warnings: []
 - Given reload, concurrent request, invalid body, stale state, or unauthorized/invalid-CSRF request, when the command is processed, then no historic state or Knowledge internals leak and no unapproved source/capture/provider side effect occurs.
 - Given a successful Accept in the inspector, when the queue refreshes, then it selects the first remaining active review or the established completion state without a dialog; Defer and Skip remain disabled previews.
 
+### Review Findings
+
+- [x] [Review][Patch] Inactive accepted review exposes a historic terminal outcome [packages/database/src/admin-youtube-discovery.ts:65] — Removed the terminal-outcome fallback when no pending association can be locked; inactive/stale retries now return `404 not_found` without disclosing historic state (AC 1).
+- [x] [Review][Patch] Discovery retains the Knowledge handoff actor identity [drizzle/migrations/0060_remove_discovery_handoff_actor.sql:1] — Lookup now accepts only the opaque reference, Discovery no longer models or writes `actor_user_id`, and migration `0060` removes the previously deployed column. Knowledge retains actor/URL binding for admission.
+- [x] [Review][Patch] Interrupted Accept is presented as confirmed failure [apps/admin/app/knowledge/youtube-discovery-review/review.tsx:83] — An error after dispatch latches reconciling feedback and refreshes the selected detail server-side; only failures before dispatch remain retryable client failures (AC 4).
+
 ## Spec Change Log
 
 ## Review Triage Log
@@ -91,6 +97,17 @@ warnings: []
   - [high] [patch] Made non-terminal handoff outcomes, missing ledgers, lost review associations, and unavailable owner calls fail closed as reconciling without inferred acceptance.
   - [high] [patch] Preserved actor-correct audits, migration validity, terminal retry outcomes, retention reconciliation bridges, and exact single-transition behavior under concurrent finalizers.
   - [medium] [patch] Bounded page reconciliation, kept a reconciled cursor anchor valid, retained terminal Vietnamese feedback, and fenced stale inspector/queue operations.
+
+### 2026-08-10 - Post-review repair
+- intent_gap: 0
+- bad_spec: 0
+- patch: 3 (high 0, medium 3, low 0), all resolved
+- defer: 0
+- reject: 1
+- addressed_findings:
+  - Removed stale terminal result disclosure after the review leaves its active pending state.
+  - Removed Discovery's durable actor copy and kept closed actor/URL binding within Knowledge's opaque handoff ledger.
+  - Made a post-dispatch browser interruption visibly reconciling and server-refreshed before retry.
 
 ## Design Notes
 
