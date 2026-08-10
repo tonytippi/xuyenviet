@@ -1,6 +1,6 @@
-import { BadRequestException, Body, Controller, Get, HttpCode, HttpStatus, Inject, Param, Post, Req, ServiceUnavailableException } from "@nestjs/common";
-import { parseAdminYoutubeDiscoveryCommand, parseAdminYoutubeDiscoveryQuery, parseAdminYoutubeDiscoveryQueryList, type RequestPrincipal } from "@xuyenviet/contracts";
-import type { AdminYoutubeDiscoveryPort } from "@xuyenviet/domain";
+import { BadRequestException, Body, Controller, Get, HttpCode, HttpStatus, Inject, NotFoundException, Param, Post, Query, Req, ServiceUnavailableException } from "@nestjs/common";
+import { parseAdminYoutubeDiscoveryCommand, parseAdminYoutubeDiscoveryQuery, parseAdminYoutubeDiscoveryQueryList, parseAdminYoutubeDiscoveryReviewCursor, parseAdminYoutubeDiscoveryReviewDetail, parseAdminYoutubeDiscoveryReviewQueue, type RequestPrincipal } from "@xuyenviet/contracts";
+import { YoutubeDiscoveryReviewCursorValidationError, type AdminYoutubeDiscoveryPort } from "@xuyenviet/domain";
 import { AllowsAdminBrowserSession, RequiresAdminCapability } from "../auth/admin-capability.decorator";
 
 export const ADMIN_YOUTUBE_DISCOVERY_PORT = Symbol("ADMIN_YOUTUBE_DISCOVERY_PORT");
@@ -8,6 +8,8 @@ export const ADMIN_YOUTUBE_DISCOVERY_PORT = Symbol("ADMIN_YOUTUBE_DISCOVERY_PORT
 export class AdminYoutubeDiscoveryController {
   constructor(@Inject(ADMIN_YOUTUBE_DISCOVERY_PORT) private readonly port: AdminYoutubeDiscoveryPort) {}
   @Get() async list() { try { const value = await this.port.list(); if (!parseAdminYoutubeDiscoveryQueryList(value)) throw unavailable(); return value; } catch (error) { if (error instanceof ServiceUnavailableException) throw error; throw unavailable(); } }
+  @Get("review") async review(@Query() query: Record<string, unknown>) { if (Object.keys(query).some((key) => key !== "cursor") || ("cursor" in query && typeof query.cursor !== "string")) throw invalid(); const cursor = query.cursor as string | undefined; const parsed = cursor === undefined ? null : parseAdminYoutubeDiscoveryReviewCursor(cursor); if (cursor !== undefined && !parsed) throw invalid(); try { const value = await this.port.listReview(parsed); if (!parseAdminYoutubeDiscoveryReviewQueue(value)) throw unavailable(); return value; } catch (error) { if (error instanceof YoutubeDiscoveryReviewCursorValidationError) throw invalid(); if (error instanceof BadRequestException || error instanceof ServiceUnavailableException) throw error; throw unavailable(); } }
+  @Get("review/:recommendationId") async detail(@Param("recommendationId") recommendationId: string) { if (!validId(recommendationId)) throw invalid(); let value: Awaited<ReturnType<AdminYoutubeDiscoveryPort["getReview"]>>; try { value = await this.port.getReview(recommendationId); } catch { throw unavailable(); } if (!value) throw notFound(); if (!parseAdminYoutubeDiscoveryReviewDetail(value)) throw unavailable(); return value; }
   @Post() @HttpCode(HttpStatus.CREATED) async create(@Body() body: unknown, @Req() request: { principal?: RequestPrincipal }) { const input = parseAdminYoutubeDiscoveryCommand(body, "create"); if (!input || !request.principal) throw invalid(); return call(() => this.port.create(request.principal!, input as { queryText: string; priority: number; cadenceMinutes: number })); }
   @Post(":id/text") async edit(@Param("id") id: string, @Body() body: unknown, @Req() request: { principal?: RequestPrincipal }) { const input = parseAdminYoutubeDiscoveryCommand(body, "edit"); if (!input || !request.principal || !validId(id)) throw invalid(); return call(() => this.port.edit(request.principal!, id, input.queryText!)); }
   @Post(":id/priority") async priority(@Param("id") id: string, @Body() body: unknown, @Req() request: { principal?: RequestPrincipal }) { const input = parseAdminYoutubeDiscoveryCommand(body, "priority"); if (!input || !request.principal || !validId(id)) throw invalid(); return call(() => this.port.reprioritize(request.principal!, id, input.priority!)); }
@@ -17,4 +19,5 @@ export class AdminYoutubeDiscoveryController {
 async function call(operation: () => Promise<unknown>) { try { const result = await operation(); if (!parseAdminYoutubeDiscoveryQuery(result)) throw invalid(); return result; } catch (error) { if (error instanceof BadRequestException) throw error; throw unavailable(); } }
 function invalid() { return new BadRequestException({ code: "validation_error" }); }
 function unavailable() { return new ServiceUnavailableException({ code: "internal_error" }); }
+function notFound() { return new NotFoundException({ code: "not_found" }); }
 function validId(value: string) { return value.trim() === value && value.length > 0 && value.length <= 128; }

@@ -51,6 +51,22 @@ describe("SafeApiExceptionFilter", () => {
     expect(body).toEqual({ code: "validation_error", message: "Dữ liệu yêu cầu không hợp lệ.", requestId: "middleware-request" });
   });
 
+  test("preserves an explicit not-found safe code and canonical 404 status", () => {
+    let status: number | undefined;
+    let body: unknown;
+    const host = {
+      switchToHttp: () => ({
+        getResponse: () => ({ status: (value: number) => { status = value; return { json: (response: unknown) => { body = response; } }; } }),
+        getRequest: () => ({ requestId: "missing-review", headers: {} }),
+      }),
+    };
+
+    new SafeApiExceptionFilter().catch(new HttpException({ code: "not_found" }, 404), host as never);
+
+    expect(status).toBe(404);
+    expect(body).toEqual({ code: "not_found", message: "Không tìm thấy tài nguyên yêu cầu.", requestId: "missing-review" });
+  });
+
   test("does not expose field violations outside validation errors", () => {
     let body: unknown;
     const host = {

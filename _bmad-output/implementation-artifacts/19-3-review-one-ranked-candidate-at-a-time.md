@@ -1,6 +1,6 @@
 ---
 story_id: 19-3
-status: ready-for-dev
+status: done
 created: 2026-08-10
 epic: 19
 ---
@@ -152,8 +152,31 @@ gpu4ai/gpt-5.6-terra
 - Ultimate context engine analysis completed - comprehensive developer guide created.
 - The guide reconciles Epic 19's URL-only and safe-projection boundaries with Story 19.2's immutable recommendation provenance and the later Story 19.4/19.5 decision ownership.
 - No implementation, migration, provider call, database reset, test execution, or commit was performed while creating this story.
+- Implemented the read-only Discovery review slice: durable pending review associations, strict safe queue/detail contracts, microsecond keyset cursors, protected Nest reads, and a responsive Vietnamese admin inspector with disabled decision previews.
+- Completed focused migration/read-model, API authorization/error-envelope, contract, UI-boundary, review-state/retention, and stale cursor regression coverage. Final independent adversarial review reported no actionable findings.
+- No commit was created.
 
 ### File List
 
 - _bmad-output/implementation-artifacts/19-3-review-one-ranked-candidate-at-a-time.md
 - _bmad-output/implementation-artifacts/sprint-status.yaml
+- drizzle/migrations/0057_add_discovery_candidate_review_state.sql
+- drizzle/migrations/meta/_journal.json
+- packages/contracts/src/index.ts
+- packages/contracts/src/youtube-discovery/index.ts
+- packages/domain/src/youtube-discovery/admin.ts
+- packages/database/src/schema.ts
+- packages/database/src/admin-youtube-discovery.ts
+- packages/database/src/youtube-discovery/index.ts
+- apps/api/src/admin/admin-youtube-discovery.controller.ts
+- apps/api/src/main.ts
+- apps/api/src/safe-api-exception.filter.ts
+- apps/admin/app/admin-access-gate.tsx
+- apps/admin/app/knowledge/youtube-discovery-review/page.tsx
+- apps/admin/app/knowledge/youtube-discovery-review/review.tsx
+- apps/admin/app/knowledge/youtube-discovery-review/review-copy.ts
+- tests/admin-youtube-discovery-contract.test.ts
+- tests/admin-youtube-discovery-api.integration.test.ts
+- tests/admin-youtube-discovery-review-ui.test.ts
+- tests/youtube-discovery-review.integration.test.ts
+- tests/youtube-discovery-recommendations.integration.test.ts

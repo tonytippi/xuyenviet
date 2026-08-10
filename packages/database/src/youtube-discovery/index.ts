@@ -1,7 +1,7 @@
 import { recordAuditEvent, type AuditEventWriter } from "../audit-writers";
 import { createSystemAuditActor, type AuditActor } from "../actors";
 import { getDb } from "../client";
-import { youtubeDiscoveryAppearances, youtubeDiscoveryCandidates, youtubeDiscoveryCommentSignalValues, youtubeDiscoveryCommentSignals, youtubeDiscoveryPlanningLeases, youtubeDiscoveryPlanningOutcomes, youtubeDiscoveryPolicyVersions, youtubeDiscoveryQueryProposals, youtubeDiscoveryQueryProposalReasonValues, youtubeDiscoveryRankingHistory, youtubeDiscoveryRecommendations, youtubeDiscoveryRuns, youtubeDiscoveryTriages, type YoutubeDiscoveryCommentSignal, type YoutubeDiscoveryQueryProposalOrigin, type YoutubeDiscoveryQueryProposalReason, type YoutubeDiscoveryRunSafeErrorCode } from "../schema";
+import { youtubeDiscoveryAppearances, youtubeDiscoveryCandidateReviewStates, youtubeDiscoveryCandidates, youtubeDiscoveryCommentSignalValues, youtubeDiscoveryCommentSignals, youtubeDiscoveryPlanningLeases, youtubeDiscoveryPlanningOutcomes, youtubeDiscoveryPolicyVersions, youtubeDiscoveryQueryProposals, youtubeDiscoveryQueryProposalReasonValues, youtubeDiscoveryRankingHistory, youtubeDiscoveryRecommendations, youtubeDiscoveryRuns, youtubeDiscoveryTriages, type YoutubeDiscoveryCommentSignal, type YoutubeDiscoveryQueryProposalOrigin, type YoutubeDiscoveryQueryProposalReason, type YoutubeDiscoveryRunSafeErrorCode } from "../schema";
 import type { YoutubeDiscoveryPolicyAuditSummary, YoutubeDiscoveryQueryProposalAuditSummary, YoutubeDiscoveryRunAuditSummary } from "@xuyenviet/contracts";
 import { canonicalizeYoutubeVideoUrl, deriveDiscoveryQueries, evaluateYoutubeDiscoveryRecommendation, parseYoutubeDiscoveryPolicy, type DiscoveryQuerySignalPortResult, type SafeDiscoveryQuerySignal } from "@xuyenviet/domain";
 import { and, eq, sql } from "drizzle-orm";
@@ -437,7 +437,20 @@ export async function persistYoutubeDiscoveryRecommendation(claim: YoutubeDiscov
     const existing = await transaction.select({ id: youtubeDiscoveryRecommendations.id }).from(youtubeDiscoveryRecommendations).where(and(eq(youtubeDiscoveryRecommendations.candidateId, bundle.candidateId), eq(youtubeDiscoveryRecommendations.appearanceId, bundle.appearanceId), eq(youtubeDiscoveryRecommendations.runId, claim.id), eq(youtubeDiscoveryRecommendations.policyVersionId, guard.policyVersionId), eq(youtubeDiscoveryRecommendations.triageId, bundle.triageId))).limit(1); if (existing[0]) return "completed" as const;
     const result = evaluateYoutubeDiscoveryRecommendation(bundle.policy, bundle.triage, { canonical: bundle.canonical, currentRunEnriched: bundle.currentRunEnriched, eligibility });
     const [created] = await transaction.insert(youtubeDiscoveryRecommendations).values({ candidateId: bundle.candidateId, appearanceId: bundle.appearanceId, runId: claim.id, policyVersionId: guard.policyVersionId, triageId: bundle.triageId, score: result.score.toFixed(6), relevanceScore: result.scores.relevanceScore.toFixed(6), expectedValueScore: result.scores.expectedValueScore.toFixed(6), freshnessFitScore: result.scores.freshnessFitScore.toFixed(6), commercialRiskScore: result.scores.commercialRiskScore.toFixed(6), duplicateRiskScore: result.scores.duplicateRiskScore.toFixed(6), recommendation: result.recommendation, factors: result.factors, penalties: result.penalties, reason: result.reason, signals: result.signals }).returning({ id: youtubeDiscoveryRecommendations.id });
-    if (created) await transaction.insert(youtubeDiscoveryRankingHistory).values({ candidateId: bundle.candidateId, appearanceId: bundle.appearanceId, runId: claim.id, policyVersionId: guard.policyVersionId, stage: "recommended", recommendationId: created.id });
+    if (created) {
+      if (result.recommendation === "consider") {
+        // A worker may create later immutable recommendations, but never replaces
+        // an existing pending or decided candidate review-state association.
+        if (guard.queryProposalId !== null) {
+          const [reviewState] = await transaction.execute(sql`insert into youtube_discovery_candidate_review_states (candidate_id, recommendation_id, state) values (${bundle.candidateId}, ${created.id}, 'pending') on conflict (candidate_id) do nothing returning recommendation_id as "recommendationId"`) as Array<{ recommendationId: string }>;
+          if (!reviewState) {
+            const [existingState] = await transaction.execute(sql`select recommendation_id as "recommendationId", state from youtube_discovery_candidate_review_states where candidate_id = ${bundle.candidateId} for key share`) as Array<{ recommendationId: string; state: "pending" | "accepted" | "deferred" | "skipped" }>;
+            if (!existingState) throw new Error("YouTube Discovery review-state association was not retained.");
+          }
+        }
+      }
+      await transaction.insert(youtubeDiscoveryRankingHistory).values({ candidateId: bundle.candidateId, appearanceId: bundle.appearanceId, runId: claim.id, policyVersionId: guard.policyVersionId, stage: "recommended", recommendationId: created.id });
+    }
     requireDeadline();
     const final = await guardYoutubeDiscoveryCandidateWrite(transaction, claim); if (typeof final === "string") throw new CandidateWriteAborted(final); return "completed" as const;
   }); } catch (error) { if (error instanceof RecommendationDeadlineExceeded) return "deadline_exhausted"; if (!(error instanceof CandidateWriteAborted)) throw error; return error.outcome === "cancelled" ? (await cancelYoutubeDiscoveryRunIfDisabled(claim, database)) === "cancelled" ? "cancelled" : "contended" : "contended"; }
@@ -458,6 +471,7 @@ export async function retainYoutubeDiscoveryRecords(database: DiscoveryWriter = 
     const candidates = await transaction.execute(sql`select id from youtube_discovery_candidates where updated_at <= clock_timestamp() - ${policy.retentionDays} * interval '1 day' order by updated_at asc limit 20 for update`) as Array<{ id: string }>;
     for (const candidate of candidates) {
       await transaction.delete(youtubeDiscoveryCommentSignals).where(eq(youtubeDiscoveryCommentSignals.candidateId, candidate.id));
+      await transaction.delete(youtubeDiscoveryCandidateReviewStates).where(eq(youtubeDiscoveryCandidateReviewStates.candidateId, candidate.id));
       await transaction.execute(sql`select set_config('youtube_discovery.retention_guard', 'on', true)`);
       await transaction.delete(youtubeDiscoveryRecommendations).where(eq(youtubeDiscoveryRecommendations.candidateId, candidate.id));
       await transaction.execute(sql`select set_config('youtube_discovery.retention_guard', 'off', true)`);
@@ -471,11 +485,12 @@ export async function retainYoutubeDiscoveryRecords(database: DiscoveryWriter = 
   });
 }
 
-async function guardYoutubeDiscoveryCandidateWrite(transaction: DiscoveryWriter, claim: YoutubeDiscoveryRunClaim): Promise<"contended" | "cancelled" | { readonly policyVersionId: string; readonly active: true }> {
-  const [run] = await transaction.execute(sql`select id, policy_version_id as "policyVersionId", attempt_count as "attemptCount" from youtube_discovery_runs where id = ${claim.id} and state = 'running' and fencing_token = ${claim.fencingToken} and lease_expires_at > clock_timestamp() for update`) as Array<{ id: string; policyVersionId: string; attemptCount: number }>;
+async function guardYoutubeDiscoveryCandidateWrite(transaction: DiscoveryWriter, claim: YoutubeDiscoveryRunClaim): Promise<"contended" | "cancelled" | { readonly policyVersionId: string; readonly queryProposalId: string | null; readonly active: true }> {
+  const [run] = await transaction.execute(sql`select id, policy_version_id as "policyVersionId", query_proposal_id as "queryProposalId", attempt_count as "attemptCount" from youtube_discovery_runs where id = ${claim.id} and state = 'running' and fencing_token = ${claim.fencingToken} and lease_expires_at > clock_timestamp() for update`) as Array<{ id: string; policyVersionId: string; queryProposalId: string | null; attemptCount: number }>;
   if (!run) return "contended";
-  const [enabled] = await transaction.execute(sql`select policy.enabled as "policyEnabled", proposal.enabled as "proposalEnabled" from youtube_discovery_policy_versions policy join youtube_discovery_runs current_run on current_run.policy_version_id = policy.id join youtube_discovery_query_proposals proposal on proposal.id = current_run.query_proposal_id where current_run.id = ${claim.id} and policy.is_current = true and policy.id = ${run.policyVersionId} for update`) as Array<{ policyEnabled: boolean; proposalEnabled: boolean }>;
-  if (enabled?.policyEnabled && enabled.proposalEnabled) return { active: true, policyVersionId: run.policyVersionId };
+  const [policy] = await transaction.execute(sql`select enabled from youtube_discovery_policy_versions where is_current = true and id = ${run.policyVersionId} for update`) as Array<{ enabled: boolean }>;
+  const [proposal] = run.queryProposalId ? await transaction.execute(sql`select enabled from youtube_discovery_query_proposals where id = ${run.queryProposalId} for update`) as Array<{ enabled: boolean }> : [];
+  if (policy?.enabled && proposal?.enabled !== false) return { active: true, policyVersionId: run.policyVersionId, queryProposalId: run.queryProposalId };
   // Do not cancel here: this guard runs inside the candidate graph transaction.
   // Its caller aborts first, then commits cancellation and its terminal audit alone.
   return "cancelled";

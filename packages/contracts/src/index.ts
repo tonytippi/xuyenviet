@@ -283,7 +283,7 @@ export function parseAdminAiGatewayModel(value: unknown): AdminAiGatewayModel | 
 }
 
 export type SafeFieldViolation = { field: string; code: string; message: string };
-export const safeApiErrorCodes = ["unauthorized", "forbidden", "validation_error", "csrf_invalid", "request_timeout", "internal_error"] as const;
+export const safeApiErrorCodes = ["unauthorized", "forbidden", "not_found", "validation_error", "csrf_invalid", "request_timeout", "internal_error"] as const;
 export type SafeApiErrorCode = (typeof safeApiErrorCodes)[number];
 export type SafeApiError = {
   code: SafeApiErrorCode;

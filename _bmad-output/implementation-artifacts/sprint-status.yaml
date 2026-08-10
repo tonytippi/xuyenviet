@@ -432,7 +432,7 @@ development_status:
   # 2026-08-10: Deterministic policy and immutable recommendation provenance implemented. Focused unit tests (5), serial integration tests (42), typecheck, build, and diff check passed; lint has 0 errors and 45 existing warnings. Worker regression coverage proves deadline exhaustion skips eligibility and policy revocation after eligibility writes no recommendation/history while retaining one terminal audit.
   # 2026-08-10: BMad review repairs preserved recommended history, filtered expired derived signals, enforced recommendation/history provenance, bounded eligibility and persistence by the execution deadline, rejected malformed eligibility results, restored the unit boundary, and consolidated the schema into migration 0056. PostgreSQL canonicalization of direct SQL numeric inputs is accepted because numeric(7,6) coercion precedes checks/triggers. Focused unit (7) and integration (36) tests, typecheck, build, and diff check passed; lint has 0 errors and 45 existing warnings. Full unit suite has one unrelated Traveler UI assertion failure.
   19-2-produce-deterministic-candidate-recommendations: done
-  19-3-review-one-ranked-candidate-at-a-time: ready-for-dev
+  19-3-review-one-ranked-candidate-at-a-time: done
   19-4-accept-a-candidate-through-knowledge-intake: backlog
   19-5-defer-skip-and-verify-candidate-decision-safety: backlog
   epic-19-retrospective: optional

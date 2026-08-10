@@ -533,12 +533,24 @@ export const youtubeDiscoveryRecommendations = pgTable("youtube_discovery_recomm
   recommendation: text("recommendation").$type<"skip" | "defer" | "consider">().notNull(), factors: text("factors").array().default([]).notNull(), penalties: text("penalties").array().default([]).notNull(), reason: text("reason").$type<"eligible_score_band" | "below_defer_band" | "between_defer_and_consider_band" | "already_compatible" | "canonical_mismatch" | "not_current_run_enriched">().notNull(), signals: text("signals").array().default([]).notNull(), createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
 }, (recommendation) => [
   uniqueIndex("youtube_discovery_recommendations_provenance_idx").on(recommendation.candidateId, recommendation.appearanceId, recommendation.runId, recommendation.policyVersionId, recommendation.triageId),
+  uniqueIndex("youtube_discovery_recommendations_id_candidate_idx").on(recommendation.id, recommendation.candidateId),
   uniqueIndex("youtube_discovery_recommendations_id_provenance_idx").on(recommendation.id, recommendation.candidateId, recommendation.appearanceId, recommendation.runId, recommendation.policyVersionId),
   foreignKey({ columns: [recommendation.appearanceId, recommendation.candidateId, recommendation.runId], foreignColumns: [youtubeDiscoveryAppearances.id, youtubeDiscoveryAppearances.candidateId, youtubeDiscoveryAppearances.runId], name: "youtube_discovery_recommendations_appearance_provenance_fk" }).onDelete("restrict"),
   foreignKey({ columns: [recommendation.triageId, recommendation.candidateId, recommendation.appearanceId, recommendation.runId, recommendation.policyVersionId], foreignColumns: [youtubeDiscoveryTriages.id, youtubeDiscoveryTriages.candidateId, youtubeDiscoveryTriages.appearanceId, youtubeDiscoveryTriages.runId, youtubeDiscoveryTriages.policyVersionId], name: "youtube_discovery_recommendations_triage_provenance_fk" }).onDelete("restrict"),
   foreignKey({ columns: [recommendation.runId, recommendation.policyVersionId], foreignColumns: [youtubeDiscoveryRuns.id, youtubeDiscoveryRuns.policyVersionId], name: "youtube_discovery_recommendations_run_policy_fk" }).onDelete("restrict"),
   check("youtube_discovery_recommendations_scores_check", sql`${recommendation.score} between 0 and 1 and ${recommendation.relevanceScore} between 0 and 1 and ${recommendation.expectedValueScore} between 0 and 1 and ${recommendation.freshnessFitScore} between 0 and 1 and ${recommendation.commercialRiskScore} between 0 and 1 and ${recommendation.duplicateRiskScore} between 0 and 1`),
   check("youtube_discovery_recommendations_codes_check", sql`${recommendation.recommendation} in ('skip','defer','consider') and ${recommendation.factors} <@ array['relevance','expected_value','freshness_fit']::text[] and youtube_discovery_text_array_unique(${recommendation.factors}) and ${recommendation.penalties} <@ array['commercial_risk','duplicate_risk']::text[] and youtube_discovery_text_array_unique(${recommendation.penalties}) and cardinality(${recommendation.factors}) + cardinality(${recommendation.penalties}) <= 5 and ${recommendation.reason} in ('eligible_score_band','below_defer_band','between_defer_and_consider_band','already_compatible','canonical_mismatch','not_current_run_enriched') and ${recommendation.signals} <@ array['recent_discussion','stale_or_changed_warning','practical_question_demand','creator_responsiveness','commercial_risk','contradictory_discussion']::text[] and youtube_discovery_text_array_unique(${recommendation.signals}) and cardinality(${recommendation.signals}) <= 6`),
+]);
+
+export const youtubeDiscoveryCandidateReviewStates = pgTable("youtube_discovery_candidate_review_states", {
+  candidateId: text("candidate_id").primaryKey().references(() => youtubeDiscoveryCandidates.id, { onDelete: "restrict" }),
+  recommendationId: text("recommendation_id").notNull(),
+  state: text("state").$type<"pending" | "accepted" | "deferred" | "skipped">().default("pending").notNull(),
+}, (review) => [
+  uniqueIndex("youtube_discovery_candidate_review_states_recommendation_idx").on(review.recommendationId),
+  index("youtube_discovery_candidate_review_states_pending_idx").on(review.state, review.recommendationId).where(sql`${review.state} = 'pending'`),
+  foreignKey({ columns: [review.recommendationId, review.candidateId], foreignColumns: [youtubeDiscoveryRecommendations.id, youtubeDiscoveryRecommendations.candidateId], name: "youtube_discovery_candidate_review_states_recommendation_candidate_fk" }).onDelete("restrict"),
+  check("youtube_discovery_candidate_review_states_state_check", sql`${review.state} in ('pending', 'accepted', 'deferred', 'skipped')`),
 ]);
 
 export const sources = pgTable(
