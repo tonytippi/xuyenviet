@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { eq, sql } from "drizzle-orm";
 
-import { aiGatewayModels, claimNextYoutubeDiscoveryRun, createSystemAuditActor, createUserAuditActor, createYoutubeDiscoveryPolicyVersion, createYoutubeDiscoveryQueryProposal, createYoutubeDiscoveryRun, finishYoutubeDiscoveryRun, getYoutubeDiscoveryRecommendationBundle, persistYoutubeDiscoveryCandidates, persistYoutubeDiscoveryEnrichment, persistYoutubeDiscoveryRecommendation, persistYoutubeDiscoveryTriage, retainYoutubeDiscoveryRecords, selectYoutubeDiscoveryTriageModel, youtubeDiscoveryCandidateReviewStates, youtubeDiscoveryCandidates, youtubeDiscoveryCommentSignals, youtubeDiscoveryRankingHistory, youtubeDiscoveryRecommendations, youtubeDiscoveryTriages } from "@xuyenviet/database";
+import { aiGatewayModels, claimNextYoutubeDiscoveryRun, createSystemAuditActor, createUserAuditActor, createYoutubeDiscoveryPolicyVersion, createYoutubeDiscoveryQueryProposal, createYoutubeDiscoveryRun, finishYoutubeDiscoveryRun, getYoutubeDiscoveryRecommendationBundle, persistYoutubeDiscoveryCandidates, persistYoutubeDiscoveryEnrichment, persistYoutubeDiscoveryRecommendation, persistYoutubeDiscoveryTriage, retainYoutubeDiscoveryRecords, selectYoutubeDiscoveryTriageModel, youtubeDiscoveryCandidateReviewStates, youtubeDiscoveryCandidates, youtubeDiscoveryCommentSignals, youtubeDiscoveryKnowledgeHandoffs, youtubeDiscoveryRankingHistory, youtubeDiscoveryRecommendations, youtubeDiscoveryTriages } from "@xuyenviet/database";
 import { resetTestDatabase, seedTestOperator, testDb } from "./helpers/db";
 
 describe.sequential("YouTube Discovery recommendation persistence", () => {
@@ -42,10 +42,12 @@ describe.sequential("YouTube Discovery recommendation persistence", () => {
 
     await expect(testDb.update(youtubeDiscoveryRecommendations).set({ reason: "below_defer_band" }).where(eq(youtubeDiscoveryRecommendations.id, (await testDb.select({ id: youtubeDiscoveryRecommendations.id }).from(youtubeDiscoveryRecommendations))[0]!.id))).rejects.toThrow();
     await expect(testDb.delete(youtubeDiscoveryRecommendations)).rejects.toThrow();
+    await testDb.insert(youtubeDiscoveryKnowledgeHandoffs).values({ candidateId: candidate.id, recommendationId: initialReviewState!.recommendationId, reference: "retention-handoff", actorUserId: "operator", reconciling: true });
     await testDb.update(youtubeDiscoveryCandidates).set({ updatedAt: new Date(0) }).where(eq(youtubeDiscoveryCandidates.id, candidate.id));
     expect(await retainYoutubeDiscoveryRecords(testDb)).toBe(1);
     await expect(testDb.select().from(youtubeDiscoveryRecommendations)).resolves.toEqual([]);
     await expect(testDb.select().from(youtubeDiscoveryCandidateReviewStates)).resolves.toEqual([]);
+    await expect(testDb.select().from(youtubeDiscoveryKnowledgeHandoffs)).resolves.toEqual([]);
   });
 
   test("retains recommended history and excludes expired derived signals", async () => {
