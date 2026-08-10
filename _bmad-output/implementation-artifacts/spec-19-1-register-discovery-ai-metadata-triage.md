@@ -2,10 +2,11 @@
 title: 'Register Discovery AI Metadata Triage'
 type: 'feature'
 created: '2026-08-10'
-status: 'in-review'
+status: 'done'
 baseline_revision: 'a02dd92'
 review_loop_iteration: 0
-followup_review_recommended: false
+followup_review_recommended: true
+implementation_revision: 'ccdb538'
 context:
   - '/home/sonnh/projects/xuyenviet/_bmad-output/project-context.md'
   - '/home/sonnh/projects/xuyenviet/_bmad-output/implementation-artifacts/epic-19-context.md'
