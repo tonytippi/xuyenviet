@@ -320,7 +320,7 @@ YTD-UX2: Desktop candidate review uses a ranked queue and persistent inspector; 
 
 YTD-UX3: Accept is immediate, disables duplicate actions while pending, does not use a confirmation dialog, and advances selection after a submitted/duplicate result. Failed or unknown outcomes preserve safe recovery behavior without claiming a source/capture exists.
 
-YTD-UX4: Candidate scoring uses a plain-language recommendation plus three to five factors/penalties; numeric model scores are authorized progressive disclosure and never establish fact correctness or credibility.
+YTD-UX4: Candidate scoring uses a plain-language recommendation plus up to five applicable factors/penalties; numeric model scores are authorized progressive disclosure and never establish fact correctness or credibility.
 
 YTD-UX5: Mission exposes Coverage needs, Queries, Candidates, and Discovery funnel, including gap-to-query-to-candidate drill-down. Queries visibly distinguish system-generated from operator-created origin and support simple editing/priority/pause/resume.
 
@@ -2509,7 +2509,7 @@ So that I can make an informed intake decision without reviewing raw source cont
 
 **Given** an operator selects a candidate
 **When** its inspector renders
-**Then** it shows canonical URL, safe video/channel metadata, query reason, recommendation, three to five factors/penalties, derived signals, and prior safe capture outcome
+**Then** it shows canonical URL, safe video/channel metadata, query reason, recommendation, up to five applicable factors/penalties, derived signals, and prior safe capture outcome
 **And** it never exposes raw comments, model output, raw source material, provider diagnostics, source IDs, or capture internals.
 
 **Given** Accept is pending for the selected candidate
