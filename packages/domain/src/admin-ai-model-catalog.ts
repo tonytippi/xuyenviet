@@ -21,7 +21,7 @@ function validate(input: AdminAiGatewayModelInput | AdminAiGatewayModelUpdate) {
   if (priced && "pricingCurrency" in input && !input.pricingCurrency) throw new AdminAiModelCatalogPolicyError("Pricing currency is required when any token price is configured.");
   if (input.active === false && input.defaultForPurpose === true) throw new AdminAiModelCatalogPolicyError("Default AI Gateway model must be active.");
   if (input.defaultForPurpose && input.purpose === "ai_ask_initial_answer" && !input.supportsTextInput) throw new AdminAiModelCatalogPolicyError("Default AI Ask model must support text input.");
-  if (input.defaultForPurpose && input.purpose === "extraction" && (!input.supportsTextInput || !input.supportsExtraction)) throw new AdminAiModelCatalogPolicyError("Default extraction model must support text input and extraction.");
+  if (input.defaultForPurpose && (input.purpose === "extraction" || input.purpose === "youtube_discovery_triage") && (!input.supportsTextInput || !input.supportsExtraction)) throw new AdminAiModelCatalogPolicyError("Default extraction model must support text input and extraction.");
   if (input.defaultForPurpose && input.purpose === "embeddings" && !input.supportsEmbeddings) throw new AdminAiModelCatalogPolicyError("Default embeddings model must support embeddings.");
   if (input.defaultForPurpose && input.purpose === "evaluation" && (!input.supportsTextInput || !input.supportsEvaluation)) throw new AdminAiModelCatalogPolicyError("Default evaluation model must support text input and evaluation.");
 }

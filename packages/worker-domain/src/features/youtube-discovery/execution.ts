@@ -1,4 +1,4 @@
-import { cancelYoutubeDiscoveryRunIfDisabled, claimNextYoutubeDiscoveryRun, claimYoutubeDiscoveryPlanning, finishYoutubeDiscoveryRun, getYoutubeDiscoveryRunQuery, persistYoutubeDiscoveryCandidates, persistYoutubeDiscoveryEnrichment, refreshYoutubeDiscoverySystemProposals, retainYoutubeDiscoveryRecords, retryYoutubeDiscoveryRun, scheduleYoutubeDiscoveryDueRuns } from "@xuyenviet/database";
+import { cancelYoutubeDiscoveryRunIfDisabled, claimNextYoutubeDiscoveryRun, claimYoutubeDiscoveryPlanning, completeYoutubeDiscoveryTriage, finishYoutubeDiscoveryRun, getYoutubeDiscoveryRunQuery, getYoutubeDiscoveryTriageBundle, parseYoutubeDiscoveryTriageAssessment, persistYoutubeDiscoveryCandidates, persistYoutubeDiscoveryEnrichment, persistYoutubeDiscoveryTriage, refreshYoutubeDiscoverySystemProposals, retainYoutubeDiscoveryRecords, retryYoutubeDiscoveryRun, scheduleYoutubeDiscoveryDueRuns, selectYoutubeDiscoveryTriageModel } from "@xuyenviet/database";
 import type { WorkerPollObservation } from "@xuyenviet/contracts";
 import { createUnavailableAiAskDiscoveryQuerySignalPort, createUnavailableKnowledgeDiscoveryQuerySignalPort, type AiAskDiscoveryQuerySignalPort, type DiscoveryQuerySignalPortResult, type KnowledgeDiscoveryQuerySignalPort, type YoutubeCaptureEligibilityPort } from "@xuyenviet/domain";
 import { searchYoutubeVideos } from "./youtube-search";
@@ -8,6 +8,7 @@ type DiscoveryStageResult = "complete" | "cancelled" | "stage_transient";
 const planningPortTimeoutMs = 1_000;
 // Keep external work comfortably inside the active five-minute run lease.
 const executionStageTimeoutMs = 240_000;
+const triageTimeoutMs = 10_000;
 let executionStageTimeoutOverrideMs: number | undefined;
 
 // This is deliberately private and finite; Story 18.4 replaces the no-provider stage.
@@ -17,6 +18,7 @@ let aiAskPlanningPort: AiAskDiscoveryQuerySignalPort = createUnavailableAiAskDis
 let youtubeCaptureEligibilityPort: YoutubeCaptureEligibilityPort | undefined;
 let youtubeSearch: typeof searchYoutubeVideos = searchYoutubeVideos;
 let youtubeEnrichment: typeof enrichYoutubeVideo = enrichYoutubeVideo;
+let youtubeTriageCompletion: typeof completeYoutubeDiscoveryTriage = completeYoutubeDiscoveryTriage;
 let youtubeDataApiKey: string | undefined;
 
 export async function runYoutubeDiscoveryPoll(workerId: string): Promise<WorkerPollObservation> {
@@ -49,6 +51,7 @@ export async function runYoutubeDiscoveryPoll(workerId: string): Promise<WorkerP
         let timeout: ReturnType<typeof setTimeout> | undefined;
         const timedOut = Symbol("youtube_discovery_execution_timeout");
         try {
+          const executionDeadlineAt = Date.now() + (executionStageTimeoutOverrideMs ?? executionStageTimeoutMs);
           const result = await Promise.race([
             runYoutubeDiscoveryExecutionStage(claim.claim, run.queryText, controller.signal),
             new Promise<typeof timedOut>((resolve) => { timeout = setTimeout(() => { controller.abort(); resolve(timedOut); }, executionStageTimeoutOverrideMs ?? executionStageTimeoutMs); }),
@@ -67,6 +70,9 @@ export async function runYoutubeDiscoveryPoll(workerId: string): Promise<WorkerP
                 const stored = await persistYoutubeDiscoveryEnrichment(activeClaim, enrichment);
                 if (stored === "cancelled") return observationFor(activeClaim, "success");
                 if (stored !== "completed") throw new Error("youtube_enrichment_contended");
+                const triage = await runYoutubeDiscoveryTriage(activeClaim, candidate.videoId, controller.signal, executionDeadlineAt);
+                if (triage === "cancelled") return observationFor(activeClaim, "success");
+                if (triage !== "completed") throw new Error(triage === "deadline_exhausted" ? "youtube_triage_deadline_exhausted" : "youtube_triage_contended");
               }
               stageResult = "complete";
             }
@@ -82,6 +88,32 @@ export async function runYoutubeDiscoveryPoll(workerId: string): Promise<WorkerP
   if (stageResult === "cancelled") return observationFor(claim.claim, "success");
   const disposition = stageResult === "complete" ? await finishYoutubeDiscoveryRun(claim.claim) : await retryYoutubeDiscoveryRun(claim.claim);
   return observationFor(claim.claim, disposition === "completed" ? "success" : disposition === "retrying" ? "retry" : disposition === "failed" ? "failure" : disposition === "cancelled" ? "success" : "contended");
+}
+
+async function runYoutubeDiscoveryTriage(claim: NonNullable<Awaited<ReturnType<typeof claimNextYoutubeDiscoveryRun>>["claim"]>, videoId: string, signal: AbortSignal, executionDeadlineAt: number): Promise<"completed" | "cancelled" | "contended" | "deadline_exhausted"> {
+  if ((await cancelYoutubeDiscoveryRunIfDisabled(claim, undefined, true)) !== "active") return "cancelled";
+  const bundle = await getYoutubeDiscoveryTriageBundle(claim, videoId);
+  if (bundle === "succeeded") return "completed";
+  if (bundle === "cancelled" || bundle === "contended") return bundle;
+  const model = await selectYoutubeDiscoveryTriageModel();
+  if (!model) return persistYoutubeDiscoveryTriage(claim, { candidateId: bundle.candidateId, status: "no_eligible_model", model: null, provider: "unavailable", modelName: "unavailable", latencyMs: null, errorCode: "no_eligible_model" });
+  if ((await cancelYoutubeDiscoveryRunIfDisabled(claim, undefined, true)) !== "active") return "cancelled";
+  if (executionDeadlineAt - Date.now() < triageTimeoutMs) return "deadline_exhausted";
+  const controller = new AbortController();
+  const abort = () => controller.abort();
+  signal.addEventListener("abort", abort, { once: true });
+  const timeout = setTimeout(() => controller.abort(), triageTimeoutMs);
+  let response: Awaited<ReturnType<typeof completeYoutubeDiscoveryTriage>>;
+  try {
+    response = await youtubeTriageCompletion({ model: model.gatewayModelName, abortSignal: controller.signal, messages: [{ role: "system", content: "Return strict JSON only with exactly relevanceScore, expectedValueScore, freshnessFitScore, commercialRiskScore, duplicateRiskScore, signals. Scores are finite 0..1. signals may contain only supplied signal codes, without duplicates. Do not include explanation, recommendation, or any other key." }, { role: "user", content: JSON.stringify({ query: bundle.queryText, candidate: bundle.candidate, signals: bundle.signals }) }] });
+  } finally {
+    clearTimeout(timeout);
+    signal.removeEventListener("abort", abort);
+  }
+  if (!response.ok) return persistYoutubeDiscoveryTriage(claim, { candidateId: bundle.candidateId, status: "gateway_failed", model, provider: response.provider, modelName: response.model, latencyMs: response.latencyMs, errorCode: response.errorCode, providerRequestId: response.requestMetadata.providerRequestId });
+  let parsed: unknown = null; try { parsed = JSON.parse(response.content); } catch { /* invalid output is deliberately not retained */ }
+  const assessment = parseYoutubeDiscoveryTriageAssessment(parsed, bundle.signals);
+  return persistYoutubeDiscoveryTriage(claim, assessment ? { candidateId: bundle.candidateId, status: "succeeded", assessment, model, provider: response.provider, modelName: response.model, latencyMs: response.latencyMs, ...response.usage, providerRequestId: response.requestMetadata.providerRequestId } : { candidateId: bundle.candidateId, status: "invalid_output", model, provider: response.provider, modelName: response.model, latencyMs: response.latencyMs, errorCode: "invalid_output", ...response.usage, providerRequestId: response.requestMetadata.providerRequestId });
 }
 
 async function runYoutubeDiscoveryExecutionStage(claim: NonNullable<Awaited<ReturnType<typeof claimNextYoutubeDiscoveryRun>>["claim"]>, queryText: string, signal: AbortSignal) {
@@ -124,6 +156,9 @@ export function setYoutubeDiscoveryExecutionStageForTest(stage: (() => Promise<D
 export function setYoutubeDiscoveryEnrichmentForTest(enrichment: typeof enrichYoutubeVideo | undefined) {
   youtubeEnrichment = enrichment ?? enrichYoutubeVideo;
 }
+
+/** @internal Test-only Gateway completion seam. */
+export function setYoutubeDiscoveryTriageCompletionForTest(completion: typeof completeYoutubeDiscoveryTriage | undefined) { youtubeTriageCompletion = completion ?? completeYoutubeDiscoveryTriage; }
 
 async function readPlanningPort(port: KnowledgeDiscoveryQuerySignalPort | AiAskDiscoveryQuerySignalPort): Promise<DiscoveryQuerySignalPortResult> {
   let timeout: ReturnType<typeof setTimeout> | undefined;

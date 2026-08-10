@@ -52,7 +52,7 @@ export type DomainOutboxStatus = (typeof domainOutboxStatusValues)[number];
 export const aiAskDomainOutboxEventTypeValues = ["ai_ask.context_extraction.v1", "ai_ask.answer_annotation.v1", "ai_ask.trip_proposal_draft.v1"] as const;
 export type AiAskDomainOutboxEventType = (typeof aiAskDomainOutboxEventTypeValues)[number];
 
-export const aiGatewayModelPurposeValues = ["ai_ask_initial_answer", "extraction", "embeddings", "evaluation"] as const;
+export const aiGatewayModelPurposeValues = ["ai_ask_initial_answer", "extraction", "embeddings", "evaluation", "youtube_discovery_triage"] as const;
 export type AiGatewayModelPurpose = (typeof aiGatewayModelPurposeValues)[number];
 
 export const sourceKindValues = ["url", "facebook", "youtube", "copied_post", "pasted_text", "screenshot"] as const;
@@ -493,6 +493,8 @@ export const youtubeDiscoveryCandidates = pgTable(
 
 export const youtubeDiscoveryCommentSignalValues = ["recent_discussion", "stale_or_changed_warning", "practical_question_demand", "creator_responsiveness", "commercial_risk", "contradictory_discussion"] as const;
 export type YoutubeDiscoveryCommentSignal = (typeof youtubeDiscoveryCommentSignalValues)[number];
+export const youtubeDiscoveryTriageStatusValues = ["succeeded", "no_eligible_model", "gateway_failed", "invalid_output"] as const;
+export type YoutubeDiscoveryTriageStatus = (typeof youtubeDiscoveryTriageStatusValues)[number];
 
 export const youtubeDiscoveryCommentSignals = pgTable(
   "youtube_discovery_comment_signals",
@@ -1417,7 +1419,7 @@ export const aiGatewayModels = pgTable(
     index("ai_gateway_models_default_idx").on(model.purpose, model.defaultForPurpose),
     check(
       "ai_gateway_models_purpose_check",
-      sql`${model.purpose} in ('ai_ask_initial_answer', 'extraction', 'embeddings', 'evaluation')`,
+      sql`${model.purpose} in ('ai_ask_initial_answer', 'extraction', 'embeddings', 'evaluation', 'youtube_discovery_triage')`,
     ),
     check("ai_gateway_models_display_label_not_empty_check", sql`length(btrim(${model.displayLabel})) > 0`),
     check("ai_gateway_models_gateway_model_name_not_empty_check", sql`length(btrim(${model.gatewayModelName})) > 0`),
@@ -1885,6 +1887,7 @@ export const aiUsageEvents = pgTable(
     userMessageId: text("user_message_id").references(() => messages.id, { onDelete: "set null" }),
     assistantMessageId: text("assistant_message_id").references(() => messages.id, { onDelete: "set null" }),
     tripAnswerContextSnapshotId: text("trip_answer_context_snapshot_id").references(() => tripAnswerContextSnapshots.id, { onDelete: "set null" }),
+    youtubeDiscoveryRunId: text("youtube_discovery_run_id").references(() => youtubeDiscoveryRuns.id, { onDelete: "set null" }),
     purpose: text("purpose").notNull(),
     provider: text("provider").notNull(),
     model: text("model").notNull(),
@@ -1920,6 +1923,7 @@ export const aiUsageEvents = pgTable(
     index("ai_usage_events_executor_system_created_at_idx").on(aiUsageEvent.executorSystem, aiUsageEvent.createdAt),
     index("ai_usage_events_conversation_id_idx").on(aiUsageEvent.conversationId),
     index("ai_usage_events_ai_gateway_model_id_idx").on(aiUsageEvent.aiGatewayModelId),
+    index("ai_usage_events_youtube_discovery_run_id_idx").on(aiUsageEvent.youtubeDiscoveryRunId),
     index("ai_usage_events_status_idx").on(aiUsageEvent.status),
     check("ai_usage_events_status_check", sql`${aiUsageEvent.status} in ('success', 'failure')`),
     check("ai_usage_events_latency_non_negative_check", sql`${aiUsageEvent.latencyMs} is null or ${aiUsageEvent.latencyMs} >= 0`),
@@ -1946,6 +1950,28 @@ export const aiUsageEvents = pgTable(
     check("ai_usage_events_executor_system_check", sql`length(btrim(${aiUsageEvent.executorSystem})) > 0`),
   ],
 );
+
+export const youtubeDiscoveryTriages = pgTable("youtube_discovery_triages", {
+  id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+  candidateId: text("candidate_id").notNull().references(() => youtubeDiscoveryCandidates.id, { onDelete: "restrict" }),
+  runId: text("run_id").notNull().references(() => youtubeDiscoveryRuns.id, { onDelete: "restrict" }),
+  policyVersionId: text("policy_version_id").notNull().references(() => youtubeDiscoveryPolicyVersions.id, { onDelete: "restrict" }),
+  promptVersion: text("prompt_version").notNull(),
+  status: text("status").$type<YoutubeDiscoveryTriageStatus>().notNull(),
+  relevanceScore: real("relevance_score"), expectedValueScore: real("expected_value_score"), freshnessFitScore: real("freshness_fit_score"), commercialRiskScore: real("commercial_risk_score"), duplicateRiskScore: real("duplicate_risk_score"),
+  signals: text("signals").array(),
+  aiGatewayModelId: text("ai_gateway_model_id").references(() => aiGatewayModels.id, { onDelete: "set null" }),
+  usageEventId: text("usage_event_id").references(() => aiUsageEvents.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(), updatedAt: timestamp("updated_at", { mode: "date" }).defaultNow().notNull(),
+}, (triage) => [
+  uniqueIndex("youtube_discovery_triages_invocation_idx").on(triage.candidateId, triage.runId, triage.promptVersion),
+  index("youtube_discovery_triages_candidate_idx").on(triage.candidateId),
+  check("youtube_discovery_triages_status_check", sql`${triage.status} in ('succeeded', 'no_eligible_model', 'gateway_failed', 'invalid_output')`),
+  check("youtube_discovery_triages_prompt_version_check", sql`length(btrim(${triage.promptVersion})) between 1 and 120`),
+  check("youtube_discovery_triages_scores_check", sql`(${triage.relevanceScore} is null or (${triage.relevanceScore} >= 0 and ${triage.relevanceScore} <= 1)) and (${triage.expectedValueScore} is null or (${triage.expectedValueScore} >= 0 and ${triage.expectedValueScore} <= 1)) and (${triage.freshnessFitScore} is null or (${triage.freshnessFitScore} >= 0 and ${triage.freshnessFitScore} <= 1)) and (${triage.commercialRiskScore} is null or (${triage.commercialRiskScore} >= 0 and ${triage.commercialRiskScore} <= 1)) and (${triage.duplicateRiskScore} is null or (${triage.duplicateRiskScore} >= 0 and ${triage.duplicateRiskScore} <= 1))`),
+  check("youtube_discovery_triages_signals_check", sql`${triage.signals} is null or (${triage.signals} <@ array['recent_discussion','stale_or_changed_warning','practical_question_demand','creator_responsiveness','commercial_risk','contradictory_discussion']::text[] and cardinality(${triage.signals}) between 1 and 6 and coalesce(cardinality(array_positions(${triage.signals}, 'recent_discussion')), 0) <= 1 and coalesce(cardinality(array_positions(${triage.signals}, 'stale_or_changed_warning')), 0) <= 1 and coalesce(cardinality(array_positions(${triage.signals}, 'practical_question_demand')), 0) <= 1 and coalesce(cardinality(array_positions(${triage.signals}, 'creator_responsiveness')), 0) <= 1 and coalesce(cardinality(array_positions(${triage.signals}, 'commercial_risk')), 0) <= 1 and coalesce(cardinality(array_positions(${triage.signals}, 'contradictory_discussion')), 0) <= 1)`),
+  check("youtube_discovery_triages_shape_check", sql`(${triage.status} = 'succeeded' and ${triage.relevanceScore} is not null and ${triage.expectedValueScore} is not null and ${triage.freshnessFitScore} is not null and ${triage.commercialRiskScore} is not null and ${triage.duplicateRiskScore} is not null and ${triage.signals} is not null and ${triage.aiGatewayModelId} is not null and ${triage.usageEventId} is not null) or (${triage.status} <> 'succeeded' and ${triage.relevanceScore} is null and ${triage.expectedValueScore} is null and ${triage.freshnessFitScore} is null and ${triage.commercialRiskScore} is null and ${triage.duplicateRiskScore} is null and ${triage.signals} is null)`),
+]);
 
 export const webSearchResults = pgTable(
   "web_search_results",

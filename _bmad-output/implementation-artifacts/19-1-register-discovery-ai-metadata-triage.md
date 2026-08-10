@@ -1,6 +1,6 @@
 ---
 story_id: 19-1
-status: ready-for-dev
+status: done
 created: 2026-08-10
 epic: 19
 ---
@@ -138,8 +138,27 @@ gpu4ai/gpt-5.6-terra
 - Ultimate context engine analysis completed - comprehensive developer guide created.
 - The guide reconciles Story 19.1 acceptance criteria with the Discovery architecture/UX contracts, Epic 18 implementation, current schema/migration sequence, AI model/usage boundaries, Worker fence behavior, and project test rules.
 - No implementation, migration, provider credential, external provider call, database reset, test execution, or commit was performed while creating this story.
+- Implemented governed `youtube_discovery_triage` with a single forward migration, strict bounded assessment storage, attributed safe Usage records, active-run fencing, successful invocation idempotency, and triage-first candidate retention.
+- Added a bounded post-enrichment Worker triage stage; it reuses the Gateway seam, rejects unsafe output, does not call Gemini or `youtube:capture`, and leaves unstarted work for the existing retry policy when the remaining run deadline is insufficient.
+- Independent adversarial and edge-case review found four in-scope defects (empty signals, deadline admission, run provenance, malformed success shape); all were repaired and covered.
+- Verification passed: migration application; 11 focused unit tests; 43 focused serial integration tests; typecheck; build; and diff check. Lint has 0 errors and 45 pre-existing warnings.
 
 ### File List
 
 - _bmad-output/implementation-artifacts/19-1-register-discovery-ai-metadata-triage.md
 - _bmad-output/implementation-artifacts/sprint-status.yaml
+- drizzle/migrations/0054_add_discovery_ai_metadata_triage.sql
+- drizzle/migrations/meta/_journal.json
+- packages/contracts/src/index.ts
+- packages/database/src/gateway.ts
+- packages/database/src/index.ts
+- packages/database/src/schema.ts
+- packages/database/src/usage-constants.ts
+- packages/database/src/usage.ts
+- packages/database/src/youtube-discovery/index.ts
+- packages/domain/src/admin-ai-model-catalog.ts
+- packages/worker-domain/src/features/youtube-discovery/execution.ts
+- tests/youtube-discovery-execution.integration.test.ts
+- tests/youtube-discovery-ownership.test.ts
+- tests/youtube-discovery-triage.integration.test.ts
+- tests/youtube-discovery-triage.test.ts

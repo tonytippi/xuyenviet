@@ -1,12 +1,15 @@
 import { recordAuditEvent, type AuditEventWriter } from "../audit-writers";
 import { createSystemAuditActor, type AuditActor } from "../actors";
 import { getDb } from "../client";
-import { youtubeDiscoveryAppearances, youtubeDiscoveryCandidates, youtubeDiscoveryCommentSignals, youtubeDiscoveryPlanningLeases, youtubeDiscoveryPlanningOutcomes, youtubeDiscoveryPolicyVersions, youtubeDiscoveryQueryProposals, youtubeDiscoveryQueryProposalReasonValues, youtubeDiscoveryRankingHistory, youtubeDiscoveryRuns, type YoutubeDiscoveryCommentSignal, type YoutubeDiscoveryQueryProposalOrigin, type YoutubeDiscoveryQueryProposalReason, type YoutubeDiscoveryRunSafeErrorCode } from "../schema";
+import { youtubeDiscoveryAppearances, youtubeDiscoveryCandidates, youtubeDiscoveryCommentSignalValues, youtubeDiscoveryCommentSignals, youtubeDiscoveryPlanningLeases, youtubeDiscoveryPlanningOutcomes, youtubeDiscoveryPolicyVersions, youtubeDiscoveryQueryProposals, youtubeDiscoveryQueryProposalReasonValues, youtubeDiscoveryRankingHistory, youtubeDiscoveryRuns, youtubeDiscoveryTriages, type YoutubeDiscoveryCommentSignal, type YoutubeDiscoveryQueryProposalOrigin, type YoutubeDiscoveryQueryProposalReason, type YoutubeDiscoveryRunSafeErrorCode } from "../schema";
 import type { YoutubeDiscoveryPolicyAuditSummary, YoutubeDiscoveryQueryProposalAuditSummary, YoutubeDiscoveryRunAuditSummary } from "@xuyenviet/contracts";
 import { deriveDiscoveryQueries, parseYoutubeDiscoveryPolicy, type DiscoveryQuerySignalPortResult, type SafeDiscoveryQuerySignal } from "@xuyenviet/domain";
 import { and, eq, sql } from "drizzle-orm";
 import { randomBytes } from "node:crypto";
 import { getYoutubeDiscoveryRetryDelayMinutes, isYoutubeDiscoveryRetryExhausted } from "./retry-policy";
+import { selectActiveAiGatewayModel, getAiGatewayPricingSnapshot, type SelectedAiGatewayModel } from "../models";
+import { writeAiUsageEvent } from "../usage";
+import { aiUsagePromptVersions, aiUsagePurposes } from "../usage-constants";
 
 type DiscoveryWriter = Pick<ReturnType<typeof getDb>, "execute" | "insert" | "select" | "update" | "transaction"> & AuditEventWriter;
 
@@ -19,6 +22,8 @@ export type YoutubeDiscoveryRunDisposition = "completed" | "failed" | "cancelled
 export type YoutubeDiscoveryPlanningClaim = Readonly<{ id: "youtube-discovery-planning"; policyVersionId: string; fencingToken: string }>;
 export type YoutubeDiscoverySearchCandidate = Readonly<{ videoId: string; canonicalUrl: string; resultOrdinal: number }>;
 export type YoutubeDiscoveryEnrichment = Readonly<{ videoId: string; title?: string; description?: string; channelId?: string; channelName?: string; publishedAt?: Date; durationSeconds?: number; categoryId?: string; tags?: string[]; viewCount?: number; likeCount?: number; commentCount?: number; channelSubscriberCount?: number; thumbnailUrl?: string; signals: ReadonlyArray<{ signal: YoutubeDiscoveryCommentSignal; count: number; score: number }> }>;
+export type YoutubeDiscoveryTriageAssessment = Readonly<{ relevanceScore: number; expectedValueScore: number; freshnessFitScore: number; commercialRiskScore: number; duplicateRiskScore: number; signals: YoutubeDiscoveryCommentSignal[] }>;
+export type YoutubeDiscoveryTriageBundle = Readonly<{ candidateId: string; queryText: string; candidate: Readonly<{ videoId: string; title: string | null; channelName: string | null; publishedAt: string | null; durationSeconds: number | null; categoryId: string | null; viewCount: number | null; likeCount: number | null; commentCount: number | null; channelSubscriberCount: number | null }>; signals: YoutubeDiscoveryCommentSignal[] }>;
 
 class PlanningLeaseLostError extends Error {}
 class CandidateWriteAborted extends Error {
@@ -344,6 +349,67 @@ export async function persistYoutubeDiscoveryEnrichment(claim: YoutubeDiscoveryR
   }
 }
 
+export function parseYoutubeDiscoveryTriageAssessment(value: unknown, allowedSignals: readonly YoutubeDiscoveryCommentSignal[]): YoutubeDiscoveryTriageAssessment | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  const keys = Object.keys(record).sort();
+  if (keys.join(",") !== "commercialRiskScore,duplicateRiskScore,expectedValueScore,freshnessFitScore,relevanceScore,signals") return null;
+  const score = (key: string) => typeof record[key] === "number" && Number.isFinite(record[key]) && record[key] >= 0 && record[key] <= 1 ? record[key] : null;
+  const scores = [score("relevanceScore"), score("expectedValueScore"), score("freshnessFitScore"), score("commercialRiskScore"), score("duplicateRiskScore")];
+  if (scores.some((item) => item === null) || !Array.isArray(record.signals) || record.signals.length < 1 || record.signals.length > 6) return null;
+  const signals = record.signals;
+  if (!signals.every((signal): signal is YoutubeDiscoveryCommentSignal => typeof signal === "string" && (youtubeDiscoveryCommentSignalValues as readonly string[]).includes(signal) && allowedSignals.includes(signal as YoutubeDiscoveryCommentSignal)) || new Set(signals).size !== signals.length) return null;
+  return { relevanceScore: scores[0]!, expectedValueScore: scores[1]!, freshnessFitScore: scores[2]!, commercialRiskScore: scores[3]!, duplicateRiskScore: scores[4]!, signals };
+}
+
+export async function getYoutubeDiscoveryTriageBundle(claim: YoutubeDiscoveryRunClaim, videoId: string, database: DiscoveryWriter = getDb()): Promise<YoutubeDiscoveryTriageBundle | "succeeded" | "cancelled" | "contended"> {
+  return database.transaction(async (transaction) => {
+    const guard = await guardYoutubeDiscoveryCandidateWrite(transaction, claim);
+    if (typeof guard === "string") return guard;
+    const [row] = await transaction.execute(sql`select candidate.id as "candidateId", proposal.query_text as "queryText", candidate.video_id as "videoId", candidate.title as title, candidate.channel_name as "channelName", candidate.published_at as "publishedAt", candidate.duration_seconds as "durationSeconds", candidate.category_id as "categoryId", candidate.view_count as "viewCount", candidate.like_count as "likeCount", candidate.comment_count as "commentCount", candidate.channel_subscriber_count as "channelSubscriberCount" from youtube_discovery_candidates candidate join youtube_discovery_appearances appearance on appearance.candidate_id = candidate.id and appearance.run_id = ${claim.id} join youtube_discovery_runs run on run.id = appearance.run_id join youtube_discovery_query_proposals proposal on proposal.id = run.query_proposal_id where candidate.video_id = ${videoId} for update`) as Array<{ candidateId: string; queryText: string; videoId: string; title: string | null; channelName: string | null; publishedAt: Date | null; durationSeconds: number | null; categoryId: string | null; viewCount: number | null; likeCount: number | null; commentCount: number | null; channelSubscriberCount: number | null }>;
+    if (!row) return "contended";
+    const [existing] = await transaction.select({ id: youtubeDiscoveryTriages.id }).from(youtubeDiscoveryTriages).where(and(eq(youtubeDiscoveryTriages.candidateId, row.candidateId), eq(youtubeDiscoveryTriages.runId, claim.id), eq(youtubeDiscoveryTriages.promptVersion, aiUsagePromptVersions.youtubeDiscoveryTriage), eq(youtubeDiscoveryTriages.status, "succeeded"))).limit(1);
+    if (existing) return "succeeded";
+    const signals = await transaction.select({ signal: youtubeDiscoveryCommentSignals.signal }).from(youtubeDiscoveryCommentSignals).where(eq(youtubeDiscoveryCommentSignals.candidateId, row.candidateId));
+    return { candidateId: row.candidateId, queryText: row.queryText, candidate: { videoId: row.videoId, title: row.title, channelName: row.channelName, publishedAt: row.publishedAt?.toISOString() ?? null, durationSeconds: row.durationSeconds, categoryId: row.categoryId, viewCount: row.viewCount, likeCount: row.likeCount, commentCount: row.commentCount, channelSubscriberCount: row.channelSubscriberCount }, signals: signals.map((signal) => signal.signal) };
+  });
+}
+
+export async function selectYoutubeDiscoveryTriageModel(database: DiscoveryWriter = getDb()) {
+  return selectActiveAiGatewayModel({ purpose: "youtube_discovery_triage", requiredCapabilities: { textInput: true, extraction: true }, db: database });
+}
+
+type YoutubeDiscoveryTriagePersistenceInput = Readonly<{ candidateId: string; provider: string; modelName: string; latencyMs: number | null; errorCode?: string; promptTokens?: number | null; completionTokens?: number | null; totalTokens?: number | null; cachedPromptTokens?: number | null; cacheWritePromptTokens?: number | null; providerRequestId?: string | null }> & (
+  Readonly<{ status: "succeeded"; assessment: YoutubeDiscoveryTriageAssessment; model: SelectedAiGatewayModel }>
+  | Readonly<{ status: "no_eligible_model" | "gateway_failed" | "invalid_output"; assessment?: never; model: SelectedAiGatewayModel | null }>
+);
+
+export async function persistYoutubeDiscoveryTriage(claim: YoutubeDiscoveryRunClaim, input: YoutubeDiscoveryTriagePersistenceInput, database: DiscoveryWriter = getDb()): Promise<"completed" | "cancelled" | "contended"> {
+  try { return await database.transaction(async (transaction) => {
+    const guard = await guardYoutubeDiscoveryCandidateWrite(transaction, claim);
+    if (typeof guard === "string") throw new CandidateWriteAborted(guard);
+    const [appearance] = await transaction.select({ id: youtubeDiscoveryAppearances.id }).from(youtubeDiscoveryAppearances).where(and(eq(youtubeDiscoveryAppearances.candidateId, input.candidateId), eq(youtubeDiscoveryAppearances.runId, claim.id))).limit(1).for("update");
+    if (!appearance) return "contended" as const;
+    const [existing] = await transaction.select({ id: youtubeDiscoveryTriages.id }).from(youtubeDiscoveryTriages).where(and(eq(youtubeDiscoveryTriages.candidateId, input.candidateId), eq(youtubeDiscoveryTriages.runId, claim.id), eq(youtubeDiscoveryTriages.promptVersion, aiUsagePromptVersions.youtubeDiscoveryTriage), eq(youtubeDiscoveryTriages.status, "succeeded"))).limit(1);
+    if (existing) return "completed" as const;
+    const succeeded = input.status === "succeeded" && isValidYoutubeDiscoveryTriageAssessment(input.assessment);
+    const status = input.status === "succeeded" ? succeeded ? "succeeded" : "invalid_output" : input.status;
+    const assessment = succeeded ? input.assessment : undefined;
+    const usageEventId = await writeAiUsageEvent(transaction, { executorSystem: "system-youtube-discovery", youtubeDiscoveryRunId: claim.id, purpose: aiUsagePurposes.youtubeDiscoveryTriage, provider: input.provider, model: input.modelName, aiGatewayModelId: input.model?.id ?? null, promptVersion: aiUsagePromptVersions.youtubeDiscoveryTriage, status: succeeded ? "success" : "failure", latencyMs: input.latencyMs, promptTokens: input.promptTokens, completionTokens: input.completionTokens, totalTokens: input.totalTokens, cachedPromptTokens: input.cachedPromptTokens, cacheWritePromptTokens: input.cacheWritePromptTokens, pricingSnapshot: input.model ? getAiGatewayPricingSnapshot(input.model) : null, errorCode: succeeded ? input.errorCode ?? null : "invalid_output", providerRequestId: input.providerRequestId ?? null });
+    if (!assessment) await transaction.execute(sql`insert into youtube_discovery_triages (id, candidate_id, run_id, policy_version_id, prompt_version, status, ai_gateway_model_id, usage_event_id, created_at, updated_at) values (${crypto.randomUUID()}, ${input.candidateId}, ${claim.id}, ${guard.policyVersionId}, ${aiUsagePromptVersions.youtubeDiscoveryTriage}, ${status}, ${input.model?.id ?? null}, ${usageEventId}, clock_timestamp(), clock_timestamp()) on conflict (candidate_id, run_id, prompt_version) do update set status = excluded.status, ai_gateway_model_id = excluded.ai_gateway_model_id, usage_event_id = excluded.usage_event_id, updated_at = excluded.updated_at`);
+    else {
+      const signals = `{${assessment.signals.join(",")}}`;
+      await transaction.execute(sql`insert into youtube_discovery_triages (id, candidate_id, run_id, policy_version_id, prompt_version, status, relevance_score, expected_value_score, freshness_fit_score, commercial_risk_score, duplicate_risk_score, signals, ai_gateway_model_id, usage_event_id, created_at, updated_at) values (${crypto.randomUUID()}, ${input.candidateId}, ${claim.id}, ${guard.policyVersionId}, ${aiUsagePromptVersions.youtubeDiscoveryTriage}, 'succeeded', ${assessment.relevanceScore}, ${assessment.expectedValueScore}, ${assessment.freshnessFitScore}, ${assessment.commercialRiskScore}, ${assessment.duplicateRiskScore}, ${signals}::text[], ${input.model!.id}, ${usageEventId}, clock_timestamp(), clock_timestamp()) on conflict (candidate_id, run_id, prompt_version) do nothing`);
+    }
+    const final = await guardYoutubeDiscoveryCandidateWrite(transaction, claim); if (typeof final === "string") throw new CandidateWriteAborted(final);
+    return "completed" as const;
+  }); } catch (error) { if (!(error instanceof CandidateWriteAborted)) throw error; return error.outcome === "cancelled" ? (await cancelYoutubeDiscoveryRunIfDisabled(claim, database)) === "cancelled" ? "cancelled" : "contended" : "contended"; }
+}
+
+function isValidYoutubeDiscoveryTriageAssessment(assessment: YoutubeDiscoveryTriageAssessment | undefined): assessment is YoutubeDiscoveryTriageAssessment {
+  return assessment !== undefined && [assessment.relevanceScore, assessment.expectedValueScore, assessment.freshnessFitScore, assessment.commercialRiskScore, assessment.duplicateRiskScore].every((score) => Number.isFinite(score) && score >= 0 && score <= 1) && assessment.signals.length >= 1 && assessment.signals.length <= 6 && assessment.signals.every((signal) => (youtubeDiscoveryCommentSignalValues as readonly string[]).includes(signal)) && new Set(assessment.signals).size === assessment.signals.length;
+}
+
 /** Runs one bounded, advisory-lock-serialized retention batch. */
 export async function retainYoutubeDiscoveryRecords(database: DiscoveryWriter = getDb()): Promise<number> {
   return database.transaction(async (transaction) => {
@@ -355,6 +421,7 @@ export async function retainYoutubeDiscoveryRecords(database: DiscoveryWriter = 
     const candidates = await transaction.execute(sql`select id from youtube_discovery_candidates where updated_at <= clock_timestamp() - ${policy.retentionDays} * interval '1 day' order by updated_at asc limit 20 for update`) as Array<{ id: string }>;
     for (const candidate of candidates) {
       await transaction.delete(youtubeDiscoveryCommentSignals).where(eq(youtubeDiscoveryCommentSignals.candidateId, candidate.id));
+      await transaction.delete(youtubeDiscoveryTriages).where(eq(youtubeDiscoveryTriages.candidateId, candidate.id));
       await transaction.delete(youtubeDiscoveryRankingHistory).where(eq(youtubeDiscoveryRankingHistory.candidateId, candidate.id));
       await transaction.delete(youtubeDiscoveryAppearances).where(eq(youtubeDiscoveryAppearances.candidateId, candidate.id));
       await transaction.delete(youtubeDiscoveryCandidates).where(eq(youtubeDiscoveryCandidates.id, candidate.id));

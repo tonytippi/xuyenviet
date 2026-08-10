@@ -258,7 +258,7 @@ export function parseAdminOverview(value: unknown): AdminOverview | null {
     : null;
 }
 
-export const aiGatewayModelPurposes = ["ai_ask_initial_answer", "extraction", "embeddings", "evaluation"] as const;
+export const aiGatewayModelPurposes = ["ai_ask_initial_answer", "extraction", "embeddings", "evaluation", "youtube_discovery_triage"] as const;
 export type AiGatewayModelPurpose = (typeof aiGatewayModelPurposes)[number];
 export type AdminAiGatewayModel = { id: string; gatewayModelName: string; displayLabel: string; purpose: AiGatewayModelPurpose; active: boolean; defaultForPurpose: boolean; supportsTextInput: boolean; supportsImageInput: boolean; supportsImageOutput: boolean; supportsEmbeddings: boolean; supportsExtraction: boolean; supportsEvaluation: boolean; supportsStreaming: boolean; supportsCachePricing: boolean; pricingCurrency: string | null; inputTokenPriceMicros: number | null; outputTokenPriceMicros: number | null; cacheReadTokenPriceMicros: number | null; cacheWriteTokenPriceMicros: number | null; pricingUnitTokens: number; pricingVersion: string | null; pricingEffectiveAt: string };
 export type AdminAiGatewayModelInput = Omit<AdminAiGatewayModel, "id">;

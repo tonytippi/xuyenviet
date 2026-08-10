@@ -3,9 +3,9 @@ import { and, eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 
-import { auditEvents, cancelYoutubeDiscoveryRunIfDisabled, claimNextYoutubeDiscoveryRun, claimYoutubeDiscoveryPlanning, createAiAskDiscoveryQuerySignalPort, createKnowledgeDiscoveryQuerySignalPort, createSystemAuditActor, createUserAuditActor, createYoutubeDiscoveryPolicyVersion, createYoutubeDiscoveryQueryProposal, createYoutubeDiscoveryRun, finishYoutubeDiscoveryRun, refreshYoutubeDiscoverySystemProposals, retryYoutubeDiscoveryRun, schema, youtubeDiscoveryAppearances, youtubeDiscoveryCandidates, youtubeDiscoveryRankingHistory, youtubeDiscoveryPlanningLeases, youtubeDiscoveryPlanningOutcomes, youtubeDiscoveryQueryProposals, youtubeDiscoveryRuns } from "@xuyenviet/database";
+import { aiGatewayModels, auditEvents, cancelYoutubeDiscoveryRunIfDisabled, claimNextYoutubeDiscoveryRun, claimYoutubeDiscoveryPlanning, createAiAskDiscoveryQuerySignalPort, createKnowledgeDiscoveryQuerySignalPort, createSystemAuditActor, createUserAuditActor, createYoutubeDiscoveryPolicyVersion, createYoutubeDiscoveryQueryProposal, createYoutubeDiscoveryRun, finishYoutubeDiscoveryRun, refreshYoutubeDiscoverySystemProposals, retryYoutubeDiscoveryRun, schema, youtubeDiscoveryAppearances, youtubeDiscoveryCandidates, youtubeDiscoveryRankingHistory, youtubeDiscoveryPlanningLeases, youtubeDiscoveryPlanningOutcomes, youtubeDiscoveryQueryProposals, youtubeDiscoveryRuns } from "@xuyenviet/database";
 import { resetTestDatabase, seedTestOperator, testDb } from "./helpers/db";
-import { bindYoutubeDiscoveryExecutionPorts, runYoutubeDiscoveryPoll, setYoutubeDiscoveryEnrichmentForTest, setYoutubeDiscoveryExecutionStageForTest, setYoutubeDiscoveryExecutionTimeoutForTest, setYoutubeDiscoveryPlanningPortsForTest } from "../packages/worker-domain/src/features/youtube-discovery/execution";
+import { bindYoutubeDiscoveryExecutionPorts, runYoutubeDiscoveryPoll, setYoutubeDiscoveryEnrichmentForTest, setYoutubeDiscoveryExecutionStageForTest, setYoutubeDiscoveryExecutionTimeoutForTest, setYoutubeDiscoveryPlanningPortsForTest, setYoutubeDiscoveryTriageCompletionForTest } from "../packages/worker-domain/src/features/youtube-discovery/execution";
 
 let firstWorker: ReturnType<typeof drizzle<typeof schema>>;
 let secondWorker: ReturnType<typeof drizzle<typeof schema>>;
@@ -38,7 +38,7 @@ describe.sequential("YouTube Discovery run execution", () => {
 
   beforeEach(async () => { await resetTestDatabase(); });
 
-  afterEach(() => { setYoutubeDiscoveryEnrichmentForTest(undefined); setYoutubeDiscoveryExecutionStageForTest(undefined); setYoutubeDiscoveryExecutionTimeoutForTest(undefined); setYoutubeDiscoveryPlanningPortsForTest(undefined, undefined); });
+  afterEach(() => { setYoutubeDiscoveryEnrichmentForTest(undefined); setYoutubeDiscoveryExecutionStageForTest(undefined); setYoutubeDiscoveryExecutionTimeoutForTest(undefined); setYoutubeDiscoveryPlanningPortsForTest(undefined, undefined); setYoutubeDiscoveryTriageCompletionForTest(undefined); });
 
   test("claims one due run and persists an atomic fenced terminal audit", async () => {
     const policy = await createYoutubeDiscoveryPolicyVersion({ version: 1, isCurrent: true, actor: createSystemAuditActor("system-youtube-discovery") }, testDb);
@@ -303,6 +303,24 @@ describe.sequential("YouTube Discovery run execution", () => {
     await expect(runYoutubeDiscoveryPoll("discovery-timeout")).resolves.toMatchObject({ resultCode: "retry", durableId: run.id });
     expect(aborted).toBe(true);
     await expect(testDb.select().from(youtubeDiscoveryRuns).where(eq(youtubeDiscoveryRuns.id, run.id))).resolves.toMatchObject([{ state: "retrying", safeErrorCode: "stage_transient" }]);
+  });
+
+  test("does not start triage when the outer execution deadline cannot fit its bounded timeout", async () => {
+    await seedTestOperator();
+    const policy = await createYoutubeDiscoveryPolicyVersion({ version: 1, isCurrent: true, policy: { maxRetryAttempts: 2 }, actor: createSystemAuditActor("system-youtube-discovery") }, testDb);
+    const proposal = await createYoutubeDiscoveryQueryProposal({ origin: "operator", reason: "operator_request", priority: 50, queryText: "Da Lat route", cadenceMinutes: 15, actor: createUserAuditActor({ userId: "operator", email: "operator@example.com" }) }, testDb);
+    const run = await createYoutubeDiscoveryRun({ policyVersionId: policy.id, queryProposalId: proposal.id }, testDb);
+    await completeDuePlanning();
+    await testDb.insert(aiGatewayModels).values({ id: "deadline-triage-model", gatewayModelName: "test/triage", displayLabel: "Triage", purpose: "youtube_discovery_triage", active: true, defaultForPurpose: true, supportsTextInput: true, supportsExtraction: true, pricingUnitTokens: 1_000_000 });
+    bindYoutubeDiscoveryExecutionPorts({ check: async () => "eligible" }, async () => [{ videoId: "abcDEF12345", canonicalUrl: "https://www.youtube.com/watch?v=abcDEF12345", resultOrdinal: 0 }], "test-key");
+    setYoutubeDiscoveryEnrichmentForTest(async () => ({ videoId: "abcDEF12345", title: "Da Lat route", signals: [{ signal: "practical_question_demand", count: 1, score: 10 }] }));
+    let triageCalls = 0;
+    setYoutubeDiscoveryTriageCompletionForTest(async () => { triageCalls += 1; return { ok: true, content: "{}", provider: "ai_gateway", model: "test/triage", latencyMs: 1, usage: { promptTokens: null, completionTokens: null, totalTokens: null, cachedPromptTokens: null, cacheWritePromptTokens: null }, requestMetadata: { providerRequestId: null } }; });
+    setYoutubeDiscoveryExecutionTimeoutForTest(5);
+
+    await expect(runYoutubeDiscoveryPoll("discovery-triage-deadline")).resolves.toMatchObject({ resultCode: "retry", durableId: run.id });
+    expect(triageCalls).toBe(0);
+    await expect(testDb.select({ state: youtubeDiscoveryRuns.state, safeErrorCode: youtubeDiscoveryRuns.safeErrorCode }).from(youtubeDiscoveryRuns).where(eq(youtubeDiscoveryRuns.id, run.id))).resolves.toEqual([{ state: "retrying", safeErrorCode: "stage_transient" }]);
   });
 
   test("cancels after provider results and before persistence without graph writes", async () => {
