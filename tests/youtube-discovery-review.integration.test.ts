@@ -90,9 +90,12 @@ describe.sequential("YouTube Discovery review read model", () => {
       await expect(port.listReview(anchor)).rejects.toBeInstanceOf(YoutubeDiscoveryReviewCursorValidationError);
 
       const detail = await port.getReview(first.items[0]!.recommendationId);
-      expect(detail).toMatchObject({ recommendationId: first.items[0]!.recommendationId, queryText: "Da Lat route", priorCaptureOutcome: "unavailable" });
+      expect(detail).toMatchObject({ recommendationId: first.items[0]!.recommendationId, queryText: "Da Lat route", queryReason: "operator_request", priorCaptureOutcome: "unavailable" });
       expect(eligibility.check).toHaveBeenCalledWith(expect.stringMatching(/^rv\d{9}$/));
       expect(detail).not.toHaveProperty("videoId");
+      await transaction.update(youtubeDiscoveryCandidates).set({ title: "  Padded title  ", channelName: "   " }).where(eq(youtubeDiscoveryCandidates.id, historicCandidate.id));
+      const normalized = await port.listReview(null);
+      expect(normalized.items.some((item) => item.title === "Padded title" && item.channelName === null)).toBe(true);
       await transaction.update(youtubeDiscoveryCandidateReviewStates).set({ state: "deferred" }).where(eq(youtubeDiscoveryCandidateReviewStates.recommendationId, first.items[0]!.recommendationId));
       await expect(port.getReview(first.items[0]!.recommendationId)).resolves.toBeNull();
       await expect(port.getReview("missing-recommendation")).resolves.toBeNull();

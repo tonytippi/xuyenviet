@@ -7,6 +7,7 @@ describe("admin YouTube Discovery review UI boundary", () => {
     expect(youtubeDiscoveryReviewCopy).toEqual({
       recommendation: { consider: expect.any(String) },
       reason: { eligible_score_band: expect.any(String) },
+      queryReason: { coverage_gap: expect.any(String), freshness_risk: expect.any(String), unresolved_conflict: expect.any(String), anonymized_demand: expect.any(String), operator_request: expect.any(String) },
       factor: { relevance: expect.any(String), expected_value: expect.any(String), freshness_fit: expect.any(String) },
       penalty: { commercial_risk: expect.any(String), duplicate_risk: expect.any(String) },
       signal: { recent_discussion: expect.any(String), stale_or_changed_warning: expect.any(String), practical_question_demand: expect.any(String), creator_responsiveness: expect.any(String), commercial_risk: expect.any(String), contradictory_discussion: expect.any(String) },
@@ -19,7 +20,7 @@ describe("admin YouTube Discovery review UI boundary", () => {
     expect(source).toContain('credentials: "include"');
     expect(source).toContain('cache: "no-store"');
     expect(source).toContain('if (initial && queue.items[0])');
-    expect(source).toContain('void loadDetail(queue.items[0].recommendationId)');
+    expect(source).toContain('if (initial && queue.items[0]) choose(queue.items[0]);');
     expect(source).toContain('onClick={() => choose(item)}');
     expect(source).toContain('const detailRequestId = useRef(0)');
     expect(source).toContain('recommendationId !== selectedId.current');
@@ -32,6 +33,10 @@ describe("admin YouTube Discovery review UI boundary", () => {
     expect(source).toContain('aria-live="polite"');
     expect(source).toContain('lg:grid-cols-');
     expect(source).toContain('min-w-0');
+    expect(source).toContain('Xem chi tiết đã chọn');
+    expect(source).toContain('Quay lại hàng đợi');
+    expect(source).toContain('detailHeading.current?.focus()');
+    expect(source).toContain('selectedRow.current?.focus()');
     expect(source).toMatch(/aria-label="Chấp nhận, chưa khả dụng"[^>]*disabled/);
     expect(source).toMatch(/aria-label="Để sau, chưa khả dụng"[^>]*disabled/);
     expect(source).toMatch(/aria-label="Bỏ qua, chưa khả dụng"[^>]*disabled/);

@@ -14,7 +14,7 @@ import { getTestDatabaseUrl } from "./helpers/env-file";
 const browserAuth = { googleClientId: "client", googleClientSecret: "secret", callbackUrl: "https://api.xuyenviet.app/auth/google/callback", allowedOrigins: ["https://admin.xuyenviet.app"], allowedReturnUrls: ["https://admin.xuyenviet.app/"], sessionLookupKey: "b".repeat(32), csrfKey: "c".repeat(32), oauthTransactionProtectionKey: "d".repeat(32), cookieName: "__Host-xuyenviet-session" } as const;
 const query = { id: "proposal-1", origin: "operator" as const, queryText: "Da Lat route", reason: "operator_request" as const, priority: 50, enabled: true, cadenceMinutes: 60, nextRunAt: "2026-08-07T00:00:00.000Z", pausedReason: null };
 const reviewItem = { recommendationId: "recommendation-1", canonicalUrl: "https://www.youtube.com/watch?v=abcDEF12345", title: "Da Lat route", channelName: "Route channel", publishedAt: "2026-08-07T00:00:00.000Z", durationSeconds: 120, recommendation: "consider" as const, reason: "eligible_score_band" as const };
-const reviewDetail = { ...reviewItem, queryText: "Da Lat route", score: 0.7, factors: ["relevance" as const], penalties: [], signals: ["practical_question_demand" as const], priorCaptureOutcome: "eligible" as const };
+const reviewDetail = { ...reviewItem, queryText: "Da Lat route", queryReason: "operator_request" as const, score: 0.7, factors: ["relevance" as const], penalties: [], signals: ["practical_question_demand" as const], priorCaptureOutcome: "eligible" as const };
 let app: INestApplication;
 let port: { [K in keyof AdminYoutubeDiscoveryPort]: ReturnType<typeof vi.fn> };
 

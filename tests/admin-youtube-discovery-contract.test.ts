@@ -26,8 +26,9 @@ describe("admin YouTube Discovery contract", () => {
     expect(parseAdminYoutubeDiscoveryReviewCursor("ydr2.eyJzY29yZSI6MC43LCJjcmVhdGVkQXQiOiIyMDI2LTAyLTMwVDAwOjAwOjAwLjAwMDAwMVoiLCJyZWNvbW1lbmRhdGlvbklkIjoicmVjb21tZW5kYXRpb24tMSJ9")).toBeNull();
     expect(parseAdminYoutubeDiscoveryReviewQueue({ items: [item], nextCursor: cursor })).not.toBeNull();
     expect(parseAdminYoutubeDiscoveryReviewQueue({ items: [{ ...item, videoId: "unsafe" }], nextCursor: null })).toBeNull();
-    const detail = { ...item, queryText: "Da Lat route", score: 0.7, factors: ["relevance"], penalties: [], signals: ["practical_question_demand"], priorCaptureOutcome: "eligible" as const };
+    const detail = { ...item, queryText: "Da Lat route", queryReason: "operator_request" as const, score: 0.7, factors: ["relevance"], penalties: [], signals: ["practical_question_demand"], priorCaptureOutcome: "eligible" as const };
     expect(parseAdminYoutubeDiscoveryReviewDetail(detail)).toEqual(detail);
     expect(parseAdminYoutubeDiscoveryReviewDetail({ ...detail, factors: ["relevance", "relevance"] })).toBeNull();
+    expect(parseAdminYoutubeDiscoveryReviewDetail({ ...detail, queryReason: "unknown" })).toBeNull();
   });
 });

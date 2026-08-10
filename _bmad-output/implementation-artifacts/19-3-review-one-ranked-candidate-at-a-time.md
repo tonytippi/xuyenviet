@@ -77,7 +77,14 @@ so that I can make an informed intake decision without reviewing raw source cont
    - [ ] Extend API integration coverage for operator authorization, unauthenticated/unauthorized denial, malformed pagination/detail input, `400`/`404`/`503` safe response envelopes, and absence of raw/internal fields.
    - [ ] Add admin UI tests for client-local first/explicit selection, empty queue without detail request, explicit load-more, inspector content, focus/selected semantics, live announcements, read-only disabled action row, and narrow sequential structural reflow. Assert no action path writes Discovery/Knowledge state or invokes capture. Reserve browser-measured 320px/400%-zoom no-horizontal-overflow evidence for the established browser/E2E harness or Epic 20.5.
   - [ ] Run focused unit tests with `pnpm exec vitest run --project unit` and the exact new/affected Discovery contract, read-model, and UI tests. Run focused serial PostgreSQL coverage with `pnpm exec vitest run --project integration` and the affected Discovery integration/API tests.
-  - [ ] Run `pnpm lint`, `pnpm typecheck`, `pnpm build`, and `git diff --check`. Record exact blockers without weakening unit/integration separation.
+   - [ ] Run `pnpm lint`, `pnpm typecheck`, `pnpm build`, and `git diff --check`. Record exact blockers without weakening unit/integration separation.
+
+### Review Findings
+
+- [x] [Review][Patch] Review detail omits the linked query-proposal reason [packages/contracts/src/youtube-discovery/index.ts:74] — Fixed with the bounded `queryReason` detail field, PostgreSQL provenance projection, exhaustive Vietnamese copy, inspector rendering, and parser/API/integration coverage.
+- [x] [Review][Patch] Persisted padded metadata can make an entire review page fail closed [packages/database/src/admin-youtube-discovery.ts:34] — Fixed by normalizing nullable candidate display text at the queue/detail projection boundary and covering padded/blank metadata.
+- [x] [Review][Patch] Forward migration loses active review admission for old-worker writes during rollout [drizzle/migrations/0057_add_discovery_candidate_review_state.sql:13] — Fixed by installing an idempotent recommendation-insert trigger before backfill; it creates the first qualifying pending association for legacy inserts and preserves existing review state.
+- [x] [Review][Patch] Narrow review layout lacks the required explicit focus transition [apps/admin/app/knowledge/youtube-discovery-review/review.tsx:70] — Fixed with explicit narrow-layout detail and return actions, a focused inspector heading, and selected-row focus restoration; the desktop persistent split-pane remains unchanged.
 
 ## Dev Notes
 
