@@ -70,9 +70,15 @@ type ReviewReason = "eligible_score_band";
 type ReviewQueryReason = "coverage_gap" | "freshness_risk" | "unresolved_conflict" | "anonymized_demand" | "operator_request";
 type ReviewSignal = "recent_discussion" | "stale_or_changed_warning" | "practical_question_demand" | "creator_responsiveness" | "commercial_risk" | "contradictory_discussion";
 type ReviewPriorCaptureOutcome = "eligible" | "already_compatible" | "unavailable";
-export type AdminYoutubeDiscoveryReviewQueueItem = Readonly<{ recommendationId: string; canonicalUrl: string; title: string | null; channelName: string | null; publishedAt: string | null; durationSeconds: number | null; recommendation: ReviewRecommendation; reason: ReviewReason }>;
+export type AdminYoutubeDiscoveryReviewQueueItem = Readonly<{ recommendationId: string; canonicalUrl: string; title: string | null; channelName: string | null; publishedAt: string | null; durationSeconds: number | null; recommendation: ReviewRecommendation; reason: ReviewReason; actionAvailability: "available" | "reconciling" }>;
 export type AdminYoutubeDiscoveryReviewQueue = Readonly<{ items: AdminYoutubeDiscoveryReviewQueueItem[]; nextCursor: string | null }>;
 export type AdminYoutubeDiscoveryReviewDetail = Readonly<AdminYoutubeDiscoveryReviewQueueItem & { queryText: string; queryReason: ReviewQueryReason; score: number; factors: ReviewFactor[]; penalties: ReviewPenalty[]; signals: ReviewSignal[]; priorCaptureOutcome: ReviewPriorCaptureOutcome }>;
+export type AdminYoutubeDiscoveryAcceptReviewResult = Readonly<{ outcome: "submitted" | "duplicate" | "failed" | "reconciling" }>;
+
+export function parseAdminYoutubeDiscoveryAcceptCommand(value: unknown): Record<string, never> | null { return record(value) && exactKeys(value, []) ? {} : null; }
+export function parseAdminYoutubeDiscoveryAcceptReviewResult(value: unknown): AdminYoutubeDiscoveryAcceptReviewResult | null {
+  return record(value) && exactKeys(value, ["outcome"]) && (value.outcome === "submitted" || value.outcome === "duplicate" || value.outcome === "failed" || value.outcome === "reconciling") ? value as AdminYoutubeDiscoveryAcceptReviewResult : null;
+}
 export type AdminYoutubeDiscoveryReviewCursor = Readonly<{ score: number; createdAt: string; recommendationId: string }>;
 
 export function encodeAdminYoutubeDiscoveryReviewCursor(cursor: AdminYoutubeDiscoveryReviewCursor): string {
@@ -84,15 +90,15 @@ export function parseAdminYoutubeDiscoveryReviewCursor(value: unknown): AdminYou
   try { const encoded = value.slice(5).replaceAll("-", "+").replaceAll("_", "/"); const parsed: unknown = JSON.parse(atob(encoded + "=".repeat((4 - encoded.length % 4) % 4))); return reviewCursor(parsed) ? parsed : null; } catch { return null; }
 }
 export function parseAdminYoutubeDiscoveryReviewQueueItem(value: unknown): AdminYoutubeDiscoveryReviewQueueItem | null {
-  if (!record(value) || !exactKeys(value, ["recommendationId", "canonicalUrl", "title", "channelName", "publishedAt", "durationSeconds", "recommendation", "reason"])) return null;
+  if (!record(value) || !exactKeys(value, ["recommendationId", "canonicalUrl", "title", "channelName", "publishedAt", "durationSeconds", "recommendation", "reason", "actionAvailability"])) return null;
   const duration = value.durationSeconds;
-  return identifier(value.recommendationId) && canonicalUrl(value.canonicalUrl) && nullableText(value.title, 200) && nullableText(value.channelName, 160) && (value.publishedAt === null || isoTimestamp(value.publishedAt)) && (duration === null || typeof duration === "number" && Number.isSafeInteger(duration) && duration >= 0 && duration <= 86_400) && value.recommendation === "consider" && value.reason === "eligible_score_band" ? value as AdminYoutubeDiscoveryReviewQueueItem : null;
+  return identifier(value.recommendationId) && canonicalUrl(value.canonicalUrl) && nullableText(value.title, 200) && nullableText(value.channelName, 160) && (value.publishedAt === null || isoTimestamp(value.publishedAt)) && (duration === null || typeof duration === "number" && Number.isSafeInteger(duration) && duration >= 0 && duration <= 86_400) && value.recommendation === "consider" && value.reason === "eligible_score_band" && (value.actionAvailability === "available" || value.actionAvailability === "reconciling") ? value as AdminYoutubeDiscoveryReviewQueueItem : null;
 }
 export function parseAdminYoutubeDiscoveryReviewQueue(value: unknown): AdminYoutubeDiscoveryReviewQueue | null {
   return record(value) && exactKeys(value, ["items", "nextCursor"]) && Array.isArray(value.items) && value.items.length <= adminYoutubeDiscoveryReviewPageSize && value.items.every((item) => parseAdminYoutubeDiscoveryReviewQueueItem(item) !== null) && (value.nextCursor === null || parseAdminYoutubeDiscoveryReviewCursor(value.nextCursor) !== null) ? value as AdminYoutubeDiscoveryReviewQueue : null;
 }
 export function parseAdminYoutubeDiscoveryReviewDetail(value: unknown): AdminYoutubeDiscoveryReviewDetail | null {
-  if (!record(value) || !exactKeys(value, ["recommendationId", "canonicalUrl", "title", "channelName", "publishedAt", "durationSeconds", "recommendation", "reason", "queryText", "queryReason", "score", "factors", "penalties", "signals", "priorCaptureOutcome"]) || !parseAdminYoutubeDiscoveryReviewQueueItem({ recommendationId: value.recommendationId, canonicalUrl: value.canonicalUrl, title: value.title, channelName: value.channelName, publishedAt: value.publishedAt, durationSeconds: value.durationSeconds, recommendation: value.recommendation, reason: value.reason })) return null;
+  if (!record(value) || !exactKeys(value, ["recommendationId", "canonicalUrl", "title", "channelName", "publishedAt", "durationSeconds", "recommendation", "reason", "actionAvailability", "queryText", "queryReason", "score", "factors", "penalties", "signals", "priorCaptureOutcome"]) || !parseAdminYoutubeDiscoveryReviewQueueItem({ recommendationId: value.recommendationId, canonicalUrl: value.canonicalUrl, title: value.title, channelName: value.channelName, publishedAt: value.publishedAt, durationSeconds: value.durationSeconds, recommendation: value.recommendation, reason: value.reason, actionAvailability: value.actionAvailability })) return null;
   return safeQueryText(value.queryText) && ["coverage_gap", "freshness_risk", "unresolved_conflict", "anonymized_demand", "operator_request"].includes(value.queryReason as string) && finiteScore(value.score) && codes(value.factors, ["relevance", "expected_value", "freshness_fit"], 3) && codes(value.penalties, ["commercial_risk", "duplicate_risk"], 2) && (value.factors as unknown[]).length + (value.penalties as unknown[]).length <= 5 && codes(value.signals, ["recent_discussion", "stale_or_changed_warning", "practical_question_demand", "creator_responsiveness", "commercial_risk", "contradictory_discussion"], 6) && (value.priorCaptureOutcome === "eligible" || value.priorCaptureOutcome === "already_compatible" || value.priorCaptureOutcome === "unavailable") ? value as AdminYoutubeDiscoveryReviewDetail : null;
 }
 

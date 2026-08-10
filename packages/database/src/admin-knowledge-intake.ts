@@ -2,10 +2,10 @@ import { and, desc, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import type { AdminKnowledgeIntake, AdminKnowledgeIntakeQuery, AdminKnowledgeSeedBatchRequest, AdminKnowledgeSeedBatchResponse, AdminKnowledgeSourceRemovalRequest, AdminKnowledgeSourceRemovalResponse, RequestPrincipal } from "@xuyenviet/contracts";
 import { canonicalizeYoutubeVideoUrl, type AdminKnowledgeIntakePort } from "@xuyenviet/domain";
 import { getDb } from "./client";
-import { knowledgeSeedBatchItems, knowledgeSeedBatches, sources } from "./schema";
+import { knowledgeOneUrlHandoffs, knowledgeSeedBatchItems, knowledgeSeedBatches, sources } from "./schema";
 import { safeAdminDisplayUrl } from "./admin-youtube-capture";
 
-export function createPostgresAdminKnowledgeIntakePort(): AdminKnowledgeIntakePort { return { list, submitBatch: submit, removeSource }; }
+export function createPostgresAdminKnowledgeIntakePort(): AdminKnowledgeIntakePort { return { list, submitBatch: submit, removeSource, handoff: { submit: submitHandoff, lookup: lookupHandoff } }; }
 async function list(input: AdminKnowledgeIntakeQuery): Promise<AdminKnowledgeIntake> {
   const db = getDb();
   const sourceRows = await db.select({ id: sources.id, url: sources.url, canonicalUrl: sources.canonicalUrl, label: sources.label, kind: sources.kind, currentCaptureVersionId: sources.currentCaptureVersionId, eligibility: sources.eligibility, removalReason: sources.removalReason, createdAt: sources.createdAt }).from(sources).where(and(inArray(sources.kind, ["url", "facebook", "youtube"]), input.kind ? eq(sources.kind, input.kind) : undefined, input.processed === undefined ? undefined : input.processed ? isNotNull(sources.currentCaptureVersionId) : isNull(sources.currentCaptureVersionId))).orderBy(desc(sources.createdAt)).limit(100);
@@ -13,7 +13,9 @@ async function list(input: AdminKnowledgeIntakeQuery): Promise<AdminKnowledgeInt
 }
 async function submit(actor: RequestPrincipal, input: AdminKnowledgeSeedBatchRequest): Promise<AdminKnowledgeSeedBatchResponse> {
   const db = getDb();
-  return db.transaction(async (tx) => {
+  return db.transaction((tx) => submitInTransaction(tx, actor, input));
+}
+async function submitInTransaction(tx: Parameters<ReturnType<typeof getDb>["transaction"]>[0] extends (arg: infer T) => unknown ? T : never, actor: Pick<RequestPrincipal, "userId">, input: AdminKnowledgeSeedBatchRequest): Promise<AdminKnowledgeSeedBatchResponse> {
     const [batch] = await tx.insert(knowledgeSeedBatches).values({ label: input.label ?? null, submittedByUserId: actor.userId }).returning({ id: knowledgeSeedBatches.id });
     const seenCanonicalUrls = new Set<string>();
     let submittedCount = 0;
@@ -50,9 +52,46 @@ async function submit(actor: RequestPrincipal, input: AdminKnowledgeSeedBatchReq
     }
 
     return { batchId: batch.id, totalItems: input.urls.length, submittedCount, failedCount, duplicateCount };
-  });
 }
 async function removeSource(_actor: RequestPrincipal, _sourceId: string, _input: AdminKnowledgeSourceRemovalRequest): Promise<AdminKnowledgeSourceRemovalResponse> { throw new Error("Source removal lifecycle transitions require the Story 15.3 command."); }
+
+async function submitHandoff(input: { reference: string; canonicalUrl: string; actorUserId: string }): Promise<"submitted" | "duplicate" | "failed" | "reconciling"> {
+  if (!validReference(input.reference) || !validReference(input.actorUserId) || canonicalizeYoutubeVideoUrl(input.canonicalUrl)?.canonicalUrl !== input.canonicalUrl) return "reconciling";
+  const db = getDb();
+  try {
+    return await db.transaction(async (tx) => {
+      const [existing] = await tx.select().from(knowledgeOneUrlHandoffs).where(eq(knowledgeOneUrlHandoffs.reference, input.reference)).limit(1).for("update");
+      if (existing) return existing.actorUserId === input.actorUserId && existing.canonicalUrl === input.canonicalUrl ? existing.outcome ?? "reconciling" : "reconciling";
+      await tx.insert(knowledgeOneUrlHandoffs).values({ reference: input.reference, canonicalUrl: input.canonicalUrl, actorUserId: input.actorUserId });
+      const result = await submitInTransaction(tx, { userId: input.actorUserId }, { urls: [input.canonicalUrl] });
+      const outcome = classifyOneUrl(result);
+      if (outcome === "reconciling") return outcome;
+      await tx.update(knowledgeOneUrlHandoffs).set({ outcome, completedAt: new Date() }).where(eq(knowledgeOneUrlHandoffs.reference, input.reference));
+      return outcome;
+    });
+  } catch {
+    // A competing insert can lose the unique-reference race after the winner commits.
+    // Read its owner-bound durable result rather than turning that completed admission into ambiguity.
+    const outcome = await lookupHandoff(input);
+    return outcome === "missing" ? "reconciling" : outcome;
+  }
+}
+
+async function lookupHandoff(input: { reference: string; canonicalUrl: string; actorUserId: string }): Promise<"submitted" | "duplicate" | "failed" | "reconciling" | "missing"> {
+  if (!validReference(input.reference) || !validReference(input.actorUserId) || canonicalizeYoutubeVideoUrl(input.canonicalUrl)?.canonicalUrl !== input.canonicalUrl) return "reconciling";
+  try {
+    const [row] = await getDb().select({ actorUserId: knowledgeOneUrlHandoffs.actorUserId, canonicalUrl: knowledgeOneUrlHandoffs.canonicalUrl, outcome: knowledgeOneUrlHandoffs.outcome }).from(knowledgeOneUrlHandoffs).where(eq(knowledgeOneUrlHandoffs.reference, input.reference)).limit(1);
+    if (!row) return "missing";
+    return row.actorUserId === input.actorUserId && row.canonicalUrl === input.canonicalUrl && row.outcome ? row.outcome : "reconciling";
+  } catch { return "reconciling"; }
+}
+
+function validReference(value: string) { return value.trim() === value && value.length > 0 && value.length <= 128; }
+function classifyOneUrl(result: AdminKnowledgeSeedBatchResponse): "submitted" | "duplicate" | "failed" | "reconciling" {
+  return result.submittedCount === 1 && result.duplicateCount === 0 && result.failedCount === 0 ? "submitted"
+    : result.submittedCount === 0 && result.duplicateCount === 1 && result.failedCount === 0 ? "duplicate"
+      : result.submittedCount === 0 && result.duplicateCount === 0 && result.failedCount === 1 ? "failed" : "reconciling";
+}
 
 export function normalizeIntakeUrl(value: string): { url: string; hostname: string; kind: "url" | "facebook" | "youtube" } | null {
   const youtube = canonicalizeYoutubeVideoUrl(value);

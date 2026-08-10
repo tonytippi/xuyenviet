@@ -1,9 +1,13 @@
 import type { AdminKnowledgeIntake, AdminKnowledgeIntakeQuery, AdminKnowledgeSeedBatchRequest, AdminKnowledgeSeedBatchResponse, AdminKnowledgeSourceRemovalRequest, AdminKnowledgeSourceRemovalResponse, RequestPrincipal } from "@xuyenviet/contracts";
 
+export type KnowledgeOneUrlHandoffOutcome = "submitted" | "duplicate" | "failed" | "reconciling";
+export type KnowledgeOneUrlHandoff = { submit(input: { reference: string; canonicalUrl: string; actorUserId: string }): Promise<KnowledgeOneUrlHandoffOutcome>; lookup(input: { reference: string; canonicalUrl: string; actorUserId: string }): Promise<KnowledgeOneUrlHandoffOutcome | "missing">; };
+
 export type AdminKnowledgeIntakePort = {
   list(input: AdminKnowledgeIntakeQuery): Promise<AdminKnowledgeIntake>;
   submitBatch(actor: RequestPrincipal, input: AdminKnowledgeSeedBatchRequest): Promise<AdminKnowledgeSeedBatchResponse>;
   removeSource(actor: RequestPrincipal, sourceId: string, input: AdminKnowledgeSourceRemovalRequest): Promise<AdminKnowledgeSourceRemovalResponse>;
+  handoff: KnowledgeOneUrlHandoff;
 };
 
 export class AdminKnowledgeIntakePolicyError extends Error {}

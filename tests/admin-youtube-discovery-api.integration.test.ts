@@ -13,7 +13,7 @@ import { getTestDatabaseUrl } from "./helpers/env-file";
 
 const browserAuth = { googleClientId: "client", googleClientSecret: "secret", callbackUrl: "https://api.xuyenviet.app/auth/google/callback", allowedOrigins: ["https://admin.xuyenviet.app"], allowedReturnUrls: ["https://admin.xuyenviet.app/"], sessionLookupKey: "b".repeat(32), csrfKey: "c".repeat(32), oauthTransactionProtectionKey: "d".repeat(32), cookieName: "__Host-xuyenviet-session" } as const;
 const query = { id: "proposal-1", origin: "operator" as const, queryText: "Da Lat route", reason: "operator_request" as const, priority: 50, enabled: true, cadenceMinutes: 60, nextRunAt: "2026-08-07T00:00:00.000Z", pausedReason: null };
-const reviewItem = { recommendationId: "recommendation-1", canonicalUrl: "https://www.youtube.com/watch?v=abcDEF12345", title: "Da Lat route", channelName: "Route channel", publishedAt: "2026-08-07T00:00:00.000Z", durationSeconds: 120, recommendation: "consider" as const, reason: "eligible_score_band" as const };
+const reviewItem = { recommendationId: "recommendation-1", canonicalUrl: "https://www.youtube.com/watch?v=abcDEF12345", title: "Da Lat route", channelName: "Route channel", publishedAt: "2026-08-07T00:00:00.000Z", durationSeconds: 120, recommendation: "consider" as const, reason: "eligible_score_band" as const, actionAvailability: "available" as const };
 const reviewDetail = { ...reviewItem, queryText: "Da Lat route", queryReason: "operator_request" as const, score: 0.7, factors: ["relevance" as const], penalties: [], signals: ["practical_question_demand" as const], priorCaptureOutcome: "eligible" as const };
 let app: INestApplication;
 let port: { [K in keyof AdminYoutubeDiscoveryPort]: ReturnType<typeof vi.fn> };
@@ -29,7 +29,7 @@ async function browserSession(userId: string, role: "operator" | "traveler") {
 
 beforeEach(async () => {
   await resetTestDatabase();
-  port = { list: vi.fn().mockResolvedValue({ items: [query] }), listReview: vi.fn().mockResolvedValue({ items: [], nextCursor: null }), getReview: vi.fn().mockResolvedValue(null), create: vi.fn().mockResolvedValue(query), edit: vi.fn().mockResolvedValue(query), reprioritize: vi.fn().mockResolvedValue(query), pause: vi.fn().mockResolvedValue({ ...query, enabled: false, nextRunAt: null, pausedReason: "operator" }), resume: vi.fn().mockResolvedValue(query) };
+  port = { list: vi.fn().mockResolvedValue({ items: [query] }), listReview: vi.fn().mockResolvedValue({ items: [], nextCursor: null }), getReview: vi.fn().mockResolvedValue(null), acceptReview: vi.fn().mockResolvedValue({ outcome: "submitted" }), create: vi.fn().mockResolvedValue(query), edit: vi.fn().mockResolvedValue(query), reprioritize: vi.fn().mockResolvedValue(query), pause: vi.fn().mockResolvedValue({ ...query, enabled: false, nextRunAt: null, pausedReason: "operator" }), resume: vi.fn().mockResolvedValue(query) };
   const identities = createPostgresApiIdentityRepository(getTestDatabaseUrl(), browserAuth.sessionLookupKey, browserAuth.oauthTransactionProtectionKey);
   const ApiModule = createApiModule(identities, { conversationSummaries: { async listOwnedConversationSummaryRows() { return []; } }, browserAuth, adminYoutubeDiscovery: port as unknown as AdminYoutubeDiscoveryPort });
   @Module({ imports: [ApiModule] }) class TestModule {}
@@ -106,8 +106,17 @@ describe("admin YouTube Discovery direct API", () => {
     port.getReview.mockResolvedValueOnce(reviewDetail);
     await request(app.getHttpServer()).get("/v1/admin/knowledge/youtube-discovery/review").set({ Cookie: operator.cookie }).expect(200, { items: [reviewItem], nextCursor: null });
     await request(app.getHttpServer()).get("/v1/admin/knowledge/youtube-discovery/review/recommendation-1").set({ Cookie: operator.cookie }).expect(200, reviewDetail);
-    expect(port.listReview).toHaveBeenCalledWith(null);
-    expect(port.getReview).toHaveBeenCalledWith("recommendation-1");
+    expect(port.listReview).toHaveBeenCalledWith(expect.objectContaining({ userId: "operator" }), null);
+    expect(port.getReview).toHaveBeenCalledWith(expect.objectContaining({ userId: "operator" }), "recommendation-1");
+  });
+
+  test("admits only an exact CSRF-protected Accept command and returns its closed outcome", async () => {
+    const operator = await browserSession("operator", "operator");
+    const headers = { Cookie: operator.cookie, Origin: "https://admin.xuyenviet.app", "x-xuyenviet-csrf": operator.csrf };
+    await request(app.getHttpServer()).post("/v1/admin/knowledge/youtube-discovery/review/recommendation-1/accept").set(headers).send({}).expect(201, { outcome: "submitted" });
+    expect(port.acceptReview).toHaveBeenCalledWith(expect.objectContaining({ userId: "operator", email: "operator@example.com" }), "recommendation-1");
+    await request(app.getHttpServer()).post("/v1/admin/knowledge/youtube-discovery/review/recommendation-1/accept").set(headers).send({ canonicalUrl: "https://unsafe.example" }).expect(400);
+    await request(app.getHttpServer()).post("/v1/admin/knowledge/youtube-discovery/review/recommendation-1/accept").set({ Cookie: operator.cookie, Origin: "https://admin.xuyenviet.app", "x-xuyenviet-csrf": "invalid" }).send({}).expect(403);
   });
 
   test("rejects malformed review cursor and identifier before port admission", async () => {

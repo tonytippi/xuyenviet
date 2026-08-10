@@ -35,7 +35,7 @@ async function bootstrap() {
     adminKnowledgeCoverage: createPostgresAdminKnowledgeCoveragePort(),
     adminFacebookCaptures: createPostgresAdminFacebookCapturePort(),
     adminYoutubeCaptures: createPostgresAdminYoutubeCapturePort(),
-    adminYoutubeDiscovery: createPostgresAdminYoutubeDiscoveryPort(createYoutubeCaptureEligibilityPort()),
+    adminYoutubeDiscovery: createPostgresAdminYoutubeDiscoveryPort(createYoutubeCaptureEligibilityPort(), undefined, createPostgresAdminKnowledgeIntakePort().handoff),
     aiAskExecution,
     browserAuth,
   }));

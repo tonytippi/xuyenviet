@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { encodeAdminYoutubeDiscoveryReviewCursor, parseAdminYoutubeDiscoveryQuery, parseAdminYoutubeDiscoveryQueryList, parseAdminYoutubeDiscoveryReviewCursor, parseAdminYoutubeDiscoveryReviewDetail, parseAdminYoutubeDiscoveryReviewQueue } from "@xuyenviet/contracts";
+import { encodeAdminYoutubeDiscoveryReviewCursor, parseAdminYoutubeDiscoveryAcceptCommand, parseAdminYoutubeDiscoveryAcceptReviewResult, parseAdminYoutubeDiscoveryQuery, parseAdminYoutubeDiscoveryQueryList, parseAdminYoutubeDiscoveryReviewCursor, parseAdminYoutubeDiscoveryReviewDetail, parseAdminYoutubeDiscoveryReviewQueue } from "@xuyenviet/contracts";
 
 const query = { id: "proposal-1", origin: "operator" as const, queryText: "Da Lat route", reason: "operator_request" as const, priority: 50, enabled: true, cadenceMinutes: 60, nextRunAt: "2026-08-07T00:00:00.000Z", pausedReason: null };
 
@@ -19,7 +19,7 @@ describe("admin YouTube Discovery contract", () => {
   });
 
   test("requires exact bounded review projections and an opaque versioned cursor", () => {
-    const item = { recommendationId: "recommendation-1", canonicalUrl: "https://www.youtube.com/watch?v=abcDEF12345", title: "Da Lat route", channelName: "Route channel", publishedAt: "2026-08-07T00:00:00.000Z", durationSeconds: 120, recommendation: "consider" as const, reason: "eligible_score_band" as const };
+    const item = { recommendationId: "recommendation-1", canonicalUrl: "https://www.youtube.com/watch?v=abcDEF12345", title: "Da Lat route", channelName: "Route channel", publishedAt: "2026-08-07T00:00:00.000Z", durationSeconds: 120, recommendation: "consider" as const, reason: "eligible_score_band" as const, actionAvailability: "available" as const };
     const cursor = encodeAdminYoutubeDiscoveryReviewCursor({ score: 0.7, createdAt: "2026-08-07T00:00:00.000001Z", recommendationId: item.recommendationId });
     expect(parseAdminYoutubeDiscoveryReviewCursor(cursor)).toEqual({ score: 0.7, createdAt: "2026-08-07T00:00:00.000001Z", recommendationId: item.recommendationId });
     expect(parseAdminYoutubeDiscoveryReviewCursor("ydr1.bad")).toBeNull();
@@ -30,5 +30,17 @@ describe("admin YouTube Discovery contract", () => {
     expect(parseAdminYoutubeDiscoveryReviewDetail(detail)).toEqual(detail);
     expect(parseAdminYoutubeDiscoveryReviewDetail({ ...detail, factors: ["relevance", "relevance"] })).toBeNull();
     expect(parseAdminYoutubeDiscoveryReviewDetail({ ...detail, queryReason: "unknown" })).toBeNull();
+  });
+
+  test("accept accepts exactly an empty JSON object and exposes only closed outcomes", () => {
+    expect(parseAdminYoutubeDiscoveryAcceptCommand({})).toEqual({});
+    expect(parseAdminYoutubeDiscoveryAcceptCommand(undefined)).toBeNull();
+    expect(parseAdminYoutubeDiscoveryAcceptCommand(null)).toBeNull();
+    expect(parseAdminYoutubeDiscoveryAcceptCommand([])).toBeNull();
+    expect(parseAdminYoutubeDiscoveryAcceptCommand({ canonicalUrl: "https://unsafe.example" })).toBeNull();
+    expect(parseAdminYoutubeDiscoveryAcceptReviewResult({ outcome: "submitted" })).toEqual({ outcome: "submitted" });
+    expect(parseAdminYoutubeDiscoveryAcceptReviewResult({ outcome: "duplicate" })).toEqual({ outcome: "duplicate" });
+    expect(parseAdminYoutubeDiscoveryAcceptReviewResult({ outcome: "failed", sourceId: "unsafe" })).toBeNull();
+    expect(parseAdminYoutubeDiscoveryAcceptReviewResult({ outcome: "reconciling", batchId: "unsafe" })).toBeNull();
   });
 });

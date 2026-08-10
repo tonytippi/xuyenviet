@@ -1,7 +1,7 @@
 import { recordAuditEvent, type AuditEventWriter } from "../audit-writers";
 import { createSystemAuditActor, type AuditActor } from "../actors";
 import { getDb } from "../client";
-import { youtubeDiscoveryAppearances, youtubeDiscoveryCandidateReviewStates, youtubeDiscoveryCandidates, youtubeDiscoveryCommentSignalValues, youtubeDiscoveryCommentSignals, youtubeDiscoveryPlanningLeases, youtubeDiscoveryPlanningOutcomes, youtubeDiscoveryPolicyVersions, youtubeDiscoveryQueryProposals, youtubeDiscoveryQueryProposalReasonValues, youtubeDiscoveryRankingHistory, youtubeDiscoveryRecommendations, youtubeDiscoveryRuns, youtubeDiscoveryTriages, type YoutubeDiscoveryCommentSignal, type YoutubeDiscoveryQueryProposalOrigin, type YoutubeDiscoveryQueryProposalReason, type YoutubeDiscoveryRunSafeErrorCode } from "../schema";
+import { youtubeDiscoveryAppearances, youtubeDiscoveryCandidateReviewStates, youtubeDiscoveryCandidates, youtubeDiscoveryCommentSignalValues, youtubeDiscoveryCommentSignals, youtubeDiscoveryKnowledgeHandoffs, youtubeDiscoveryPlanningLeases, youtubeDiscoveryPlanningOutcomes, youtubeDiscoveryPolicyVersions, youtubeDiscoveryQueryProposals, youtubeDiscoveryQueryProposalReasonValues, youtubeDiscoveryRankingHistory, youtubeDiscoveryRecommendations, youtubeDiscoveryRuns, youtubeDiscoveryTriages, type YoutubeDiscoveryCommentSignal, type YoutubeDiscoveryQueryProposalOrigin, type YoutubeDiscoveryQueryProposalReason, type YoutubeDiscoveryRunSafeErrorCode } from "../schema";
 import type { YoutubeDiscoveryPolicyAuditSummary, YoutubeDiscoveryQueryProposalAuditSummary, YoutubeDiscoveryRunAuditSummary } from "@xuyenviet/contracts";
 import { canonicalizeYoutubeVideoUrl, deriveDiscoveryQueries, evaluateYoutubeDiscoveryRecommendation, parseYoutubeDiscoveryPolicy, type DiscoveryQuerySignalPortResult, type SafeDiscoveryQuerySignal } from "@xuyenviet/domain";
 import { and, eq, sql } from "drizzle-orm";
@@ -468,10 +468,11 @@ export async function retainYoutubeDiscoveryRecords(database: DiscoveryWriter = 
     const [policy] = await transaction.select({ id: youtubeDiscoveryPolicyVersions.id, enabled: youtubeDiscoveryPolicyVersions.enabled, retentionDays: youtubeDiscoveryPolicyVersions.retentionDays }).from(youtubeDiscoveryPolicyVersions).where(eq(youtubeDiscoveryPolicyVersions.isCurrent, true)).limit(1).for("update");
     if (!policy?.enabled) return 0;
     await transaction.execute(sql`delete from youtube_discovery_comment_signals where id in (select id from youtube_discovery_comment_signals where expires_at <= clock_timestamp() order by expires_at asc, id asc limit 20)`);
-    const candidates = await transaction.execute(sql`select id from youtube_discovery_candidates where updated_at <= clock_timestamp() - ${policy.retentionDays} * interval '1 day' order by updated_at asc limit 20 for update`) as Array<{ id: string }>;
+    const candidates = await transaction.execute(sql`select candidate.id from youtube_discovery_candidates candidate where candidate.updated_at <= clock_timestamp() - ${policy.retentionDays} * interval '1 day' and not exists (select 1 from youtube_discovery_candidate_review_states review inner join youtube_discovery_knowledge_handoffs handoff on handoff.candidate_id = review.candidate_id where review.candidate_id = candidate.id and review.state = 'pending' and handoff.outcome is null) order by candidate.updated_at asc limit 20 for update`) as Array<{ id: string }>;
     for (const candidate of candidates) {
-      await transaction.delete(youtubeDiscoveryCommentSignals).where(eq(youtubeDiscoveryCommentSignals.candidateId, candidate.id));
-      await transaction.delete(youtubeDiscoveryCandidateReviewStates).where(eq(youtubeDiscoveryCandidateReviewStates.candidateId, candidate.id));
+       await transaction.delete(youtubeDiscoveryCommentSignals).where(eq(youtubeDiscoveryCommentSignals.candidateId, candidate.id));
+       await transaction.delete(youtubeDiscoveryKnowledgeHandoffs).where(eq(youtubeDiscoveryKnowledgeHandoffs.candidateId, candidate.id));
+       await transaction.delete(youtubeDiscoveryCandidateReviewStates).where(eq(youtubeDiscoveryCandidateReviewStates.candidateId, candidate.id));
       await transaction.execute(sql`select set_config('youtube_discovery.retention_guard', 'on', true)`);
       await transaction.delete(youtubeDiscoveryRecommendations).where(eq(youtubeDiscoveryRecommendations.candidateId, candidate.id));
       await transaction.execute(sql`select set_config('youtube_discovery.retention_guard', 'off', true)`);

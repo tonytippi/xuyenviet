@@ -553,6 +553,21 @@ export const youtubeDiscoveryCandidateReviewStates = pgTable("youtube_discovery_
   check("youtube_discovery_candidate_review_states_state_check", sql`${review.state} in ('pending', 'accepted', 'deferred', 'skipped')`),
 ]);
 
+export const youtubeDiscoveryKnowledgeHandoffs = pgTable("youtube_discovery_knowledge_handoffs", {
+  candidateId: text("candidate_id").primaryKey().references(() => youtubeDiscoveryCandidates.id, { onDelete: "restrict" }),
+  recommendationId: text("recommendation_id").notNull(),
+  reference: text("reference").notNull(),
+  actorUserId: text("actor_user_id").notNull().references(() => users.id, { onDelete: "restrict" }),
+  reconciling: boolean("reconciling").default(false).notNull(),
+  outcome: text("outcome").$type<"submitted" | "duplicate">(),
+  createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
+}, (handoff) => [
+  uniqueIndex("youtube_discovery_knowledge_handoffs_reference_idx").on(handoff.reference),
+  foreignKey({ columns: [handoff.recommendationId, handoff.candidateId], foreignColumns: [youtubeDiscoveryRecommendations.id, youtubeDiscoveryRecommendations.candidateId], name: "youtube_discovery_knowledge_handoffs_recommendation_candidate_fk" }).onDelete("restrict"),
+  check("youtube_discovery_knowledge_handoffs_reference_check", sql`length(btrim(${handoff.reference})) between 1 and 128`),
+  check("youtube_discovery_knowledge_handoffs_outcome_check", sql`${handoff.outcome} is null or ${handoff.outcome} in ('submitted', 'duplicate')`),
+]);
+
 export const sources = pgTable(
   "sources",
   {
@@ -1912,6 +1927,20 @@ export const knowledgeSeedBatchItems = pgTable(
   ],
 );
 
+export const knowledgeOneUrlHandoffs = pgTable("knowledge_one_url_handoffs", {
+  reference: text("reference").primaryKey(),
+  canonicalUrl: text("canonical_url").notNull(),
+  actorUserId: text("actor_user_id").notNull().references(() => users.id, { onDelete: "restrict" }),
+  outcome: text("outcome").$type<"submitted" | "duplicate" | "failed">(),
+  createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
+  completedAt: timestamp("completed_at", { mode: "date" }),
+}, (handoff) => [
+  check("knowledge_one_url_handoffs_reference_check", sql`length(btrim(${handoff.reference})) between 1 and 128`),
+  check("knowledge_one_url_handoffs_url_check", sql`${handoff.canonicalUrl} ~ '^https://www\\.youtube\\.com/watch\\?v=[A-Za-z0-9_-]{6,20}$'`),
+  check("knowledge_one_url_handoffs_outcome_check", sql`${handoff.outcome} is null or ${handoff.outcome} in ('submitted', 'duplicate', 'failed')`),
+  check("knowledge_one_url_handoffs_completion_check", sql`(${handoff.outcome} is null and ${handoff.completedAt} is null) or (${handoff.outcome} is not null and ${handoff.completedAt} is not null)`),
+]);
+
 export const aiUsageEvents = pgTable(
   "ai_usage_events",
   {
@@ -2407,6 +2436,9 @@ export const schema = {
   youtubeDiscoveryCommentSignals,
   youtubeDiscoveryAppearances,
   youtubeDiscoveryRankingHistory,
+  youtubeDiscoveryRecommendations,
+  youtubeDiscoveryCandidateReviewStates,
+  youtubeDiscoveryKnowledgeHandoffs,
   sources,
   sourceCaptureVersions,
   rawSourceMaterial,
@@ -2427,6 +2459,7 @@ export const schema = {
   knowledgeSourceSuggestions,
   knowledgeSeedBatches,
   knowledgeSeedBatchItems,
+  knowledgeOneUrlHandoffs,
   referralCodes,
   referralAttributions,
   tripProjects,
