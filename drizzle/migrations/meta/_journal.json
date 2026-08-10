@@ -54,6 +54,7 @@
     { "idx": 49, "version": "7", "when": 1786550400000, "tag": "0049_discovery_youtube_candidates", "breakpoints": true },
     { "idx": 50, "version": "7", "when": 1786636800000, "tag": "0050_discovery_youtube_enrichment_retention", "breakpoints": true },
     { "idx": 51, "version": "7", "when": 1786723200000, "tag": "0051_fix_discovery_thumbnail_constraint", "breakpoints": true },
-    { "idx": 52, "version": "7", "when": 1786809600000, "tag": "0052_reject_discovery_thumbnail_controls", "breakpoints": true }
+    { "idx": 52, "version": "7", "when": 1786809600000, "tag": "0052_reject_discovery_thumbnail_controls", "breakpoints": true },
+    { "idx": 53, "version": "7", "when": 1786896000000, "tag": "0053_harden_discovery_metadata_constraints", "breakpoints": true }
   ]
 }

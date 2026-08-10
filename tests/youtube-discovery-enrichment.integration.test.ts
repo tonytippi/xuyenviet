@@ -64,6 +64,13 @@ describe.sequential("YouTube Discovery enrichment and retention", () => {
     await expect(testDb.select().from(youtubeDiscoveryRankingHistory).where(eq(youtubeDiscoveryRankingHistory.candidateId, stored!.id))).resolves.toHaveLength(20);
   });
 
+  test("rejects control-bearing metadata and oversized individual tags at the database boundary", async () => {
+    const { claim } = await claimedRun();
+    expect(await persistYoutubeDiscoveryCandidates(claim, [candidate], testDb)).toBe("completed");
+    await expect(persistYoutubeDiscoveryEnrichment(claim, { ...enrichment, title: `unsafe${String.fromCharCode(127)}`, tags: ["x".repeat(81)] }, testDb)).rejects.toThrow();
+    await expect(testDb.select({ title: youtubeDiscoveryCandidates.title, tags: youtubeDiscoveryCandidates.tags }).from(youtubeDiscoveryCandidates)).resolves.toEqual([{ title: null, tags: null }]);
+  });
+
   test("preserves canonical candidates across runs while attaching current-run enrichment provenance", async () => {
     const first = await claimedRun(1, { maxConcurrentRuns: 2 });
     await persistCandidateAndEnrichment(first.claim);

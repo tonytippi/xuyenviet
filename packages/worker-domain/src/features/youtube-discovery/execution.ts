@@ -16,7 +16,7 @@ let knowledgePlanningPort: KnowledgeDiscoveryQuerySignalPort = createUnavailable
 let aiAskPlanningPort: AiAskDiscoveryQuerySignalPort = createUnavailableAiAskDiscoveryQuerySignalPort();
 let youtubeCaptureEligibilityPort: YoutubeCaptureEligibilityPort | undefined;
 let youtubeSearch: typeof searchYoutubeVideos = searchYoutubeVideos;
-const youtubeEnrichment: typeof enrichYoutubeVideo = enrichYoutubeVideo;
+let youtubeEnrichment: typeof enrichYoutubeVideo = enrichYoutubeVideo;
 let youtubeDataApiKey: string | undefined;
 
 export async function runYoutubeDiscoveryPoll(workerId: string): Promise<WorkerPollObservation> {
@@ -43,6 +43,8 @@ export async function runYoutubeDiscoveryPoll(workerId: string): Promise<WorkerP
       if (run === "contended") return observationFor(claim.claim, "contended");
       else if (!youtubeCaptureEligibilityPort) stageResult = "stage_transient";
       else {
+        const activeClaim = claim.claim!;
+        const apiKey = youtubeDataApiKey!;
         const controller = new AbortController();
         let timeout: ReturnType<typeof setTimeout> | undefined;
         const timedOut = Symbol("youtube_discovery_execution_timeout");
@@ -53,13 +55,17 @@ export async function runYoutubeDiscoveryPoll(workerId: string): Promise<WorkerP
           ]);
           if (result === timedOut) stageResult = "stage_transient";
           else {
-            const persisted = await persistYoutubeDiscoveryCandidates(claim.claim, result.candidates);
-            if (persisted === "cancelled") return observationFor(claim.claim, "success");
+            const persisted = await persistYoutubeDiscoveryCandidates(activeClaim, result);
+            if (persisted === "cancelled") return observationFor(activeClaim, "success");
             if (persisted !== "completed") stageResult = "stage_transient";
             else {
-              for (const enrichment of result.enrichments) {
-                const stored = await persistYoutubeDiscoveryEnrichment(claim.claim, enrichment);
-                if (stored === "cancelled") return observationFor(claim.claim, "success");
+              for (const candidate of result) {
+                if ((await cancelYoutubeDiscoveryRunIfDisabled(activeClaim, undefined, true)) !== "active") throw new Error("youtube_enrichment_cancelled");
+                const enrichment = await youtubeEnrichment(candidate.videoId, apiKey, undefined, controller.signal, async () => {
+                  if ((await cancelYoutubeDiscoveryRunIfDisabled(activeClaim, undefined, true)) !== "active") throw new Error("youtube_enrichment_cancelled");
+                });
+                const stored = await persistYoutubeDiscoveryEnrichment(activeClaim, enrichment);
+                if (stored === "cancelled") return observationFor(activeClaim, "success");
                 if (stored !== "completed") throw new Error("youtube_enrichment_contended");
               }
               stageResult = "complete";
@@ -94,12 +100,7 @@ async function runYoutubeDiscoveryExecutionStage(claim: NonNullable<Awaited<Retu
     if (status === "unavailable" || signal.aborted) throw new Error("youtube_capture_eligibility_unavailable");
     if (status === "eligible") eligible.push(result);
   }
-  const enrichments = [];
-  for (const candidate of eligible) {
-    await requireActive();
-    enrichments.push(await youtubeEnrichment(candidate.videoId, youtubeDataApiKey, undefined, signal, requireActive));
-  }
-  return { candidates: eligible, enrichments };
+  return eligible;
 }
 
 function observationFor(claim: NonNullable<Awaited<ReturnType<typeof claimNextYoutubeDiscoveryRun>>["claim"]>, resultCode: WorkerPollObservation["resultCode"]): WorkerPollObservation {
@@ -117,6 +118,11 @@ function observationFor(claim: NonNullable<Awaited<ReturnType<typeof claimNextYo
 /** @internal Test-only stage seam. It is intentionally not exported from the package barrel. */
 export function setYoutubeDiscoveryExecutionStageForTest(stage: (() => Promise<DiscoveryStageResult>) | undefined) {
   executionStage = stage;
+}
+
+/** @internal Test-only enrichment seam. */
+export function setYoutubeDiscoveryEnrichmentForTest(enrichment: typeof enrichYoutubeVideo | undefined) {
+  youtubeEnrichment = enrichment ?? enrichYoutubeVideo;
 }
 
 async function readPlanningPort(port: KnowledgeDiscoveryQuerySignalPort | AiAskDiscoveryQuerySignalPort): Promise<DiscoveryQuerySignalPortResult> {

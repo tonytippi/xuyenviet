@@ -23,8 +23,8 @@ export async function enrichYoutubeVideo(videoId: string, apiKey: string, fetchI
   const commentPayload = await requestComments(videoId, apiKey, fetchImpl, signal, beforeRequest);
   return {
     videoId,
-    title: safeText(snippet.title, 200, false), description: safeText(snippet.description, 1000, true), channelId,
-    channelName: safeText(snippet.channelTitle, 160, false), publishedAt: date(snippet.publishedAt),
+    title: safeText(snippet.title, 200), description: safeText(snippet.description, 1000), channelId,
+    channelName: safeText(snippet.channelTitle, 160), publishedAt: date(snippet.publishedAt),
     durationSeconds: duration(object(video.contentDetails)?.duration), categoryId: optionalCategory(snippet.categoryId),
     tags: safeTags(snippet.tags), ...statistics(object(video.statistics)), channelSubscriberCount: nonNegativeInteger(object(channel.statistics)?.subscriberCount),
     thumbnailUrl: thumbnail(object(snippet.thumbnails)), signals: deriveYoutubeCommentSignals(commentPayload),
@@ -100,12 +100,12 @@ function sanitizeComment(value: string | undefined) { if (!value) return null; c
 function object(value: unknown): Record<string, unknown> | null { return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null; }
 function string(value: unknown) { return typeof value === "string" ? value : undefined; }
 function firstItem(payload: Record<string, unknown>) { const item = Array.isArray(payload.items) ? object(payload.items[0]) : null; if (!item) throw new Error("youtube_enrichment_transient"); return item; }
-function safeText(value: unknown, maximum: number, multiline: boolean) { const text = string(value)?.trim(); return text && text.length <= maximum && !(multiline ? /[\x00-\x08\x0B\x0C\x0E-\x1F]/ : /[\x00-\x1F]/).test(text) ? text : undefined; }
+function safeText(value: unknown, maximum: number) { const text = string(value)?.trim(); return text && text.length <= maximum && !/[\x00-\x1F\x7F]/.test(text) ? text : undefined; }
 function optionalId(value: unknown) { const id = string(value); return id && /^[A-Za-z0-9_-]{6,64}$/.test(id) ? id : undefined; }
 function optionalCategory(value: unknown) { const id = string(value); return id && /^\d{1,8}$/.test(id) ? id : undefined; }
 function nonNegativeInteger(value: unknown) { const number = typeof value === "string" && /^\d+$/.test(value) ? Number(value) : typeof value === "number" ? value : NaN; return Number.isSafeInteger(number) && number >= 0 && number <= 2147483647 ? number : undefined; }
 function statistics(value: Record<string, unknown> | null) { return { viewCount: nonNegativeInteger(value?.viewCount), likeCount: nonNegativeInteger(value?.likeCount), commentCount: nonNegativeInteger(value?.commentCount) }; }
-function date(value: unknown) { const parsed = typeof value === "string" ? new Date(value) : null; return parsed && !Number.isNaN(parsed.getTime()) ? parsed : undefined; }
+function date(value: unknown) { if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/.test(value)) return undefined; const parsed = new Date(value); const expected = value.includes(".") ? value : `${value.slice(0, -1)}.000Z`; return parsed.toISOString() === expected ? parsed : undefined; }
 function duration(value: unknown) { const match = typeof value === "string" ? /^PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?$/.exec(value) : null; if (!match) return undefined; const seconds = (Number(match[1] ?? 0) * 3600) + (Number(match[2] ?? 0) * 60) + Number(match[3] ?? 0); return Number.isSafeInteger(seconds) && seconds <= 86400 ? seconds : undefined; }
-function safeTags(value: unknown) { return Array.isArray(value) ? value.slice(0, 20).flatMap((tag) => { const text = safeText(tag, 80, false); return text ? [text] : []; }) : undefined; }
+function safeTags(value: unknown) { return Array.isArray(value) ? value.slice(0, 20).flatMap((tag) => { const text = safeText(tag, 80); return text ? [text] : []; }) : undefined; }
 function thumbnail(value: Record<string, unknown> | null) { const url = string(object(value?.medium)?.url) ?? string(object(value?.default)?.url); return url && !/[\x00-\x1F\x7F]/.test(url) && /^https:\/\/(i\.ytimg\.com|img\.youtube\.com)\/[^\s]{1,500}$/.test(url) ? url : undefined; }

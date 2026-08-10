@@ -1,6 +1,6 @@
 ---
 story_id: 18-5
-status: review
+status: done
 created: 2026-08-09
 epic: 18
 ---
@@ -34,6 +34,13 @@ so that Discovery can rank URLs while protecting privacy and Knowledge boundarie
    - Only the bounded safe operational schema is retained.
 
 ## Tasks / Subtasks
+
+### Review Findings
+
+- [x] [Review][Patch] Canonical candidates are retained before enrichment failures [packages/worker-domain/src/features/youtube-discovery/execution.ts:58]
+- [x] [Review][Patch] Safe retained text rejects control characters [packages/worker-domain/src/features/youtube-discovery/youtube-enrichment.ts:103]
+- [x] [Review][Patch] Database tags enforce the per-item length bound [drizzle/migrations/0053_harden_discovery_metadata_constraints.sql:4]
+- [x] [Review][Patch] Publication parsing rejects JavaScript-normalized invalid dates [packages/worker-domain/src/features/youtube-discovery/youtube-enrichment.ts:108]
 
 - [x] Add the minimal Discovery-owned enrichment and derived-signal persistence model (AC: 1, 3, 6)
   - [ ] Add the next sequential Drizzle migration after `0049_discovery_youtube_candidates.sql`, update `drizzle/migrations/meta/_journal.json`, and update `packages/database/src/schema.ts`; preserve every prior migration unchanged.
@@ -149,6 +156,7 @@ gpu4ai/gpt-5.6-terra
 - Remaining blocker: `pnpm exec vitest run --project integration tests/youtube-discovery-execution.integration.test.ts` reproduces one unrelated pre-existing execution assertion failure: “cancels after provider results and before persistence without graph writes” receives `resultCode: "contended"` rather than the expected `"success"` (25 of 26 tests pass). The new Story 18.5 enrichment integration suite passes independently.
 - Final-review repairs: the Knowledge vocabulary boundary now excludes only the database integration fixture that legitimately asserts the Discovery ranking stage; the original runtime and unit-test vocabulary scan remains active. Execution rechecks the active claim, current policy, and proposal before search and every capture-eligibility call. YouTube search and enrichment endpoints reject oversized response bodies before decoding, and derived comment-signal expiration is limited to 20 rows per advisory-locked retention pass.
 - Passed after final-review repairs: focused unit tests (9), focused serial integration tests (33), root TypeScript check, full `pnpm typecheck`, and `git diff --check`. Full `pnpm test:unit` runs 317/318 tests successfully; the unrelated existing `tests/traveler-ui-foundation.test.ts` source-string assertion at line 109 fails because the current delete-control class contains `z-10`.
+- Code-review repair: canonical candidates now persist before per-candidate enrichment; safe metadata rejects every control character and non-round-trippable timestamps; migration 0053 enforces the tag item cap. Focused unit tests (6), serial enrichment/execution integration tests (35), `pnpm typecheck`, and `git diff --check` passed.
 
 ### File List
 
@@ -171,3 +179,4 @@ gpu4ai/gpt-5.6-terra
 
 - 2026-08-09: Implemented bounded safe candidate enrichment, derived signals, retention, and focused serial PostgreSQL verification; repaired the thumbnail constraint and appearance provenance guard.
 - 2026-08-09: Repaired final-review fence, retention-bound, response-size, and vocabulary-test findings.
+- 2026-08-10: Repaired final Story 18.5 code-review findings and verified focused unit/integration coverage.

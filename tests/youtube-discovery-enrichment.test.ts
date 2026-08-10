@@ -36,4 +36,14 @@ describe("YouTube Discovery enrichment adapter", () => {
     const result = await enrichYoutubeVideo("abcDEF12345", "secret", async (input) => new Response(JSON.stringify(new URL(String(input)).pathname.endsWith("videos") ? unsafeVideo : new URL(String(input)).pathname.endsWith("channels") ? channel : { items: [] })));
     expect(result.thumbnailUrl).toBeUndefined();
   });
+
+  test("drops metadata text containing controls and invalid publication dates", async () => {
+    const unsafeVideo = structuredClone(video);
+    unsafeVideo.items[0].snippet.title = `Da${String.fromCharCode(127)} Lat`;
+    unsafeVideo.items[0].snippet.description = "Route\nnotes";
+    unsafeVideo.items[0].snippet.tags = ["route", `unsafe${String.fromCharCode(127)}tag`];
+    unsafeVideo.items[0].snippet.publishedAt = "2026-02-31T00:00:00Z";
+    const result = await enrichYoutubeVideo("abcDEF12345", "secret", async (input) => new Response(JSON.stringify(new URL(String(input)).pathname.endsWith("videos") ? unsafeVideo : new URL(String(input)).pathname.endsWith("channels") ? channel : { items: [] })));
+    expect(result).toMatchObject({ title: undefined, description: undefined, tags: ["route"], publishedAt: undefined });
+  });
 });
