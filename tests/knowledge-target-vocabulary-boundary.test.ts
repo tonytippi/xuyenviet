@@ -11,6 +11,8 @@ const excluded = new Set([
   "tests/knowledge-search.test.ts",
   // Integration fixtures may assert database-only operational enum values.
   "tests/youtube-discovery-enrichment.integration.test.ts",
+  "tests/youtube-discovery-execution.integration.test.ts",
+  "tests/youtube-discovery-recommendations.integration.test.ts",
 ]);
 const retiredShape = /\b(?:publicationState|reviewState|needsReview|reviewStatus|operationState|verify_first)\b|\.stage\b/;
 

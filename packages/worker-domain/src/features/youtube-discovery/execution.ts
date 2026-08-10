@@ -79,8 +79,8 @@ export async function runYoutubeDiscoveryPoll(workerId: string): Promise<WorkerP
                 if (bundle === "cancelled") return observationFor(activeClaim, "success");
                 if (bundle === "contended") throw new Error("youtube_recommendation_contended");
                 if (executionDeadlineAt <= Date.now() || controller.signal.aborted) throw new Error("youtube_recommendation_deadline_exhausted");
-                const eligibility = await youtubeCaptureEligibilityPort!.check(candidate.videoId, controller.signal);
-                if (eligibility === "unavailable" || controller.signal.aborted) throw new Error("youtube_capture_eligibility_unavailable");
+                const eligibility = await raceWithDeadline(youtubeCaptureEligibilityPort!.check(candidate.videoId, controller.signal), controller.signal, executionDeadlineAt);
+                if ((eligibility !== "eligible" && eligibility !== "already_compatible") || controller.signal.aborted) throw new Error("youtube_capture_eligibility_unavailable");
                 const active = await cancelYoutubeDiscoveryRunIfDisabled(activeClaim, undefined, true);
                 if (active === "cancelled") return observationFor(activeClaim, "success");
                 if (active === "contended") throw new Error("youtube_eligibility_contended");
@@ -106,7 +106,7 @@ export async function runYoutubeDiscoveryPoll(workerId: string): Promise<WorkerP
 
 async function runYoutubeDiscoveryRecommendation(claim: NonNullable<Awaited<ReturnType<typeof claimNextYoutubeDiscoveryRun>>["claim"]>, bundle: Exclude<Awaited<ReturnType<typeof getYoutubeDiscoveryRecommendationBundle>>, "completed" | "cancelled" | "contended">, eligibility: "eligible" | "already_compatible", signal: AbortSignal, executionDeadlineAt: number): Promise<"completed" | "cancelled" | "contended" | "deadline_exhausted" | "retry"> {
   if (executionDeadlineAt <= Date.now() || signal.aborted) return "deadline_exhausted";
-  const persisted = await persistYoutubeDiscoveryRecommendation(claim, bundle, eligibility);
+  const persisted = await persistYoutubeDiscoveryRecommendation(claim, bundle, eligibility, executionDeadlineAt);
   return persisted;
 }
 
@@ -169,6 +169,21 @@ function observationFor(claim: NonNullable<Awaited<ReturnType<typeof claimNextYo
     leaseRecovery: claim.recoveredCount ? "recovered" : "none",
     ...(claim.recoveredCount ? { leaseRecoveryCount: claim.recoveredCount } : {}),
   };
+}
+
+async function raceWithDeadline<T>(operation: Promise<T>, signal: AbortSignal, deadlineAt: number): Promise<T> {
+  const remainingMs = deadlineAt - Date.now();
+  if (remainingMs <= 0) throw new Error("youtube_capture_eligibility_unavailable");
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      operation,
+      new Promise<never>((_, reject) => { timeout = setTimeout(() => reject(new Error("youtube_capture_eligibility_unavailable")), remainingMs); }),
+    ]);
+  } finally {
+    if (timeout) clearTimeout(timeout);
+    if (signal.aborted) throw new Error("youtube_capture_eligibility_unavailable");
+  }
 }
 
 /** @internal Test-only stage seam. It is intentionally not exported from the package barrel. */

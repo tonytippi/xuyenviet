@@ -1,6 +1,6 @@
 ---
 story_id: 19-2
-status: review
+status: done
 baseline_commit: 9a33e10
 created: 2026-08-10
 epic: 19
@@ -133,6 +133,7 @@ gpu4ai/gpt-5.6-terra
 - No implementation, migration, provider call, database reset, test execution, or commit was performed while creating this story.
 - Completed deterministic policy evaluation, immutable recommendation provenance persistence, guarded Worker eligibility sequencing, and recommendation retention. Worker coverage proves deadline exhaustion skips the eligibility port and post-lookup policy revocation persists neither recommendation nor recommended history while retaining exactly one terminal cancellation audit.
 - Final verification passed: focused unit tests (5), focused serial integration tests (42), `pnpm typecheck`, `pnpm lint` (0 errors, 45 existing warnings), `pnpm build`, and `git diff --check`.
+- 2026-08-10: BMad code review repaired ranking-history retention, unexpired signal projection, recommendation/history provenance, execution deadline fencing, malformed eligibility handling, the Discovery unit-test boundary, and the one-migration contract. PostgreSQL `numeric(7,6)` canonicalization was accepted for direct SQL inputs because checks/triggers cannot observe pre-coercion scale. Focused unit tests (7), focused integration tests (36), typecheck, lint (0 errors, 45 existing warnings), build, and diff check passed. Full unit suite retains one unrelated Traveler UI assertion failure.
 
 ### File List
 
