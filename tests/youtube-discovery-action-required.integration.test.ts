@@ -57,6 +57,18 @@ describe.sequential("YouTube Discovery action-required queue", () => {
     expect(queue.items.some((item) => item.actionId.endsWith(":execution_terminal") && item.actionId !== `${other.id}:execution_terminal`)).toBe(false);
   });
 
+  test("surfaces a typed provider rate limit before its retry is terminal", async () => {
+    const { policy, proposal } = await queueFixture({ maxRetryAttempts: 1 });
+    await createYoutubeDiscoveryRun({ policyVersionId: policy.id, queryProposalId: proposal.id }, testDb);
+    const claim = (await claimNextYoutubeDiscoveryRun({ workerId: "rate-limit-retry" }, testDb)).claim;
+    if (!claim) throw new Error("expected rate-limit retry claim");
+    expect(await retryYoutubeDiscoveryRun(claim, "provider_rate_limited", testDb)).toBe("retrying");
+
+    const queue = await createPostgresAdminYoutubeDiscoveryPort(undefined, testDb).listActionRequired(principal, null);
+
+    expect(queue.items).toEqual(expect.arrayContaining([expect.objectContaining({ kind: "health_incident", actionId: `${proposal.id}:provider_rate_limited`, reason: "provider_rate_limited" })]));
+  });
+
   test("combines owner inputs deterministically, continues cursors, and rejects stale anchors", async () => {
     const { policy, proposal } = await queueFixture();
     const candidateId = await createConsiderCandidate(policy.id, proposal.id, "pagecandidate");

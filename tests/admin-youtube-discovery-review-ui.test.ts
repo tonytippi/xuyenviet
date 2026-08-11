@@ -114,5 +114,8 @@ describe("admin YouTube Discovery review UI boundary", () => {
     for (const reason of ["review_pending", "review_aged", "mission_no_progress", "mission_disabled", "mission_no_enabled_query", "provider_rate_limited", "triage_schema_invalid", "execution_persistent_failure", "knowledge_risk", "knowledge_relation"]) expect(source).toContain(reason);
     expect(source).toContain("{reasonCopy[item.reason]}");
     expect(source).not.toContain("item.label");
+    expect(source).toContain('const [unavailable, setUnavailable] = useState(false)');
+    expect(source).toContain('Chưa thể tải việc cần xử lý');
+    expect(source).toContain('Hãy thử lại trước khi kết luận không còn việc cần xử lý.');
   });
 });

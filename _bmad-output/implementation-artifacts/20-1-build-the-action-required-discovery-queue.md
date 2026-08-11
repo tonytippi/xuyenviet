@@ -1,6 +1,6 @@
 ---
 story_id: 20-1
-status: done
+status: in-progress
 created: 2026-08-11
 epic: 20
 ---
@@ -40,6 +40,14 @@ so that I can act quickly without scanning a noisy dashboard or routine history.
 - Persist these values on the versioned Discovery policy and include only bounded values in its audit summary. Do not hard-code thresholds in React, scripts, or scattered database queries.
 
 ## Tasks / Subtasks
+
+### Review Findings
+
+- [x] [Review][Patch] Surface typed provider rate limits while retrying [packages/database/src/admin-youtube-discovery.ts:47]
+- [x] [Review][Patch] Preserve Mission action IDs in direct system-query creation [packages/database/src/youtube-discovery/index.ts:555]
+- [x] [Review][Patch] Reconcile legacy system-query identities before adding Mission IDs to the digest [packages/domain/src/youtube-discovery/planning.ts:38]
+- [ ] [Review][Patch] Bound and paginate each action-queue source rather than loading all historical rows [packages/database/src/admin-youtube-discovery.ts:44]
+- [x] [Review][Patch] Keep the unavailable queue state distinct from a successful empty completion state [apps/admin/app/knowledge/youtube-discovery/queue.tsx:35]
 
 - [x] Extend the versioned Discovery policy and closed operational classification (AC: 1)
   - [ ] Add one forward Drizzle migration, schema fields, constraints, contracts, policy creation/update paths, and audit summary fields for the five locked policy values above. Preserve existing policy-version/run snapshot semantics; a run/action projection must use its applicable policy version, not environment defaults.
@@ -148,6 +156,7 @@ gpu4ai/gpt-5.6-terra
 - 2026-08-11: Repaired confirmed Story 20.1 review findings and verified them with focused unit and serial integration tests. Action-queue inputs now use canonical ordering with fail-closed bounded capacity, rate-limit clearance compares against the latest classified failure, terminal categories survive retries and lease expiry, Knowledge uses the persisted action policy threshold, malformed/stale cursors are admitted before owner worklist reads, and Mission/Health handoff routes validate their opaque IDs before rendering.
 - 2026-08-11: Verified follow-up review repairs: Mission stall projection now uses Knowledge-owned opaque needs composed with Discovery-owned enabled-link/latest-success state, mixed-version incidents use the latest run's persisted threshold semantics, the action queue contract is a closed discriminated union, and all queue sources paginate without a 500-row truncation/fail-closed path. Focused contract test passed (5 tests), serial integration test passed (6 tests), `pnpm typecheck` and `git diff --check` passed.
 - 2026-08-11: Final review repair verified: removed the action-queue free-form `label` from owner inputs, persistence projection, public contract, and UI. The UI now renders only local Vietnamese closed reason copy, including `mission_no_enabled_query`. Focused unit tests passed (10 tests); serial action-queue/API integration tests passed (22 tests), including explicit anonymous `401` and traveler `403` admission checks for `GET action-required`; `pnpm typecheck` and `git diff --check` passed. No commit created.
+- 2026-08-11: Code-review repair applied: typed provider rate limits appear while retrying; direct system proposals retain Mission action IDs; the planner adopts one compatible legacy system query before using its Mission-specific digest; and failed queue loads render an unavailable retry state instead of a false completion state. Focused unit tests passed (10 tests), focused serial integration/API tests passed (23 tests), `pnpm typecheck`, and `git diff --check` passed. The source-level database keyset pagination repair remains open because the current owner-port contract returns complete unpaged Mission/Knowledge projections; adding an arbitrary limit would silently omit action work.
 
 ### File List
 

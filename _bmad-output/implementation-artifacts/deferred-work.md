@@ -149,3 +149,7 @@
 - source_spec: `spec-restore-operator-capture-clis.md`
   summary: Require an unambiguous timestamp convention from Gemini for nonzero YouTube video windows.
   evidence: Existing capture code accepts both absolute and clip-relative timestamps. A provider contract revision is required to reject or label ambiguous values safely without losing current compatible captures.
+
+## Deferred from: code review of story-20-1-build-action-required-discovery-queue (2026-08-11)
+
+- Bound and keyset-paginate every action-queue source in `packages/database/src/admin-youtube-discovery.ts`. This requires an owner-port/cursor contract that can seek Mission and Knowledge projections by the global action tuple; imposing an arbitrary cap on the current complete projections would omit required operator work.
