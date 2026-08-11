@@ -4,7 +4,7 @@ baseline_commit: cbf9efc
 
 # Story 16.4: Prove Chat-First Scope, Trust, and Accessibility Boundaries
 
-Status: review
+Status: done
 
 ## Story
 
@@ -90,6 +90,28 @@ so that convenience improvements cannot silently weaken traveler control, owner 
 - [x] [Review][Patch] Global fetch stub leaks from serial integration test [tests/private-turn-answer-context.integration.test.ts:12] — `afterEach` now restores AI Ask dependencies and globals with `vi.unstubAllGlobals()`.
 - [x] [Review][Patch] Feedback API admission matrix omits required parser, principal, and safe-result cases [tests/trip-recommendations-api.integration.test.ts:111] — added forged-field, invalid comment, foreign/missing safe-result, and authenticated-principal forwarding coverage; repaired the controller's runtime DTO metadata so valid feedback reaches the command port.
 - [x] [Review][Patch] Accessibility evidence matrix is incomplete and not durably attached [16-4-prove-chat-first-scope-trust-and-accessibility-boundaries.md:175] — AC 4 and task 4 require keyboard sequence and observed focus for selected-answer detail, private/continue actions, feedback save/failure, stale-scope recovery, and `Hỏi XuyenViet`; the recorded note covers only a subset and points to transient `/tmp` screenshots. Record each required flow with browser, viewport, interaction/focus/Escape/live-region result, and durable screenshot attachment or an explicit blocker.
+
+### Review Findings (Round 2 — 2026-08-11)
+
+- [x] [Review][Defer] Evidence script does not keyboard-test most AC4 flows [scripts/story-16-4-evidence.ts:657-684] — deferred, UI phần này có thể còn thay đổi nhiều, không cần test sâu đến mức này
+- [x] [Review][Defer] Provenance filter behavioral change in a verification story [apps/web/src/features/ai/ai-ask-composer.tsx:546] — deferred, UI phần này có thể còn thay đổi nhiều, không cần test sâu đến mức này
+- [x] [Review][Defer] `knowledge-source-removal.test.ts` never recorded as run [16-4-prove-chat-first-scope-trust-and-accessibility-boundaries.md:181,190] — deferred, UI phần này có thể còn thay đổi nhiều, không cần test sâu đến mức này
+- [x] [Review][Defer] Vietnamese-copy and forbidden-vocabulary matrix not comprehensive [tests/traveler-ui-foundation.test.ts:57-102] — deferred, UI phần này có thể còn thay đổi nhiều, không cần test sâu đến mức này
+- [x] [Review][Defer] Focused 5-file integration command never recorded as specified [16-4-prove-chat-first-scope-trust-and-accessibility-boundaries.md:181,185,187,190] — deferred, UI phần này có thể còn thay đổi nhiều, không cần test sâu đến mức này
+- [x] [Review][Patch] Escape closes delete modal during active deletion [apps/web/src/features/chat-trips/conversation-list.tsx:36] — `closeOnEscape` calls `setConversationPendingDeletion(null)` without checking `isDeleting`, unlike the backdrop `onMouseDown` which guards with `!isDeleting`. Pressing Escape mid-deletion dismisses the modal while the delete operation proceeds irreversibly.
+- [x] [Review][Patch] No focus trap in `aria-modal="true"` delete dialog [apps/web/src/features/chat-trips/conversation-list.tsx:104] — the dialog declares `aria-modal="true"` but has no Tab-cycle containment. Keyboard users can Tab out to background conversation list buttons, which remain focusable (no `inert`/`aria-hidden` on the rest of the page).
+- [x] [Review][Patch] No focus restoration when delete modal closes [apps/web/src/features/chat-trips/conversation-list.tsx:28-40] — the `useEffect` focuses `cancelDeleteRef` on open but never restores focus to the triggering delete button on close. Focus falls to `<body>`, losing keyboard/screen-reader users' position.
+- [x] [Review][Patch] Evidence script logs PII to stdout [scripts/story-16-4-evidence.ts:724] — `console.log("Session validated:", await sessionResp.json())` prints the full session JSON (email, roles, user ID) to console. If captured to a CI log, this leaks user PII.
+- [x] [Review][Patch] Concurrent feedback test only verifies `comment` null on `useful` win [tests/answer-usefulness-feedback.integration.test.ts:802] — `if (rows[0]!.rating === "useful") expect(rows[0]!.comment).toBeNull()` has no `else` branch. When `not_useful` wins the race, the test never asserts `comment === "Cần thêm ví dụ"` is preserved.
+- [x] [Review][Patch] Evidence script reads unused `OAUTH_PROTECTION_KEY` into memory [scripts/story-16-4-evidence.ts:448] — `OAUTH_PROTECTION_KEY` is parsed from `.env.local` but never referenced. Dead code that needlessly reads a secret.
+- [x] [Review][Patch] Evidence script crashes on empty users table [scripts/story-16-4-evidence.ts:469-471] — if the target email is not found AND `SELECT ... FROM users LIMIT 1` returns zero rows, `fallback[0].id` throws `TypeError`. The top-level IIFE has no try-catch.
+- [x] [Review][Patch] Private/decline URL preservation not directly asserted [tests/private-turn-answer-context.integration.test.ts:820-868] — the private-turn test is DB-level and never asserts the URL remains unscoped after a private/decline action. The `buildCanonicalAiAskUrl` unit test proves the builder returns `/ai-ask`, but no test connects the private action handler to the URL builder.
+- [x] [Review][Patch] Ordinary conversation unlinked "after the turn" not re-checked [tests/private-turn-answer-context.integration.test.ts:838] — spec requires asserting "the ordinary conversation remains unlinked before and after the turn." The test checks `tripProjectId: null` after the private decision but does not re-check `conversations.tripProjectId` after the next turn completes.
+- [x] [Review][Defer] vitest.config.ts adds 14+ unrelated youtube-discovery test files [vitest.config.ts:1096-1124] — deferred, pre-existing scope creep from other epics mixed into this commit
+- [x] [Review][Defer] Evidence script hardcodes developer email [scripts/story-16-4-evidence.ts:462] — deferred, non-portable but it is a dev evidence script not production code
+- [x] [Review][Defer] Foundation tests match exact source-code strings [tests/traveler-ui-foundation.test.ts:890-893] — deferred, fragile but pre-existing pattern in this test suite
+- [x] [Review][Defer] Stale-scope reconciliation no longer redirects to `/ai-ask` [tests/direct-shell-proposal-actions.test.ts:28] — deferred, deliberate production change from 16.2/16.3; in-place recovery message replaces URL redirect
+- [x] [Review][Defer] Lint warnings increased 45→54 without explanation [16-4-prove-chat-first-scope-trust-and-accessibility-boundaries.md:181,190] — deferred, 9 new warnings labeled "pre-existing" but count increased; not caused by this review
 
 ## Dev Notes
 

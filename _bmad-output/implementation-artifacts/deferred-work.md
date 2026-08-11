@@ -153,3 +153,16 @@
 ## Deferred from: code review of story-20-1-build-action-required-discovery-queue (2026-08-11)
 
 - Bound and keyset-paginate every action-queue source in `packages/database/src/admin-youtube-discovery.ts`. This requires an owner-port/cursor contract that can seek Mission and Knowledge projections by the global action tuple; imposing an arbitrary cap on the current complete projections would omit required operator work.
+
+## Deferred from: code review of story-16-4 (2026-08-11)
+
+- vitest.config.ts adds 14+ unrelated youtube-discovery test files to the `unitTests` allowlist, mixing scope from other epics into this story's commit. Pre-existing scope creep; not introduced by this review.
+- Evidence script `scripts/story-16-4-evidence.ts` hardcodes developer email `sonnh273@gmail.com` for session minting. Non-portable but it is a dev evidence script, not production code.
+- Foundation tests in `tests/traveler-ui-foundation.test.ts` match exact source-code strings (multi-line inline expressions). Fragile — any Prettier reformat breaks the test without behavioral change. Pre-existing pattern in this test suite.
+- Stale-scope reconciliation in `direct-shell-loader.tsx` no longer redirects to `/ai-ask` via `router.replace`. The test was changed from `toContain` to `not.toContain`. The spec says "reconcile to `/ai-ask`" but the implementation now shows an in-place recovery message. Deliberate production change from 16.2/16.3.
+- Lint warnings increased from 45 to 54 between completion notes without explanation. The 9 new warnings are labeled "pre-existing" but the count increased. Not caused by this review.
+- Evidence script does not keyboard-test most AC4 flows (selected-answer detail, private/continue actions, feedback save/failure, stale-scope recovery). Only navigation sheet has Escape+focus test. UI phần này có thể còn thay đổi nhiều, không cần test sâu đến mức này.
+- Provenance filter behavioral change in ai-ask-composer.tsx:546 — new filter shows all non-general items (checkedAt always valid) instead of only freshness-sensitive/unverified/URL-having items. Behavioral change in a verification story. UI phần này có thể còn thay đổi nhiều, không cần test sâu đến mức này.
+- `knowledge-source-removal.test.ts` never recorded as run in completion notes. UI phần này có thể còn thay đổi nhiều, không cần test sâu đến mức này.
+- Vietnamese-copy and forbidden-vocabulary matrix not comprehensive — only 2 positive strings and 3 not.toContain checks vs. full state-by-state coverage required by spec. UI phần này có thể còn thay đổi nhiều, không cần test sâu đến mức này.
+- Focused 5-file integration command never recorded as specified — completion notes list only 3 of 5 required files. UI phần này có thể còn thay đổi nhiều, không cần test sâu đến mức này.

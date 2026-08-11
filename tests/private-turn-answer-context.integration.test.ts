@@ -55,5 +55,7 @@ describe("private recommendation next-turn answer context", () => {
     expect(JSON.parse(snapshot!.serialization)).toMatchObject({ anchors: [], planItems: [], constraints: null, currentConversationFacts: [{ field: "destination", value: "Đà Lạt", source: "conversation" }] });
     expect(provenance.some((row) => row.sourceCategory === "trip_context")).toBe(false);
     expect(provenance.every((row) => row.tripAnswerContextSnapshotId === snapshot!.id)).toBe(true);
+
+    await expect(testDb.select({ tripProjectId: conversations.tripProjectId }).from(conversations).where(eq(conversations.id, "ordinary-conversation"))).resolves.toEqual([{ tripProjectId: null }]);
   });
 });

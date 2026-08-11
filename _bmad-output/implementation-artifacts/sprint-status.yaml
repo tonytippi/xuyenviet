@@ -1,5 +1,5 @@
 # generated: 2026-07-25
-# last_updated: 2026-08-11 (Story 20.3 Automation Health and safe incident detail guide created; status set to ready-for-dev.)
+# last_updated: 2026-08-11 (Story 16.4 code review round 2 completed: 5 decision-needed deferred, 9 patches applied, 5 deferred, 4 dismissed; status set to done. Story 20.3 ready-for-dev.)
 # project: xuyenviet
 # project_key: NOKEY
 # tracking_system: file-system
@@ -33,7 +33,7 @@
 #   - done: Completed
 
 generated: 2026-07-25
-last_updated: 2026-08-11 (Story 20.3 Automation Health and safe incident detail guide created; status set to ready-for-dev.)
+last_updated: 2026-08-11 (Story 16.4 code review round 2 completed: 5 decision-needed deferred, 9 patches applied, 5 deferred, 4 dismissed; status set to done. Story 20.3 ready-for-dev.)
 project: xuyenviet
 project_key: NOKEY
 tracking_system: file-system
@@ -390,8 +390,8 @@ development_status:
   16-2-preserve-explicit-trip-scope-in-the-planning-shell: done
   # 2026-08-05: BMad code review repaired traveler-visible stream error interpolation, raw source URL quick facts, unsafe disclosure labels, and unavailable-shell recovery. A provenance-state report was dismissed after contract inspection because that state is not projected to the browser. Focused unit suite passed (23 files, 228 tests); lint had 0 errors and 45 pre-existing warnings; typecheck, build, and diff check passed.
   16-3-present-practical-vietnamese-answer-trust-and-recovery-states: done
-  16-4-prove-chat-first-scope-trust-and-accessibility-boundaries: review
-  # 2026-08-11: Completed durable browser accessibility evidence matrix via Playwright Chromium 149.0.7827.55 (desktop 1440x900, mobile 390x844). All required flows recorded with durable screenshots under _bmad-output/implementation-artifacts/evidence/story-16-4/. Fixed 4 collapsed-rail icon buttons from 40px to 44px (size-10 -> size-11). Focused unit suite passed (40 files, 337 tests); lint (0 errors, 54 pre-existing warnings); typecheck; build; git diff --check all passed. Integration tests blocked by pre-existing test-database migration issue (unrelated to 44px fix).
+  16-4-prove-chat-first-scope-trust-and-accessibility-boundaries: done
+  # 2026-08-11: Code review round 2 (bmad-code-review, 3 adversarial layers on diff cbf9efc..1f36765). 5 decision-needed deferred (UI còn thay đổi), 9 patches applied (escape guard, focus trap, focus restoration, PII log, concurrent test assertion, unused secret, empty DB guard, URL preservation assertion, post-turn re-check), 5 deferred, 4 dismissed. typecheck + unit tests (40 files, 338 tests) + lint (0 errors, 53 warnings) pass.
   epic-16-retrospective: optional
 
   # 2026-08-06: Documentation-only follow-up after the Intake filter/status and

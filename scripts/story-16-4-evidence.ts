@@ -14,7 +14,6 @@ for (const line of ENV_FILE.split("\n")) {
 const DATABASE_URL = env.DATABASE_URL!;
 const SESSION_LOOKUP_KEY = env.XV_BROWSER_SESSION_LOOKUP_KEY!;
 const CSRF_KEY = env.XV_BROWSER_CSRF_KEY!;
-const OAUTH_PROTECTION_KEY = env.XV_BROWSER_OAUTH_TRANSACTION_PROTECTION_KEY!;
 const COOKIE_NAME = "xuyenviet-session";
 
 const OUT = join(process.cwd(), "_bmad-output/implementation-artifacts/evidence/story-16-4");
@@ -36,6 +35,7 @@ async function mintSession(): Promise<{ cookie: string; csrf: string; userId: st
       authVersion = existing[0].authorizationVersion;
     } else {
       const fallback = await sql`SELECT id, email, authorization_version as "authorizationVersion" FROM users LIMIT 1`;
+      if (fallback.length === 0) throw new Error("No users found in the database. Cannot mint a browser session for evidence collection.");
       userId = fallback[0].id;
       authVersion = fallback[0].authorizationVersion;
     }
@@ -290,7 +290,7 @@ async function runViewport(viewport: { width: number; height: number }, label: s
     console.error("Session validation failed. Aborting.");
     process.exit(1);
   }
-  console.log("Session validated:", await sessionResp.json());
+  console.log("Session validated (status:", sessionResp.status + ")");
 
   console.log("Running desktop viewport (1440x900)...");
   await runViewport({ width: 1440, height: 900 }, "desktop", cookie);

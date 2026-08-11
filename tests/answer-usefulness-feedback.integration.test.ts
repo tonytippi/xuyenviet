@@ -59,5 +59,6 @@ describe("answer usefulness feedback persistence", () => {
     expect(rows).toHaveLength(1);
     expect(rows[0]).toEqual(expect.objectContaining({ rating: expect.stringMatching(/^(useful|not_useful)$/) }));
     if (rows[0]!.rating === "useful") expect(rows[0]!.comment).toBeNull();
+    else expect(rows[0]!.comment).toBe("Cần thêm ví dụ");
   });
 });

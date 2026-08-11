@@ -23,7 +23,9 @@ export function ConversationList({ sessions, activeConversationId, isDisabled = 
   const [conversationPendingDeletion, setConversationPendingDeletion] = useState<ChatSessionSummary | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [isDeleting, setDeleting] = useState(false);
+  const isDeletingRef = useRef(false);
   const cancelDeleteRef = useRef<HTMLButtonElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!conversationPendingDeletion) {
@@ -31,12 +33,34 @@ export function ConversationList({ sessions, activeConversationId, isDisabled = 
       return;
     }
 
+    const previousFocus = document.activeElement as HTMLElement | null;
     cancelDeleteRef.current?.focus();
-    function closeOnEscape(event: KeyboardEvent) {
-      if (event.key === "Escape") setConversationPendingDeletion(null);
+
+    function handleKeydown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        if (!isDeletingRef.current) setConversationPendingDeletion(null);
+        return;
+      }
+      if (event.key === "Tab") {
+        const focusable = dialogRef.current?.querySelectorAll<HTMLElement>('button:not([disabled]), a[href], input, select, textarea, [tabindex]:not([tabindex="-1"])');
+        if (!focusable || focusable.length === 0) return;
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+        if (event.shiftKey && document.activeElement === first) {
+          event.preventDefault();
+          last.focus();
+        } else if (!event.shiftKey && document.activeElement === last) {
+          event.preventDefault();
+          first.focus();
+        }
+      }
     }
-    window.addEventListener("keydown", closeOnEscape);
-    return () => window.removeEventListener("keydown", closeOnEscape);
+
+    window.addEventListener("keydown", handleKeydown);
+    return () => {
+      window.removeEventListener("keydown", handleKeydown);
+      previousFocus?.focus();
+    };
   }, [conversationPendingDeletion]);
 
   return (
@@ -101,7 +125,7 @@ export function ConversationList({ sessions, activeConversationId, isDisabled = 
         </ul>
       )}
       {conversationPendingDeletion ? (
-        <div className="fixed inset-0 z-50 grid place-items-center bg-[#17342c]/35 p-4" onMouseDown={(event) => { if (!isDeleting && event.target === event.currentTarget) setConversationPendingDeletion(null); }} role="dialog" aria-modal="true" aria-labelledby="delete-conversation-title" aria-describedby="delete-conversation-description">
+        <div className="fixed inset-0 z-50 grid place-items-center bg-[#17342c]/35 p-4" onMouseDown={(event) => { if (!isDeleting && event.target === event.currentTarget) setConversationPendingDeletion(null); }} ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="delete-conversation-title" aria-describedby="delete-conversation-description">
           <div className="w-full max-w-md rounded-2xl border border-[#d8c9ad] bg-[#fffdf8] p-5 shadow-[0_20px_60px_rgba(23,52,44,0.22)]">
             <div className="grid size-11 place-items-center rounded-full bg-[#f1e6e4] text-[#a33a32]">
               <TrashIcon className="size-5" />
@@ -112,11 +136,13 @@ export function ConversationList({ sessions, activeConversationId, isDisabled = 
             {deleteError ? <p className="mt-3 rounded-xl bg-[#f1e6e4] px-3 py-2 text-sm leading-5 text-[#8a3831]" role="alert">{deleteError}</p> : null}
             <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
               <button className="min-h-11 rounded-xl border border-[#d8c9ad] bg-white px-4 py-2 text-sm font-semibold text-[#17342c] transition hover:bg-[#fff8ec] focus:outline-none focus:ring-4 focus:ring-[#e5bd82] disabled:cursor-not-allowed disabled:opacity-60" disabled={isDeleting} onClick={() => setConversationPendingDeletion(null)} ref={cancelDeleteRef} type="button">Hủy</button>
-              <button className="min-h-11 rounded-xl bg-[#a33a32] px-4 py-2 text-sm font-semibold text-white transition hover:bg-[#8d302a] focus:outline-none focus:ring-4 focus:ring-[#f0c8a0] disabled:cursor-not-allowed disabled:opacity-60" disabled={isDeleting} onClick={async () => {
+              <button className="min-h-11 rounded-xl bg-[#a33a32] px-4 py-2 text-sm font-semibold text-white transition hover:bg-[#8d302a] focus:outline-none focus:ring-4 focus:ring-[#f0c8a0] disabled:cursor-not-allowed disabled:opacity-60" disabled={isDeleting}               onClick={async () => {
                 if (!onDelete) return;
+                isDeletingRef.current = true;
                 setDeleting(true);
                 setDeleteError(null);
                 const deleted = await onDelete(conversationPendingDeletion.id);
+                isDeletingRef.current = false;
                 setDeleting(false);
                 if (deleted) setConversationPendingDeletion(null);
                 else setDeleteError("Không thể xóa cuộc trò chuyện lúc này. Vui lòng thử lại.");

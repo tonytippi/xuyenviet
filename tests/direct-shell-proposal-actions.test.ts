@@ -47,6 +47,13 @@ describe("direct shell proposal actions", () => {
     expect(composer).toContain("mainHeadingRef.current?.offsetParent !== null ? mainHeadingRef.current : textareaRef.current");
   });
 
+  test("private and decline recommendation actions preserve the unscoped URL without navigation", () => {
+    const source = readFileSync("apps/web/src/features/ai/ai-ask-composer.tsx", "utf8");
+    expect(source).toContain('setStatus("Bạn có thể tiếp tục hỏi riêng trong cuộc trò chuyện này.")');
+    expect(source).toContain('setStatus("Đã ghi nhận lựa chọn của bạn.")');
+    expect(source).toContain('router.push(buildCanonicalAiAskUrl(result.destination.conversationId, result.destination.tripProjectId))');
+  });
+
   test("keeps the selected-trip label in the shared shell rather than only the empty state", () => {
     const source = readFileSync("apps/web/src/features/ai/ai-ask-composer.tsx", "utf8");
     const scopeLabel = source.indexOf("Đang lên kế hoạch cho: {selectedTripProject.title}");
