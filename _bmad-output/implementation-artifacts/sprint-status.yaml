@@ -1,5 +1,5 @@
 # generated: 2026-07-25
-# last_updated: 2026-08-10 (Story 19.5 validated and ready for development.)
+# last_updated: 2026-08-11 (Story 19.5 follow-up code review repairs verified.)
 # project: xuyenviet
 # project_key: NOKEY
 # tracking_system: file-system
@@ -33,7 +33,7 @@
 #   - done: Completed
 
 generated: 2026-07-25
-last_updated: 2026-08-10 (Story 19.5 validated and ready for development.)
+last_updated: 2026-08-11 (Story 19.5 follow-up code review repairs verified.)
 project: xuyenviet
 project_key: NOKEY
 tracking_system: file-system
@@ -435,6 +435,7 @@ development_status:
   19-3-review-one-ranked-candidate-at-a-time: done
   19-4-accept-a-candidate-through-knowledge-intake: done
   # 2026-08-11: Implemented exact closed Defer/Skip commands, audited locked Discovery-only transitions, protected API routes, and server-ranked workbench recovery. Focused unit (7) and serial integration/API (14) tests, lint with 0 errors and 46 existing warnings, typecheck, build, and diff check passed. Review repairs hardened interrupted-decision reconciliation and desktop/mobile keyboard focus.
+  # 2026-08-11: Follow-up BMad code-review repairs serialize Defer/Skip after the review-state lock with the current Knowledge handoff, retain the recovery action without loaded detail, and add terminal-race, Defer/Skip API safe-error, and recovery-rendering coverage. Focused unit (7) and serial integration/API (15) tests, typecheck, and diff check passed.
   19-5-defer-skip-and-verify-candidate-decision-safety: done
   epic-19-retrospective: optional
 

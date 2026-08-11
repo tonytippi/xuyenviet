@@ -129,6 +129,24 @@ describe("admin YouTube Discovery direct API", () => {
     expect(port.skipReview).toHaveBeenCalledWith(expect.objectContaining({ userId: "operator" }), "recommendation-1");
   });
 
+  test("fails closed for Defer and Skip authorization, stale associations, and unsafe port results", async () => {
+    const traveler = await browserSession("traveler", "traveler");
+    const operator = await browserSession("operator", "operator");
+    const headers = { Cookie: operator.cookie, Origin: "https://admin.xuyenviet.app", "x-xuyenviet-csrf": operator.csrf };
+    for (const action of ["defer", "skip"] as const) {
+      await request(app.getHttpServer()).post(`/v1/admin/knowledge/youtube-discovery/review/recommendation-1/${action}`).send({}).expect(401);
+      await request(app.getHttpServer()).post(`/v1/admin/knowledge/youtube-discovery/review/recommendation-1/${action}`).set({ Cookie: traveler.cookie, Origin: "https://admin.xuyenviet.app", "x-xuyenviet-csrf": traveler.csrf }).send({}).expect(403);
+      await request(app.getHttpServer()).post(`/v1/admin/knowledge/youtube-discovery/review/recommendation-1/${action}`).set({ ...headers, "x-xuyenviet-csrf": "invalid" }).send({}).expect(403);
+      port[action === "defer" ? "deferReview" : "skipReview"].mockResolvedValueOnce(null);
+      await request(app.getHttpServer()).post(`/v1/admin/knowledge/youtube-discovery/review/recommendation-1/${action}`).set(headers).send({}).expect(404).expect(({ body }) => expect(body).toMatchObject({ code: "not_found" }));
+      port[action === "defer" ? "deferReview" : "skipReview"].mockResolvedValueOnce({ outcome: action === "defer" ? "skipped" : "deferred" });
+      await request(app.getHttpServer()).post(`/v1/admin/knowledge/youtube-discovery/review/recommendation-1/${action}`).set(headers).send({}).expect(503);
+      port[action === "defer" ? "deferReview" : "skipReview"].mockRejectedValueOnce(new Error("adapter unavailable"));
+      await request(app.getHttpServer()).post(`/v1/admin/knowledge/youtube-discovery/review/recommendation-1/${action}`).set(headers).send({}).expect(503);
+    }
+    await request(app.getHttpServer()).post("/v1/admin/knowledge/youtube-discovery/review/%20/defer").set(headers).send({}).expect(400);
+  });
+
   test("rejects malformed review cursor and identifier before port admission", async () => {
     const operator = await browserSession("operator", "operator");
     await request(app.getHttpServer()).get("/v1/admin/knowledge/youtube-discovery/review?cursor=ydr2.bad").set({ Cookie: operator.cookie }).expect(400);

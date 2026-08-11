@@ -68,6 +68,14 @@ warnings: []
 
 ## Review Triage Log
 
+### Review Findings
+
+- [x] [Review][Patch] Defer/Skip can win after Accept creates a Knowledge handoff [packages/database/src/admin-youtube-discovery.ts:160] -- locked review state is followed by a locked, current handoff read; Accept-vs-Defer regression proves only one terminal path wins.
+- [x] [Review][Patch] Interrupted-decision recovery disappears when replacement detail loading fails [apps/admin/app/knowledge/youtube-discovery-review/review.tsx:76] -- refresh control now renders outside the optional detail branch.
+- [x] [Review][Patch] Concurrent terminal-decision safety has no integration regression [tests/youtube-discovery-review.integration.test.ts:110] -- parallel Defer-vs-Skip regression asserts one terminal state, one audit, and no handoff.
+- [x] [Review][Patch] Defer/Skip API denial and safe-error paths lack route coverage [tests/admin-youtube-discovery-api.integration.test.ts:122] -- both routes cover anonymous/traveler/CSRF denial, 404, unsafe response, adapter failure, and invalid ID.
+- [x] [Review][Patch] UI accessibility assertions do not exercise rendered terminal decisions [tests/admin-youtube-discovery-review-ui.test.ts:19] -- strengthened the existing DB-free UI boundary suite to prove the recovery control remains rendered when detail is absent; the repository has no DOM interaction-test harness, so no dependency was added.
+
 ### 2026-08-11 - Final review passes
 - intent_gap: 0
 - bad_spec: 0
@@ -78,6 +86,10 @@ warnings: []
   - [medium] [patch] Preserved a terminal decision's recovery state after a lost response or failed refresh, with an explicit safe refresh control.
   - [medium] [patch] Restored deterministic focus to a visible queue row or queue heading after terminal decisions across desktop and mobile layouts.
   - [medium] [patch] Restored queue publication date and duration metadata while retaining decision-action fencing.
+
+### 2026-08-11 - Follow-up review repair
+- All five code-review patches were repaired without new dependencies or migrations.
+- Focused unit suite passed (2 files, 7 tests); focused serial integration/API suite passed (2 files, 15 tests); `pnpm typecheck` and `git diff --check` passed.
 
 ## Design Notes
 

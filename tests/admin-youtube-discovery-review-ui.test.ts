@@ -81,7 +81,8 @@ describe("admin YouTube Discovery review UI boundary", () => {
     expect(source).toContain('choose(queue.items[0], true, retainReconciliation);');
     expect(source).toContain('item.publishedAt ? new Intl.DateTimeFormat("vi-VN").format(new Date(item.publishedAt)) : "Chưa rõ ngày đăng"');
     expect(source).toContain('setIsReconciling(true); setNeedsDecisionRefresh(true); setStatus("Đang làm mới trạng thái quyết định."); void refreshAfterDecision(recommendationId, requestId, true).catch(() => setStatus("Không thể làm mới trạng thái quyết định."));');
-    expect(source).toContain('Làm mới trạng thái quyết định');
+    expect(source).toContain('{needsDecisionRefresh ? <button className="mt-4 min-h-11 rounded border px-4 font-semibold" onClick={() => void retryDecisionRefresh()} type="button">Làm mới trạng thái quyết định</button> : null}');
+    expect(source).toContain('</div></div> : <p className="mt-4 text-slate-600">Chọn một ứng viên để xem chi tiết.</p>}{needsDecisionRefresh ?');
     expect(source).toContain('disabled={isAccepting || isDeciding || isReconciling}');
     expect(source).not.toMatch(/youtube:capture|capture\//);
   });
