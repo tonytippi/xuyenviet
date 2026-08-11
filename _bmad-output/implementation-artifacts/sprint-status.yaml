@@ -1,5 +1,5 @@
 # generated: 2026-07-25
-# last_updated: 2026-08-11 (Story 16.4 code review round 2 completed: 5 decision-needed deferred, 9 patches applied, 5 deferred, 4 dismissed; status set to done. Story 20.3 ready-for-dev.)
+# last_updated: 2026-08-11 (Synchronized Epic 8, 14, 15, 16, 18, and 19 to done after all of their stories reached done. Story 20.3 ready-for-dev.)
 # project: xuyenviet
 # project_key: NOKEY
 # tracking_system: file-system
@@ -33,7 +33,7 @@
 #   - done: Completed
 
 generated: 2026-07-25
-last_updated: 2026-08-11 (Story 16.4 code review round 2 completed: 5 decision-needed deferred, 9 patches applied, 5 deferred, 4 dismissed; status set to done. Story 20.3 ready-for-dev.)
+last_updated: 2026-08-11 (Synchronized Epic 8, 14, 15, 16, 18, and 19 to done after all of their stories reached done. Story 20.3 ready-for-dev.)
 project: xuyenviet
 project_key: NOKEY
 tracking_system: file-system
@@ -122,7 +122,7 @@ development_status:
   epic-7-retrospective: optional
 
   # AD-31 clean-break audit and automated-execution attribution plan.
-  epic-8: in-progress
+  epic-8: done
   # Finalized 2026-07-27 after status-only verification of supplied final repair commit 6687df2d8ed78b1a6f701d459a4f2cc66d24958e and a clean pre-update worktree; status synchronized to done. No additional code review or implementation verification was performed.
   8-1-establish-the-audit-actor-boundary-and-system-catalog: done
   # Authorized exception 2026-07-27: focused Story 8.2 rerun passed (8 files, 272 tests); review status granted despite four pre-existing unrelated full-suite failures and Drizzle's non-TTY rename prompt. Blockers remain unresolved outside this story.
@@ -303,7 +303,7 @@ development_status:
   # 2026-08-03: Direct API/session course correction approved. BFF/Auth.js
   # decisions in completed Epics 9-13 remain historical evidence only.
   # Epic 14 owns NestJS direct browser API consolidation and retirement.
-  epic-14: in-progress
+  epic-14: done
   # 2026-08-03: Completed Nest-owned Google OAuth, encrypted one-time transactions, opaque browser sessions, direct request-principal admission, session-bound CSRF, exact CORS, renewal, and idempotent logout. Serial direct-auth integration coverage, root typecheck, build, and diff checks passed; lint has only existing unrelated warnings. Final adversarial and edge-case closure reviews found no high or medium findings.
   14-1-establish-nestjs-google-oauth-opaque-browser-sessions-and-direct-api-admission: done
   # 2026-08-03: Direct AI Ask and traveler-shell read cutover implemented. Direct-client/API contract verification, typecheck, build, and diff check passed; lint has only five existing unrelated warnings. No deployment or ingress evidence is claimed; ready for code review.
@@ -369,7 +369,7 @@ development_status:
   # 2026-08-04: Story-readiness validation found target-contract, dependency, writer-inventory,
   # and matrix-test gaps. Story 15.1 was amended and remains the first ready implementation step;
   # Stories 15.2-15.7 return to backlog until their declared prerequisites complete.
-  epic-15: in-progress
+  epic-15: done
   # 2026-08-04: Review repair made migration 0038 self-consistent with baseline constraints and target recommendation shapes. Confirmed disposable local development and test targets were recreated, migrated, and reseeded. Focused serial Story 15.1 suites passed (4 files, 22 tests); `pnpm typecheck`, `pnpm exec drizzle-kit check`, and diff check pass. Expired candidate recovery remains deferred to Story 15.2.
   15-1-establish-the-target-lifecycle-schema: done
   15-2-complete-candidate-processing-and-technical-job-accounting: done
@@ -384,7 +384,7 @@ development_status:
   epic-15-retrospective: optional
 
   # Epic 16 passed implementation-readiness assessment on 2026-08-05.
-  epic-16: in-progress
+  epic-16: done
   16-1-recommend-and-save-trip-projects-through-typed-owner-decisions: done
   # 2026-08-05: BMad code review repaired stale-shell submit exposure, terminal recommendation reconciliation, create/delete duplicate mutations, desktop focus, and duplicate sidebar identities. Focused 222-test unit suite, typecheck, build, and diff check passed; lint had 0 errors and 45 pre-existing warnings.
   16-2-preserve-explicit-trip-scope-in-the-planning-shell: done
@@ -405,7 +405,7 @@ development_status:
   # 2026-08-07: YouTube Discovery implementation plan passed final readiness.
   # Discovery remains URL-only: it delegates accepted URLs to Knowledge intake
   # and never schedules, invokes, or retries manual youtube:capture.
-  epic-18: in-progress
+  epic-18: done
   18-1-establish-discovery-ownership-policy-and-audit-foundation: done
   # 2026-08-07: Independent review of b45101d89e0f8a1b9ba6ed9c36e284f58a7b79ba..5e6d83bca956bddbd3e230bfeb069231db5b5652 ran Blind Hunter, Edge Case Hunter, and Acceptance Auditor synchronously. Required coverage repair adds stale cancel/retry fencing, disable-at-stage/write/requeue cancellation with one terminal audit and no continuation, and DB-free bounded backoff/cap/exhaustion verification. Focused unit (2 tests), serial integration (12 tests), and typecheck passed. Blind Hunter clean; Edge migration concern dismissed because Story 18.1 can create only queued runs. Status is ready-for-dev pending follow-up review; not done.
   # 2026-08-07: Second and final unattended independent review of b45101d89e0f8a1b9ba6ed9c36e284f58a7b79ba..a7a31f6758c2e5a9f3c22107dffba7517d532e30 ran Blind Hunter, Edge Case Hunter, and Acceptance Auditor synchronously. Blind Hunter and Edge Case Hunter: clean. Acceptance Auditor found one MEDIUM [patch]: tests/youtube-discovery-execution.integration.test.ts:48 did not prove AC 4 later-run independence after a separate run exhausts.
@@ -427,7 +427,7 @@ development_status:
   18-5-enrich-candidates-with-safe-derived-signals-and-retention: done
   epic-18-retrospective: optional
 
-  epic-19: in-progress
+  epic-19: done
   # 2026-08-10: Completed governed Discovery metadata triage. A single forward migration adds the bounded triage assessment and Discovery-run Usage linkage; Worker triage runs only after enrichment, under existing fencing/retry rules. Focused verification: migration apply, 11 unit tests, 43 serial integration tests, typecheck, build, and diff check passed; lint has 0 errors and 45 pre-existing warnings. Independent review repairs covered empty signals, deadline admission, run provenance, and malformed success input.
   19-1-register-discovery-ai-metadata-triage: done
   # 2026-08-10: Deterministic policy and immutable recommendation provenance implemented. Focused unit tests (5), serial integration tests (42), typecheck, build, and diff check passed; lint has 0 errors and 45 existing warnings. Worker regression coverage proves deadline exhaustion skips eligibility and policy revocation after eligibility writes no recommendation/history while retaining one terminal audit.
