@@ -44,6 +44,7 @@ const unitTests = [
     "tests/youtube-video.test.ts",
     "tests/admin-youtube-discovery-contract.test.ts",
     "tests/admin-youtube-discovery-review-ui.test.ts",
+    "tests/admin-youtube-discovery-health-ui.test.ts",
     "tests/admin-youtube-discovery-mission-ui.test.ts",
 ];
 

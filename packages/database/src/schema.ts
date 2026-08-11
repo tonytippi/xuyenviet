@@ -559,11 +559,13 @@ export const youtubeDiscoveryCandidateReviewStates = pgTable("youtube_discovery_
   candidateId: text("candidate_id").primaryKey().references(() => youtubeDiscoveryCandidates.id, { onDelete: "restrict" }),
   recommendationId: text("recommendation_id").notNull(),
   state: text("state").$type<"pending" | "accepted" | "deferred" | "skipped">().default("pending").notNull(),
+  deferredAt: timestamp("deferred_at", { mode: "date" }),
 }, (review) => [
   uniqueIndex("youtube_discovery_candidate_review_states_recommendation_idx").on(review.recommendationId),
   index("youtube_discovery_candidate_review_states_pending_idx").on(review.state, review.recommendationId).where(sql`${review.state} = 'pending'`),
   foreignKey({ columns: [review.recommendationId, review.candidateId], foreignColumns: [youtubeDiscoveryRecommendations.id, youtubeDiscoveryRecommendations.candidateId], name: "youtube_discovery_candidate_review_states_recommendation_candidate_fk" }).onDelete("restrict"),
   check("youtube_discovery_candidate_review_states_state_check", sql`${review.state} in ('pending', 'accepted', 'deferred', 'skipped')`),
+  check("youtube_discovery_candidate_review_states_deferred_at_check", sql`(${review.state} = 'deferred') or ${review.deferredAt} is null`),
 ]);
 
 export const youtubeDiscoveryKnowledgeHandoffs = pgTable("youtube_discovery_knowledge_handoffs", {

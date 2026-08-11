@@ -13,6 +13,8 @@ const excluded = new Set([
   "tests/youtube-discovery-enrichment.integration.test.ts",
   "tests/youtube-discovery-execution.integration.test.ts",
   "tests/youtube-discovery-recommendations.integration.test.ts",
+  // Discovery Health exposes its own durable run-stage availability contract.
+  "packages/contracts/src/youtube-discovery/index.ts",
 ]);
 const retiredShape = /\b(?:publicationState|reviewState|needsReview|reviewStatus|operationState|verify_first)\b|\.stage\b/;
 

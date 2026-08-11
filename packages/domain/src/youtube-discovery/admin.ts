@@ -1,10 +1,11 @@
-import type { AdminYoutubeDiscoveryAcceptReviewResult, AdminYoutubeDiscoveryActionRequiredCursor, AdminYoutubeDiscoveryActionRequiredQueue, AdminYoutubeDiscoveryDeferReviewResult, AdminYoutubeDiscoveryMissionCandidateCursor, AdminYoutubeDiscoveryMissionCandidatePage, AdminYoutubeDiscoveryMissionCoverage, AdminYoutubeDiscoveryMissionCoverageCursor, AdminYoutubeDiscoveryMissionCoveragePage, AdminYoutubeDiscoveryMissionDetail, AdminYoutubeDiscoveryMissionFunnel, AdminYoutubeDiscoveryMissionQueryCursor, AdminYoutubeDiscoveryMissionQueryPage, AdminYoutubeDiscoveryQuery, AdminYoutubeDiscoveryQueryList, AdminYoutubeDiscoveryReviewCursor, AdminYoutubeDiscoveryReviewDetail, AdminYoutubeDiscoveryReviewQueue, AdminYoutubeDiscoverySkipReviewResult, RequestPrincipal } from "@xuyenviet/contracts";
+import type { AdminYoutubeDiscoveryAcceptReviewResult, AdminYoutubeDiscoveryActionRequiredCursor, AdminYoutubeDiscoveryActionRequiredQueue, AdminYoutubeDiscoveryDeferReviewResult, AdminYoutubeDiscoveryHealthIncidentCursor, AdminYoutubeDiscoveryHealthIncidentDetail, AdminYoutubeDiscoveryHealthOverview, AdminYoutubeDiscoveryMissionCandidateCursor, AdminYoutubeDiscoveryMissionCandidatePage, AdminYoutubeDiscoveryMissionCoverage, AdminYoutubeDiscoveryMissionCoverageCursor, AdminYoutubeDiscoveryMissionCoveragePage, AdminYoutubeDiscoveryMissionDetail, AdminYoutubeDiscoveryMissionFunnel, AdminYoutubeDiscoveryMissionQueryCursor, AdminYoutubeDiscoveryMissionQueryPage, AdminYoutubeDiscoveryQuery, AdminYoutubeDiscoveryQueryList, AdminYoutubeDiscoveryReviewCursor, AdminYoutubeDiscoveryReviewDetail, AdminYoutubeDiscoveryReviewQueue, AdminYoutubeDiscoverySkipReviewResult, RequestPrincipal } from "@xuyenviet/contracts";
 import type { KnowledgeOneUrlHandoff } from "../admin-knowledge-intake";
 
 /** A cursor must continue to identify an active queue row before it can seek. */
 export class YoutubeDiscoveryReviewCursorValidationError extends Error {}
 export class YoutubeDiscoveryActionRequiredCursorValidationError extends Error {}
 export class YoutubeDiscoveryMissionCursorValidationError extends Error {}
+export class YoutubeDiscoveryHealthCursorValidationError extends Error {}
 
 export type YoutubeDiscoveryMissionActionInput = Readonly<{ actionId: string; priority: number; createdAt: Date }>;
 export type YoutubeDiscoveryKnowledgeActionInput = Readonly<{ recommendationId: string; workType: "risk" | "relation"; priority: number; createdAt: Date }>;
@@ -36,6 +37,8 @@ export type AdminYoutubeDiscoveryPort = {
   listMissionCandidates(cursor: AdminYoutubeDiscoveryMissionCandidateCursor | null): Promise<AdminYoutubeDiscoveryMissionCandidatePage>;
   missionFunnel(): Promise<AdminYoutubeDiscoveryMissionFunnel>;
   getMissionDetail(actionId: string, cursor: AdminYoutubeDiscoveryMissionCandidateCursor | null): Promise<AdminYoutubeDiscoveryMissionDetail | null>;
+  healthOverview(): Promise<AdminYoutubeDiscoveryHealthOverview>;
+  getHealthIncident(groupId: string, cursor: AdminYoutubeDiscoveryHealthIncidentCursor | null): Promise<AdminYoutubeDiscoveryHealthIncidentDetail | null>;
 };
 
 export type AdminYoutubeDiscoveryDependencies = { captureEligibility?: { check(videoId: string): Promise<"eligible" | "already_compatible" | "unavailable"> }; knowledgeHandoff?: KnowledgeOneUrlHandoff; actionOwners?: YoutubeDiscoveryActionOwnerPorts; missionOwners?: YoutubeDiscoveryMissionOwnerPorts };

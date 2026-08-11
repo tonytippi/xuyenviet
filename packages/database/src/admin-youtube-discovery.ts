@@ -1,12 +1,12 @@
 import { and, asc, desc, eq, gt, inArray, lt, or, sql } from "drizzle-orm";
-import { YoutubeDiscoveryActionRequiredCursorValidationError, YoutubeDiscoveryMissionCursorValidationError, YoutubeDiscoveryReviewCursorValidationError, type AdminYoutubeDiscoveryDependencies, type AdminYoutubeDiscoveryPort } from "@xuyenviet/domain";
-import type { AdminYoutubeDiscoveryActionRequiredItem, AdminYoutubeDiscoveryMissionCandidate, RequestPrincipal } from "@xuyenviet/contracts";
-import { adminYoutubeDiscoveryActionRequiredPageSize, adminYoutubeDiscoveryMissionPageSize, adminYoutubeDiscoveryReviewPageSize, encodeAdminYoutubeDiscoveryActionRequiredCursor, encodeAdminYoutubeDiscoveryMissionCandidateCursor, encodeAdminYoutubeDiscoveryMissionQueryCursor, encodeAdminYoutubeDiscoveryReviewCursor } from "@xuyenviet/contracts";
+import { YoutubeDiscoveryActionRequiredCursorValidationError, YoutubeDiscoveryHealthCursorValidationError, YoutubeDiscoveryMissionCursorValidationError, YoutubeDiscoveryReviewCursorValidationError, type AdminYoutubeDiscoveryDependencies, type AdminYoutubeDiscoveryPort } from "@xuyenviet/domain";
+import type { AdminYoutubeDiscoveryActionRequiredItem, AdminYoutubeDiscoveryHealthIncidentCursor, AdminYoutubeDiscoveryHealthIncidentDetail, AdminYoutubeDiscoveryMissionCandidate, RequestPrincipal } from "@xuyenviet/contracts";
+import { adminYoutubeDiscoveryActionRequiredPageSize, adminYoutubeDiscoveryHealthIncidentPageSize, adminYoutubeDiscoveryHealthStageWindowHours, adminYoutubeDiscoveryMissionPageSize, adminYoutubeDiscoveryReviewPageSize, encodeAdminYoutubeDiscoveryActionRequiredCursor, encodeAdminYoutubeDiscoveryHealthIncidentCursor, encodeAdminYoutubeDiscoveryMissionCandidateCursor, encodeAdminYoutubeDiscoveryMissionQueryCursor, encodeAdminYoutubeDiscoveryReviewCursor } from "@xuyenviet/contracts";
 import type { YoutubeCaptureEligibilityPort } from "@xuyenviet/domain";
 import { getDb } from "./client";
 import { createUserAuditActor } from "./actors";
 import { recordAuditEvent } from "./audit-writers";
-import { youtubeDiscoveryAppearances, youtubeDiscoveryCandidateReviewStates, youtubeDiscoveryCandidates, youtubeDiscoveryKnowledgeHandoffs, youtubeDiscoveryPolicyVersions, youtubeDiscoveryQueryProposals, youtubeDiscoveryRankingHistory, youtubeDiscoveryRecommendations, youtubeDiscoveryRuns } from "./schema";
+import { aiUsageEvents, youtubeDiscoveryAppearances, youtubeDiscoveryCandidateReviewStates, youtubeDiscoveryCandidates, youtubeDiscoveryKnowledgeHandoffs, youtubeDiscoveryPlanningLeases, youtubeDiscoveryPolicyVersions, youtubeDiscoveryQueryProposals, youtubeDiscoveryRankingHistory, youtubeDiscoveryRecommendations, youtubeDiscoveryRuns } from "./schema";
 
 const validText = (value: unknown) => typeof value === "string" && value.trim() === value && /^[\p{L}\p{N} '-]{1,240}$/u.test(value);
 const validPriority = (value: unknown) => Number.isSafeInteger(value) && (value as number) >= 1 && (value as number) <= 100;
@@ -18,7 +18,7 @@ export function createPostgresAdminYoutubeDiscoveryPort(captureEligibility: Yout
   return {
     async list() {
       const rows = await db.select({ id: youtubeDiscoveryQueryProposals.id, origin: youtubeDiscoveryQueryProposals.origin, queryText: youtubeDiscoveryQueryProposals.queryText, reason: youtubeDiscoveryQueryProposals.reason, priority: youtubeDiscoveryQueryProposals.priority, enabled: youtubeDiscoveryQueryProposals.enabled, cadenceMinutes: youtubeDiscoveryQueryProposals.cadenceMinutes, nextDueAt: youtubeDiscoveryQueryProposals.nextDueAt, policyEnabled: youtubeDiscoveryPolicyVersions.enabled }).from(youtubeDiscoveryQueryProposals).leftJoin(youtubeDiscoveryPolicyVersions, eq(youtubeDiscoveryPolicyVersions.isCurrent, true)).orderBy(asc(youtubeDiscoveryQueryProposals.createdAt)).limit(200);
-      return { items: rows.map((row) => ({ id: row.id, origin: row.origin, queryText: row.queryText, reason: row.reason, priority: row.priority, enabled: row.enabled, cadenceMinutes: row.cadenceMinutes, nextRunAt: row.enabled && row.policyEnabled ? row.nextDueAt?.toISOString() ?? null : null, pausedReason: !row.enabled ? "operator" : !row.policyEnabled ? "global" : null })) };
+      return { items: rows.map((row) => ({ id: row.id, origin: row.origin, queryText: row.queryText, reason: row.reason, priority: row.priority, enabled: row.enabled, cadenceMinutes: row.cadenceMinutes, nextRunAt: row.enabled && row.policyEnabled === true ? row.nextDueAt?.toISOString() ?? null : null, pausedReason: !row.enabled ? "operator" : row.policyEnabled !== true ? "global" : null })) };
     },
     async listReview(principal, cursor) {
       const active = [eq(youtubeDiscoveryCandidateReviewStates.state, "pending"), eq(youtubeDiscoveryRecommendations.recommendation, "consider"), sql`${youtubeDiscoveryRuns.queryProposalId} is not null`] as const;
@@ -175,6 +175,54 @@ export function createPostgresAdminYoutubeDiscoveryPort(captureEligibility: Yout
       const last = items.at(-1);
       return { coverage, query: { id: proposal.id, origin: proposal.origin, queryText: proposal.queryText, reason: proposal.reason, priority: proposal.priority, enabled: proposal.enabled, cadenceMinutes: proposal.cadenceMinutes, nextRunAt: proposal.enabled && proposal.policyEnabled ? proposal.nextDueAt?.toISOString() ?? null : null, pausedReason: !proposal.enabled ? "operator" as const : !proposal.policyEnabled ? "global" as const : null }, latestRun: run ? { state: run.state, createdAt: run.createdAt.toISOString(), retryCount: run.attemptCount, terminalCategory: run.incidentCategory ?? "unavailable" } : { state: "unavailable", createdAt: null, retryCount: null, terminalCategory: "unavailable" }, candidates: { items, nextCursor: after.length > items.length && last ? encodeAdminYoutubeDiscoveryMissionCandidateCursor({ version: 1, actionId, priority: last.priority, rank: last.rank, rankedAt: last.rankedAt, candidateId: last.candidateId }) : null } };
     },
+    async healthOverview() {
+      const now = new Date(); const staleBefore = new Date(now.getTime() - adminYoutubeDiscoveryHealthStageWindowHours * 3_600_000);
+      const [policyRows, planningRows, runRows, stageRows, stageFreshnessRows, reviewRows, usageRows, usageFreshnessRows, scheduleRows, pausedProposalRows] = await Promise.all([
+        db.select({ enabled: youtubeDiscoveryPolicyVersions.enabled, cadenceMinutes: youtubeDiscoveryPolicyVersions.cadenceMinutes, createdAt: youtubeDiscoveryPolicyVersions.createdAt }).from(youtubeDiscoveryPolicyVersions).where(eq(youtubeDiscoveryPolicyVersions.isCurrent, true)).limit(1),
+        db.select({ state: youtubeDiscoveryPlanningLeases.state, terminalAt: youtubeDiscoveryPlanningLeases.terminalAt, createdAt: youtubeDiscoveryPlanningLeases.createdAt }).from(youtubeDiscoveryPlanningLeases).where(eq(youtubeDiscoveryPlanningLeases.id, "youtube-discovery-planning")).limit(1),
+        healthRuns(db),
+        db.select({ discovered: sql<number>`count(*) filter (where ${youtubeDiscoveryRankingHistory.stage} = 'discovered')`, enriched: sql<number>`count(*) filter (where ${youtubeDiscoveryRankingHistory.stage} = 'enriched')`, triaged: sql<number>`count(*) filter (where ${youtubeDiscoveryRankingHistory.stage} = 'triaged')`, recommended: sql<number>`count(*) filter (where ${youtubeDiscoveryRankingHistory.stage} = 'recommended')` }).from(youtubeDiscoveryRankingHistory).where(gt(youtubeDiscoveryRankingHistory.createdAt, staleBefore)),
+        db.select({ lastUpdatedAt: sql<Date | null>`max(${youtubeDiscoveryRankingHistory.createdAt})` }).from(youtubeDiscoveryRankingHistory),
+        db.select({ pending: sql<number>`count(*) filter (where ${youtubeDiscoveryCandidateReviewStates.state} = 'pending')`, deferred: sql<number>`count(*) filter (where ${youtubeDiscoveryCandidateReviewStates.state} = 'deferred')`, missingDeferredAt: sql<number>`count(*) filter (where ${youtubeDiscoveryCandidateReviewStates.state} = 'deferred' and ${youtubeDiscoveryCandidateReviewStates.deferredAt} is null)`, oldestDeferredAt: sql<Date | null>`min(${youtubeDiscoveryCandidateReviewStates.deferredAt}) filter (where ${youtubeDiscoveryCandidateReviewStates.state} = 'deferred')`, lastUpdatedAt: sql<Date | null>`max(${youtubeDiscoveryCandidateReviewStates.deferredAt}) filter (where ${youtubeDiscoveryCandidateReviewStates.state} = 'deferred')` }).from(youtubeDiscoveryCandidateReviewStates),
+        db.select({ requests: sql<number>`count(*)`, totalTokens: sql<number | null>`case when count(*) = 0 or count(*) filter (where ${aiUsageEvents.totalTokens} is null) > 0 then null else sum(${aiUsageEvents.totalTokens}) end`, costMicros: sql<number | null>`case when count(*) = 0 or count(*) filter (where ${aiUsageEvents.estimatedTotalCostMicros} is null) > 0 then null else sum(${aiUsageEvents.estimatedTotalCostMicros}) end` }).from(aiUsageEvents).where(and(eq(aiUsageEvents.executorSystem, "system-youtube-discovery"), eq(aiUsageEvents.purpose, "youtube_discovery_triage"), sql`${aiUsageEvents.youtubeDiscoveryRunId} is not null`, gt(aiUsageEvents.createdAt, staleBefore))),
+        db.select({ latestAt: sql<Date | null>`max(${aiUsageEvents.createdAt})` }).from(aiUsageEvents).where(and(eq(aiUsageEvents.executorSystem, "system-youtube-discovery"), eq(aiUsageEvents.purpose, "youtube_discovery_triage"), sql`${aiUsageEvents.youtubeDiscoveryRunId} is not null`)),
+        db.select({ enabled: youtubeDiscoveryQueryProposals.enabled, cadenceMinutes: youtubeDiscoveryQueryProposals.cadenceMinutes, nextDueAt: youtubeDiscoveryQueryProposals.nextDueAt, scheduleAnchorAt: youtubeDiscoveryQueryProposals.scheduleAnchorAt, createdAt: youtubeDiscoveryQueryProposals.createdAt }).from(youtubeDiscoveryQueryProposals).where(eq(youtubeDiscoveryQueryProposals.enabled, true)).orderBy(asc(youtubeDiscoveryQueryProposals.nextDueAt), asc(youtubeDiscoveryQueryProposals.id)).limit(1),
+        db.select({ id: youtubeDiscoveryQueryProposals.id, createdAt: youtubeDiscoveryQueryProposals.createdAt }).from(youtubeDiscoveryQueryProposals).where(eq(youtubeDiscoveryQueryProposals.enabled, false)).limit(1),
+      ]);
+      const policy = policyRows[0]; const planning = planningRows[0]; const latest = runRows[0]; const incidents = groupedIncidents(runRows, now.getTime()).sort(compareActionItems).slice(0, adminYoutubeDiscoveryActionRequiredPageSize).map(({ urgency: _urgency, ...incident }) => incident); const stages = stageRows[0]!; const stageFreshness = stageFreshnessRows[0]!; const backlog = reviewRows[0]!; const usage = usageRows[0]!; const usageFreshness = usageFreshnessRows[0]!; const schedule = scheduleRows[0]; const pausedProposal = pausedProposalRows[0];
+      const planningAt = planning?.terminalAt ?? planning?.createdAt ?? null;
+      const planningFreshness = planningAt && policy ? freshnessAt(planningAt, policy.cadenceMinutes, now) : "unavailable" as const;
+      const latestFreshness = latest ? freshnessAt(latest.terminalAt ?? latest.createdAt, latest.cadenceMinutes, now) : "unavailable" as const;
+      const latestUsageAt = usageFreshness.latestAt && new Date(usageFreshness.latestAt);
+      const scheduleAt = schedule?.nextDueAt ?? schedule?.scheduleAnchorAt ?? schedule?.createdAt ?? null;
+      const querySchedule = !policy ? { enabled: null, cadenceMinutes: null, nextRunAt: null, lastUpdatedAt: null, freshness: "unavailable" as const } : !policy.enabled || pausedProposal && !schedule ? { enabled: false, cadenceMinutes: policy.cadenceMinutes, nextRunAt: null, lastUpdatedAt: pausedProposal?.createdAt.toISOString() ?? policy.createdAt.toISOString(), freshness: "unavailable" as const } : schedule ? { enabled: true, cadenceMinutes: schedule.cadenceMinutes, nextRunAt: schedule.nextDueAt?.toISOString() ?? null, lastUpdatedAt: (schedule.scheduleAnchorAt ?? schedule.createdAt).toISOString(), freshness: scheduleAt ? freshnessAt(scheduleAt, schedule.cadenceMinutes, now) : "unavailable" as const } : { enabled: true, cadenceMinutes: policy.cadenceMinutes, nextRunAt: null, lastUpdatedAt: policy.createdAt.toISOString(), freshness: "unavailable" as const };
+      const planningResult = planning ? { state: planning.state, at: planningAt!.toISOString(), lastUpdatedAt: planningAt!.toISOString(), nextRunAt: null, retryCount: 0, category: "unavailable" as const, freshness: planningFreshness } : unavailableHealthRun("no_run");
+      const latestQueryRun = latest ? { ...healthRun(latest), freshness: latestFreshness } : unavailableHealthRun("no_run");
+      const stageLastUpdatedAt = dateOrNull(stageFreshness.lastUpdatedAt);
+      const backlogLastUpdatedAt = dateOrNull(backlog.lastUpdatedAt);
+      const usageLastUpdatedAt = latestUsageAt?.toISOString() ?? null;
+      const lastUpdatedAt = latestDate([planningAt, querySchedule.lastUpdatedAt ? new Date(querySchedule.lastUpdatedAt) : null, latestQueryRun.lastUpdatedAt ? new Date(latestQueryRun.lastUpdatedAt) : null, stageLastUpdatedAt, backlogLastUpdatedAt, latestUsageAt]);
+      const usageRequests = Number(usage.requests); const totalTokens = usage.totalTokens === null ? null : Number(usage.totalTokens); const costMicros = usage.costMicros === null ? null : Number(usage.costMicros);
+      // Missing token usage takes precedence if both telemetry dimensions are incomplete.
+      const usageAvailability = usageRequests === 0 ? "missing" as const : totalTokens === null ? "incomplete_usage" as const : costMicros === null ? "incomplete_pricing" as const : "available" as const;
+      return { asOf: now.toISOString(), lastUpdatedAt: lastUpdatedAt?.toISOString() ?? null, policy: { enabled: policy?.enabled ?? null }, planning: planningResult, querySchedule, latestQueryRun, throughput: { windowHours: adminYoutubeDiscoveryHealthStageWindowHours, discovered: Number(stages.discovered), enriched: Number(stages.enriched), triaged: Number(stages.triaged), recommended: Number(stages.recommended), lastUpdatedAt: stageLastUpdatedAt?.toISOString() ?? null, freshness: !stageLastUpdatedAt ? "unavailable" as const : stageLastUpdatedAt >= staleBefore ? "current" as const : "stale" as const }, backlog: { pending: Number(backlog.pending), deferred: Number(backlog.deferred), oldestDeferredAt: Number(backlog.missingDeferredAt) || !backlog.oldestDeferredAt ? null : backlog.oldestDeferredAt.toISOString(), deferredAge: Number(backlog.missingDeferredAt) || !backlog.oldestDeferredAt ? "unavailable" as const : "available" as const, lastUpdatedAt: backlogLastUpdatedAt?.toISOString() ?? null }, incidents, usage: { availability: usageAvailability, requests: usageRequests, totalTokens, costMicros, lastUpdatedAt: usageLastUpdatedAt, freshness: !latestUsageAt ? "unavailable" as const : latestUsageAt >= staleBefore ? "current" as const : "stale" as const } };
+    },
+    async getHealthIncident(groupId, cursor) {
+      if (!validHealthGroup(groupId) || cursor && (!validHealthCursor(cursor) || cursor.groupId !== groupId)) throw new YoutubeDiscoveryHealthCursorValidationError("Invalid YouTube Discovery Health cursor.");
+      const rows = await healthRuns(db); const admitted = admittedIncidentRows(rows, Date.now()).get(groupId);
+      if (!admitted) return null;
+      const category = groupId.slice(groupId.lastIndexOf(":") + 1) as "provider_rate_limited" | "triage_schema_invalid" | "execution_terminal";
+      const proposalId = groupId.slice(0, groupId.lastIndexOf(":"));
+      const clearingAt = category === "provider_rate_limited" ? rows.filter((row) => row.queryProposalId === proposalId && row.state === "completed" && row.terminalAt).reduce<Date | null>((latest, row) => !latest || row.terminalAt! > latest ? row.terminalAt : latest, null) : null;
+      const active = and(eq(youtubeDiscoveryRuns.queryProposalId, proposalId), eq(youtubeDiscoveryRuns.incidentCategory, category), category === "provider_rate_limited" ? or(eq(youtubeDiscoveryRuns.state, "retrying"), eq(youtubeDiscoveryRuns.state, "failed"), eq(youtubeDiscoveryRuns.state, "completed")) : inArray(youtubeDiscoveryRuns.id, admitted.map((row) => row.runId)), sql`${youtubeDiscoveryRuns.terminalAt} is not null or ${youtubeDiscoveryRuns.state} = 'retrying'`, clearingAt ? gt(sql<Date>`coalesce(${youtubeDiscoveryRuns.terminalAt}, ${youtubeDiscoveryRuns.nextRunAt})`, clearingAt) : undefined);
+      const healthIncidentAtCursorKey = sql<string>`to_char(coalesce(${youtubeDiscoveryRuns.terminalAt}, ${youtubeDiscoveryRuns.nextRunAt}) at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`;
+      const cursorAfter = cursor ? or(lt(healthIncidentAtCursorKey, cursor.at), and(eq(healthIncidentAtCursorKey, cursor.at), lt(youtubeDiscoveryRuns.id, cursor.runId))) : undefined;
+      if (cursor) { const [anchor] = await db.select({ id: youtubeDiscoveryRuns.id }).from(youtubeDiscoveryRuns).where(and(active, eq(youtubeDiscoveryRuns.id, cursor.runId), eq(healthIncidentAtCursorKey, cursor.at))).limit(1); if (!anchor) throw new YoutubeDiscoveryHealthCursorValidationError("Invalid YouTube Discovery Health cursor."); }
+      const relevant = await db.select({ runId: youtubeDiscoveryRuns.id, state: youtubeDiscoveryRuns.state, terminalAt: youtubeDiscoveryRuns.terminalAt, retryAt: youtubeDiscoveryRuns.nextRunAt, retryCount: youtubeDiscoveryRuns.attemptCount, cursorAt: healthIncidentAtCursorKey }).from(youtubeDiscoveryRuns).where(and(active, cursorAfter)).orderBy(desc(healthIncidentAtCursorKey), desc(youtubeDiscoveryRuns.id)).limit(adminYoutubeDiscoveryHealthIncidentPageSize + 1);
+      const items = relevant.slice(0, adminYoutubeDiscoveryHealthIncidentPageSize).map((row) => ({ runId: row.runId, state: row.state as "retrying" | "failed" | "completed", stage: "unavailable" as const, phase: row.state === "retrying" ? "retrying" as const : row.state === "completed" ? "completed" as const : "terminal" as const, at: (row.terminalAt ?? row.retryAt).toISOString(), nextRunAt: row.state === "retrying" ? row.retryAt.toISOString() : null, retryCount: row.retryCount, category })); const last = items.at(-1);
+      const lastRow = relevant[adminYoutubeDiscoveryHealthIncidentPageSize - 1];
+      return { groupId, category, items, nextCursor: relevant.length > items.length && last && lastRow ? encodeAdminYoutubeDiscoveryHealthIncidentCursor({ version: 1, groupId, at: lastRow.cursorAt, runId: last.runId }) : null } as AdminYoutubeDiscoveryHealthIncidentDetail;
+    },
   };
 }
 // Fixed-width UTC microsecond text preserves database ordering in the opaque cursor.
@@ -245,7 +293,7 @@ async function decideReview<T extends "deferred" | "skipped">(db: AdminYoutubeDi
     if (!row) return null;
     const [handoff] = await transaction.select({ reference: youtubeDiscoveryKnowledgeHandoffs.reference }).from(youtubeDiscoveryKnowledgeHandoffs).where(eq(youtubeDiscoveryKnowledgeHandoffs.candidateId, row.candidateId)).limit(1).for("update");
     if (handoff) return null;
-    const [updated] = await transaction.update(youtubeDiscoveryCandidateReviewStates).set({ state: decision }).where(and(eq(youtubeDiscoveryCandidateReviewStates.candidateId, row.candidateId), eq(youtubeDiscoveryCandidateReviewStates.recommendationId, recommendationId), eq(youtubeDiscoveryCandidateReviewStates.state, "pending"))).returning({ candidateId: youtubeDiscoveryCandidateReviewStates.candidateId });
+    const [updated] = await transaction.update(youtubeDiscoveryCandidateReviewStates).set({ state: decision, deferredAt: decision === "deferred" ? sql`clock_timestamp()` : null }).where(and(eq(youtubeDiscoveryCandidateReviewStates.candidateId, row.candidateId), eq(youtubeDiscoveryCandidateReviewStates.recommendationId, recommendationId), eq(youtubeDiscoveryCandidateReviewStates.state, "pending"))).returning({ candidateId: youtubeDiscoveryCandidateReviewStates.candidateId });
     if (!updated) return null;
     await recordAuditEvent({ actor, operation: "update", targetType: "youtube_discovery_candidate_review", targetId: recommendationId, afterSummary: JSON.stringify({ decision }) }, transaction);
     return { outcome: decision };
@@ -285,27 +333,47 @@ async function missionCandidates(db: AdminYoutubeDiscoveryDatabase): Promise<Adm
 function compareMissionCandidate(left: Pick<AdminYoutubeDiscoveryMissionCandidate, "actionId" | "priority" | "rank" | "rankedAt" | "candidateId">, right: Pick<AdminYoutubeDiscoveryMissionCandidate, "actionId" | "priority" | "rank" | "rankedAt" | "candidateId">) { return left.priority - right.priority || left.rank - right.rank || right.rankedAt.localeCompare(left.rankedAt) || left.candidateId.localeCompare(right.candidateId) || left.actionId.localeCompare(right.actionId); }
 
 type IncidentRow = { runId: string; queryProposalId: string | null; category: "provider_rate_limited" | "triage_schema_invalid" | "execution_terminal" | null; terminalAt: Date | null; retryAt: Date; priority: number; failures: number; windowHours: number; state: "queued" | "running" | "retrying" | "completed" | "failed" | "cancelled" };
+type HealthRunRow = IncidentRow & { createdAt: Date; nextRunAt: Date; attemptCount: number; queryEnabled: boolean; cadenceMinutes: number };
+async function healthRuns(db: AdminYoutubeDiscoveryDatabase): Promise<HealthRunRow[]> {
+  return db.select({ runId: youtubeDiscoveryRuns.id, queryProposalId: youtubeDiscoveryRuns.queryProposalId, category: youtubeDiscoveryRuns.incidentCategory, terminalAt: youtubeDiscoveryRuns.terminalAt, retryAt: youtubeDiscoveryRuns.nextRunAt, nextRunAt: youtubeDiscoveryRuns.nextRunAt, createdAt: youtubeDiscoveryRuns.createdAt, attemptCount: youtubeDiscoveryRuns.attemptCount, queryEnabled: youtubeDiscoveryQueryProposals.enabled, cadenceMinutes: youtubeDiscoveryQueryProposals.cadenceMinutes, priority: youtubeDiscoveryQueryProposals.priority, failures: youtubeDiscoveryPolicyVersions.actionQueuePersistentIncidentFailureCount, windowHours: youtubeDiscoveryPolicyVersions.actionQueuePersistentIncidentWindowHours, state: youtubeDiscoveryRuns.state }).from(youtubeDiscoveryRuns).innerJoin(youtubeDiscoveryQueryProposals, eq(youtubeDiscoveryQueryProposals.id, youtubeDiscoveryRuns.queryProposalId)).innerJoin(youtubeDiscoveryPolicyVersions, eq(youtubeDiscoveryPolicyVersions.id, youtubeDiscoveryRuns.policyVersionId)).where(sql`${youtubeDiscoveryRuns.queryProposalId} is not null`).orderBy(desc(sql`coalesce(${youtubeDiscoveryRuns.terminalAt}, ${youtubeDiscoveryRuns.createdAt})`), desc(youtubeDiscoveryRuns.id));
+}
+function healthRun(row: HealthRunRow) { const at = row.terminalAt ?? row.createdAt; return { state: row.state, at: at.toISOString(), lastUpdatedAt: at.toISOString(), nextRunAt: row.state === "retrying" ? row.nextRunAt.toISOString() : null, retryCount: row.attemptCount, category: row.category ?? "unavailable" as const }; }
+function unavailableHealthRun(state: "no_run" | "unavailable") { return { state, at: null, lastUpdatedAt: null, nextRunAt: null, retryCount: null, category: "unavailable" as const, freshness: "unavailable" as const }; }
+function freshnessAt(at: Date, cadenceMinutes: number, now: Date) { return now.getTime() - at.getTime() <= cadenceMinutes * 60_000 ? "current" as const : "stale" as const; }
+function latestDate(dates: Array<Date | null>) { return dates.reduce<Date | null>((latest, value) => value && (!latest || value > latest) ? value : latest, null); }
+function dateOrNull(value: Date | string | null) { return value === null ? null : value instanceof Date ? value : new Date(value); }
+function validHealthGroup(value: string) { return /^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}:(provider_rate_limited|triage_schema_invalid|execution_terminal)$/.test(value); }
+function validHealthCursor(cursor: AdminYoutubeDiscoveryHealthIncidentCursor) { return cursor.version === 1 && validHealthGroup(cursor.groupId) && validId(cursor.runId) && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}Z$/.test(cursor.at) && new Date(`${cursor.at.slice(0, 23)}Z`).toISOString() === `${cursor.at.slice(0, 23)}Z`; }
 function groupedIncidents(rows: IncidentRow[], now: number): Array<AdminYoutubeDiscoveryActionRequiredItem & { urgency: number }> {
-  const groups = new Map<string, IncidentRow[]>();
-  const successes = new Map<string, Date>();
-  for (const row of rows) if (row.queryProposalId && row.state === "completed" && row.terminalAt && (!successes.get(row.queryProposalId) || successes.get(row.queryProposalId)! < row.terminalAt)) successes.set(row.queryProposalId, row.terminalAt);
-  for (const row of rows) if (row.queryProposalId && row.category && (row.terminalAt || row.state === "retrying" && row.category === "provider_rate_limited")) groups.set(`${row.queryProposalId}:${row.category}`, [...(groups.get(`${row.queryProposalId}:${row.category}`) ?? []), row]);
+  const admitted = admittedIncidentRows(rows, now);
   const items: Array<AdminYoutubeDiscoveryActionRequiredItem & { urgency: number }> = [];
-  for (const [groupId, group] of groups) {
-    const occurred = (row: IncidentRow) => row.terminalAt ?? row.retryAt;
-    const latest = group.reduce((current, row) => occurred(row) > occurred(current) || occurred(row).getTime() === occurred(current).getTime() && row.runId > current.runId ? row : current);
-    const latestFailure = occurred(latest);
-    if (latest.category === "provider_rate_limited" && successes.get(latest.queryProposalId!) && successes.get(latest.queryProposalId!)! > latestFailure) continue;
-    // Thresholds are immutable run-policy semantics; a newer policy must not
-    // count failures classified under an older policy version.
-    const recent = group.filter((row) => row.state === "failed" && row.failures === latest.failures && row.windowHours === latest.windowHours && row.terminalAt && now - row.terminalAt.getTime() <= latest.windowHours * 3_600_000);
-    if (latest.category !== "provider_rate_limited" && recent.length < latest.failures) continue;
-    const occurredAt = group.reduce((oldest, row) => occurred(row) < oldest ? occurred(row) : oldest, occurred(group[0]!));
+  for (const [groupId, group] of admitted) {
+    const latest = group.reduce((current, row) => incidentOccurredAt(row) > incidentOccurredAt(current) || incidentOccurredAt(row).getTime() === incidentOccurredAt(current).getTime() && row.runId > current.runId ? row : current);
+    const occurredAt = group.reduce((oldest, row) => incidentOccurredAt(row) < oldest ? incidentOccurredAt(row) : oldest, incidentOccurredAt(group[0]!));
     const priority = group.reduce((mostUrgent, row) => Math.min(mostUrgent, row.priority), latest.priority);
     const reason = latest.category === "provider_rate_limited" ? "provider_rate_limited" : latest.category === "triage_schema_invalid" ? "triage_schema_invalid" : "execution_persistent_failure";
     items.push({ kind: "health_incident", actionId: groupId, destination: "health", reason, priority, occurredAt: occurredAt.toISOString(), urgency: 0 });
   }
   return items;
+}
+function incidentOccurredAt(row: IncidentRow) { return row.terminalAt ?? row.retryAt; }
+function admittedIncidentRows(rows: IncidentRow[], now: number) {
+  const groups = new Map<string, IncidentRow[]>();
+  const successes = new Map<string, Date>();
+  for (const row of rows) if (row.queryProposalId && row.state === "completed" && row.terminalAt && (!successes.get(row.queryProposalId) || successes.get(row.queryProposalId)! < row.terminalAt)) successes.set(row.queryProposalId, row.terminalAt);
+  for (const row of rows) if (row.queryProposalId && row.category && (row.terminalAt || row.state === "retrying" && row.category === "provider_rate_limited")) groups.set(`${row.queryProposalId}:${row.category}`, [...(groups.get(`${row.queryProposalId}:${row.category}`) ?? []), row]);
+  const admitted = new Map<string, IncidentRow[]>();
+  for (const [groupId, group] of groups) {
+    const latest = group.reduce((current, row) => incidentOccurredAt(row) > incidentOccurredAt(current) || incidentOccurredAt(row).getTime() === incidentOccurredAt(current).getTime() && row.runId > current.runId ? row : current);
+    const latestFailure = incidentOccurredAt(latest);
+    if (latest.category === "provider_rate_limited" && successes.get(latest.queryProposalId!) && successes.get(latest.queryProposalId!)! > latestFailure) continue;
+    // Thresholds are immutable run-policy semantics; a newer policy must not
+    // count failures classified under an older policy version.
+    const recent = group.filter((row) => row.state === "failed" && row.failures === latest.failures && row.windowHours === latest.windowHours && row.terminalAt && now - row.terminalAt.getTime() <= latest.windowHours * 3_600_000);
+    if (latest.category !== "provider_rate_limited" && recent.length < latest.failures) continue;
+    admitted.set(groupId, latest.category === "provider_rate_limited" ? group : recent);
+  }
+  return admitted;
 }
 function compareActionItems(left: AdminYoutubeDiscoveryActionRequiredItem & { urgency: number }, right: AdminYoutubeDiscoveryActionRequiredItem & { urgency: number }) { return compareActionTuple(left, right); }
 function compareActionTuple(left: Pick<AdminYoutubeDiscoveryActionRequiredItem & { urgency: number }, "urgency" | "priority" | "occurredAt" | "kind" | "actionId">, right: Pick<AdminYoutubeDiscoveryActionRequiredItem & { urgency: number }, "urgency" | "priority" | "occurredAt" | "kind" | "actionId">) { return left.urgency - right.urgency || left.priority - right.priority || left.occurredAt.localeCompare(right.occurredAt) || left.kind.localeCompare(right.kind) || left.actionId.localeCompare(right.actionId); }

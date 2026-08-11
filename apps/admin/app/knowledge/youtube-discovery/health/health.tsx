@@ -1,0 +1,43 @@
+"use client";
+
+import Link from "next/link";
+import { useEffect, useRef, useState } from "react";
+import { parseAdminYoutubeDiscoveryHealthOverview, type AdminYoutubeDiscoveryHealthOverview } from "@xuyenviet/contracts";
+
+function origin() { const value = process.env.NEXT_PUBLIC_API_ORIGIN; if (!value) throw new Error("NEXT_PUBLIC_API_ORIGIN is required."); return value; }
+function signIn() { window.location.assign(`${origin()}/auth/google?${new URLSearchParams({ returnUrl: window.location.href })}`); }
+const runCopy = { no_run: "Chưa có lần chạy", queued: "Đang chờ", running: "Đang chạy", retrying: "Đang thử lại", completed: "Đã hoàn tất", failed: "Đã thất bại", cancelled: "Đã hủy", unavailable: "Không khả dụng" } as const;
+const incidentCopy = { provider_rate_limited: "Nhà cung cấp giới hạn tốc độ", triage_schema_invalid: "Dữ liệu phân loại không hợp lệ", execution_persistent_failure: "Thực thi thất bại liên tục" } as const;
+
+export function YoutubeDiscoveryHealth() {
+  const [health, setHealth] = useState<AdminYoutubeDiscoveryHealthOverview | null>(null);
+  const [status, setStatus] = useState("Đang tải sức khỏe Discovery.");
+  const [failed, setFailed] = useState(false);
+  const sequence = useRef(0);
+  const active = useRef<AbortController | null>(null);
+  async function load() {
+    active.current?.abort(); const controller = new AbortController(); active.current = controller; const request = ++sequence.current;
+    setFailed(false); setStatus("Đang tải sức khỏe Discovery.");
+    try {
+      const response = await fetch(`${origin()}/v1/admin/knowledge/youtube-discovery/health`, { credentials: "include", cache: "no-store", signal: controller.signal, headers: { "x-request-id": crypto.randomUUID() } });
+      if (response.status === 401) { signIn(); return; }
+      const parsed = parseAdminYoutubeDiscoveryHealthOverview(await response.json().catch(() => null));
+      if (!response.ok || !parsed) throw new Error("unavailable");
+      if (request === sequence.current) { setHealth(parsed); setStatus("Đã tải sức khỏe Discovery an toàn."); }
+    } catch { if (request === sequence.current && !controller.signal.aborted) { setFailed(true); setStatus("Không thể tải sức khỏe Discovery lúc này."); } }
+  }
+  useEffect(() => { void load(); return () => active.current?.abort(); }, []);
+  if (failed) return <main><h1 className="text-3xl font-bold">Sức khỏe Discovery</h1><p role="status" aria-live="polite" className="mt-4">{status}</p><button className="mt-4 min-h-11 border border-emerald-900 px-4 font-semibold" onClick={() => void load()} type="button">Thử lại</button></main>;
+  if (!health) return <main><h1 className="text-3xl font-bold">Sức khỏe Discovery</h1><p role="status" aria-live="polite" className="mt-4">{status}</p></main>;
+  return <main className="mx-auto max-w-5xl min-w-0 text-slate-900"><header><p className="text-sm font-semibold text-emerald-800">YOUTUBE DISCOVERY</p><h1 className="mt-2 text-3xl font-bold">Sức khỏe Discovery</h1><p role="status" aria-live="polite" className="mt-3 text-slate-600">{status}</p><p className="mt-1 text-sm text-slate-600">{lastUpdatedNote(health.lastUpdatedAt)}</p></header><section className="mt-6 grid gap-4 sm:grid-cols-2"><Card title="Chính sách Discovery" value={policyLabel(health.policy.enabled)} note={health.policy.enabled === null ? "Chính sách hiện tại không khả dụng." : "Trạng thái chính sách Discovery hiện tại."} /><Card title="Lập kế hoạch" value={runCopy[health.planning.state]} note={runNote(health.planning, "Chưa có lần chạy lập kế hoạch")} /><Card title="Lần chạy truy vấn gần nhất" value={runCopy[health.latestQueryRun.state]} note={runNote(health.latestQueryRun, "Chưa có lần chạy truy vấn")} /><Card title="Lịch truy vấn" value={health.querySchedule.enabled === false ? "Đang tắt" : health.querySchedule.freshness === "unavailable" ? "Không khả dụng" : "Đang bật"} note={scheduleNote(health.querySchedule)} /><Card title="Hàng đợi xem xét" value={`${health.backlog.pending} cần xem, ${health.backlog.deferred} để sau`} note={health.backlog.deferredAge === "available" ? `Để sau lâu nhất: ${format(health.backlog.oldestDeferredAt!)}. ${lastUpdatedNote(health.backlog.lastUpdatedAt)}` : `Tuổi để sau không khả dụng cho dữ liệu cũ hoặc chưa có. ${lastUpdatedNote(health.backlog.lastUpdatedAt)}`} /></section><Throughput throughput={health.throughput} /><section className="mt-6 border border-[#b8c4b9] bg-[#fbf7ed] p-5"><h2 className="font-semibold">Telemetry sử dụng AI</h2><p className="mt-3 text-sm">{usageNote(health.usage)}</p></section><Incidents incidents={health.incidents} /></main>;
+}
+
+function Card({ title, value, note }: { title: string; value: string; note: string }) { return <section className="border border-[#b8c4b9] bg-[#fbf7ed] p-5"><h2 className="font-semibold">{title}</h2><p className="mt-2 text-xl font-bold">{value}</p><p className="mt-2 text-sm text-slate-600">{note}</p></section>; }
+function Throughput({ throughput }: { throughput: AdminYoutubeDiscoveryHealthOverview["throughput"] }) { return <section className="mt-6 border border-[#b8c4b9] bg-[#fbf7ed] p-5"><h2 className="font-semibold">Thông lượng {throughput.windowHours} giờ</h2>{throughput.freshness === "unavailable" ? <p className="mt-3 text-sm">Dữ liệu thông lượng chưa sẵn sàng.</p> : throughput.freshness === "stale" ? <p className="mt-3 text-sm">Dữ liệu thông lượng có thể đã cũ. {lastUpdatedNote(throughput.lastUpdatedAt)}</p> : <><dl className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">{(["discovered", "enriched", "triaged", "recommended"] as const).map((stage) => <div key={stage}><dt className="text-sm text-slate-600">{stage}</dt><dd className="text-xl font-bold">{throughput[stage]}</dd></div>)}</dl><p className="mt-3 text-sm text-slate-600">{lastUpdatedNote(throughput.lastUpdatedAt)}</p></>}</section>; }
+function Incidents({ incidents }: { incidents: AdminYoutubeDiscoveryHealthOverview["incidents"] }) { return <section className="mt-6 border border-[#b8c4b9] bg-[#fbf7ed] p-5"><h2 className="font-semibold">Sự cố cần xử lý</h2>{incidents.length === 0 ? <p className="mt-3 text-sm">Không có sự cố cần xử lý.</p> : <ol className="mt-3 divide-y divide-[#b8c4b9] border-y border-[#b8c4b9]">{incidents.map((incident) => <li key={incident.actionId}><Link className="flex min-h-11 items-center justify-between gap-4 px-3 py-2 font-semibold underline decoration-2 underline-offset-4" href={`/knowledge/youtube-discovery/health/${encodeURIComponent(incident.actionId)}`} aria-label={`Mở sự cố: ${incidentCopy[incident.reason]}`}><span>{incidentCopy[incident.reason]}</span><span className="text-right text-sm font-normal">Ưu tiên {incident.priority}. Ghi nhận: {format(incident.occurredAt)}.</span></Link></li>)}</ol>}</section>; }
+function format(value: string) { return new Intl.DateTimeFormat("vi-VN", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value)); }
+function policyLabel(enabled: boolean | null) { return enabled === null ? "Không khả dụng" : enabled ? "Đang bật" : "Đang tắt"; }
+function runNote(run: AdminYoutubeDiscoveryHealthOverview["planning"], empty: string) { const updated = lastUpdatedNote(run.lastUpdatedAt); return run.freshness === "stale" ? `Cảnh báo: dữ liệu đã quá nhịp. ${updated}` : run.nextRunAt ? `Thử lại lúc: ${format(run.nextRunAt)}. ${updated}` : run.at ? `${format(run.at)}. ${updated}` : `${empty}. ${updated}`; }
+function scheduleNote(schedule: AdminYoutubeDiscoveryHealthOverview["querySchedule"]) { const updated = lastUpdatedNote(schedule.lastUpdatedAt); return schedule.freshness === "stale" ? `Cảnh báo: lịch truy vấn đã quá nhịp. ${updated}` : schedule.nextRunAt ? `Lần tới: ${format(schedule.nextRunAt)}. ${updated}` : `Chưa có lịch lần tới. ${updated}`; }
+function usageNote(usage: AdminYoutubeDiscoveryHealthOverview["usage"]) { const freshness = usage.freshness === "stale" ? " Cảnh báo: dữ liệu sử dụng AI đã cũ." : ""; if (usage.availability === "missing") return `Thiếu telemetry sử dụng AI trong 24 giờ qua.${freshness} ${lastUpdatedNote(usage.lastUpdatedAt)}`; if (usage.availability === "incomplete_usage") return `Telemetry sử dụng AI chưa đầy đủ: thiếu số token.${freshness} ${lastUpdatedNote(usage.lastUpdatedAt)}`; if (usage.availability === "incomplete_pricing") return `Telemetry sử dụng AI chưa đầy đủ: thiếu chi phí.${freshness} ${lastUpdatedNote(usage.lastUpdatedAt)}`; return `${usage.requests} yêu cầu, ${usage.totalTokens} token, ${usage.costMicros} micro-đồng.${freshness} ${lastUpdatedNote(usage.lastUpdatedAt)}`; }
+function lastUpdatedNote(value: string | null) { return value ? `Cập nhật lần cuối: ${format(value)}.` : "Chưa có thời điểm cập nhật khả dụng."; }

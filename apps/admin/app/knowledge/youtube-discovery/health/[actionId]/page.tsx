@@ -1,1 +1,7 @@
-export default async function HealthActionPage({ params }: { params: Promise<{ actionId: string }> }) { const { actionId } = await params; if (!/^[a-f0-9-]{36}:(provider_rate_limited|triage_schema_invalid|execution_terminal)$/.test(actionId)) return <section><h1 className="text-2xl font-bold">Sức khỏe Discovery</h1><p className="mt-3 text-slate-700">Sự cố trong liên kết không khả dụng.</p></section>; return <section><h1 className="text-2xl font-bold">Sức khỏe Discovery</h1><p className="mt-3 text-slate-700">Sự cố này chưa sẵn sàng để xem chi tiết.</p><p className="mt-2 text-sm text-slate-600">Mã tham chiếu: {actionId}</p></section>; }
+import { HealthIncidentDetail } from "./detail";
+
+export default async function HealthActionPage({ params }: { params: Promise<{ actionId: string }> }) {
+  const { actionId } = await params;
+  if (!/^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}:(provider_rate_limited|triage_schema_invalid|execution_terminal)$/.test(actionId)) return <main><h1 className="text-3xl font-bold">Sức khỏe Discovery</h1><p className="mt-3 text-slate-700">Sự cố trong liên kết không khả dụng.</p></main>;
+  return <HealthIncidentDetail groupId={actionId} />;
+}

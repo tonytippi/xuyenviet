@@ -28,6 +28,18 @@ describe.sequential("YouTube Discovery action-required queue", () => {
     expect(await queueWriteSnapshot()).toEqual(before);
   });
 
+  test("reads Health projections without reconciliation or writes", async () => {
+    const { policy, proposal } = await queueFixture();
+    await createConsiderCandidate(policy.id, proposal.id, "healthcandidate");
+    const before = await queueWriteSnapshot();
+
+    const health = await createPostgresAdminYoutubeDiscoveryPort(undefined, testDb).healthOverview();
+
+    expect(health.throughput.windowHours).toBe(24);
+    expect(health.backlog).toEqual(expect.objectContaining({ pending: 1, deferred: 0, oldestDeferredAt: null, deferredAge: "unavailable" }));
+    expect(await queueWriteSnapshot()).toEqual(before);
+  });
+
   test("uses typed incident escalation and clearance while excluding non-actionable runs", async () => {
     const { policy, proposal } = await queueFixture({ maxRetryAttempts: 0 });
     const other = await createProposal("Other route", 30);

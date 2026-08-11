@@ -112,7 +112,7 @@ describe.sequential("YouTube Discovery review read model", () => {
         if (!terminalCandidate) throw new Error("expected terminal candidate");
         const terminalPort = createPostgresAdminYoutubeDiscoveryPort(eligibility, transaction, intake);
         await expect(terminalPort.deferReview(principal, terminalRecommendationId)).resolves.toEqual({ outcome: "deferred" });
-        expect(await transaction.select({ state: youtubeDiscoveryCandidateReviewStates.state }).from(youtubeDiscoveryCandidateReviewStates).where(eq(youtubeDiscoveryCandidateReviewStates.recommendationId, terminalRecommendationId))).toEqual([{ state: "deferred" }]);
+         expect(await transaction.select({ state: youtubeDiscoveryCandidateReviewStates.state, deferredAt: youtubeDiscoveryCandidateReviewStates.deferredAt }).from(youtubeDiscoveryCandidateReviewStates).where(eq(youtubeDiscoveryCandidateReviewStates.recommendationId, terminalRecommendationId))).toEqual([{ state: "deferred", deferredAt: expect.any(Date) }]);
         expect(await transaction.select({ afterSummary: auditEvents.afterSummary }).from(auditEvents).where(eq(auditEvents.targetId, terminalRecommendationId))).toEqual([{ afterSummary: JSON.stringify({ decision: "deferred" }) }]);
         expect(intake.submit).toHaveBeenCalledOnce();
         await expect(terminalPort.skipReview(principal, terminalRecommendationId)).resolves.toBeNull();
