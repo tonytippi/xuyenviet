@@ -1852,7 +1852,7 @@ export function AiAskComposer({
           <aside aria-label="Thanh công cụ thu gọn" className="fixed inset-y-0 left-0 z-10 hidden w-[60px] flex-col items-center border-r border-[#e6e6e6] bg-[#f9f9f9] py-3 lg:flex">
             <button
               aria-label="Mở thanh bên"
-              className="grid size-10 place-items-center rounded-lg text-[#555] transition hover:bg-[#ededed] focus:outline-none focus:ring-2 focus:ring-[#167c5a]"
+              className="grid size-11 place-items-center rounded-lg text-[#555] transition hover:bg-[#ededed] focus:outline-none focus:ring-2 focus:ring-[#167c5a]"
               onClick={() => setSidebarCollapsed(false)}
               type="button"
             >
@@ -1860,7 +1860,7 @@ export function AiAskComposer({
             </button>
             <button
                aria-label="Hỏi XuyenViet"
-              className="mt-3 grid size-10 place-items-center rounded-lg text-[#555] transition hover:bg-[#ededed] focus:outline-none focus:ring-2 focus:ring-[#167c5a]"
+              className="mt-3 grid size-11 place-items-center rounded-lg text-[#555] transition hover:bg-[#ededed] focus:outline-none focus:ring-2 focus:ring-[#167c5a]"
               disabled={sessionActionsDisabled}
               onClick={handleNewChat}
                title="Hỏi XuyenViet"
@@ -1870,7 +1870,7 @@ export function AiAskComposer({
             </button>
             <button
               aria-label="Mở chuyến đi"
-              className="mt-2 grid size-10 place-items-center rounded-lg text-[#555] transition hover:bg-[#ededed] focus:outline-none focus:ring-2 focus:ring-[#167c5a]"
+              className="mt-2 grid size-11 place-items-center rounded-lg text-[#555] transition hover:bg-[#ededed] focus:outline-none focus:ring-2 focus:ring-[#167c5a]"
               onClick={() => setSidebarCollapsed(false)}
               title="Chuyến đi"
               type="button"
@@ -1879,7 +1879,7 @@ export function AiAskComposer({
             </button>
             <button
               aria-label="Mở tài khoản"
-              className="mt-auto grid size-10 place-items-center rounded-full transition hover:ring-2 hover:ring-[#167c5a] focus:outline-none focus:ring-2 focus:ring-[#167c5a]"
+              className="mt-auto grid size-11 place-items-center rounded-full transition hover:ring-2 hover:ring-[#167c5a] focus:outline-none focus:ring-2 focus:ring-[#167c5a]"
               onClick={() => setSidebarCollapsed(false)}
               title={accountName}
               type="button"

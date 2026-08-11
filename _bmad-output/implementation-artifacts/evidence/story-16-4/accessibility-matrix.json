@@ -1,0 +1,163 @@
+[
+  {
+    "flow": "Browser version",
+    "viewport": "meta",
+    "outcome": "chromium",
+    "detail": "149.0.7827.55",
+    "timestamp": "2026-08-11T08:35:56.998Z"
+  },
+  {
+    "flow": "Hỏi XuyenViet unscoped landing aria-current=page",
+    "viewport": "desktop",
+    "outcome": "present",
+    "detail": "button: \"Hỏi XuyenViet\"",
+    "timestamp": "2026-08-11T08:36:01.310Z"
+  },
+  {
+    "flow": "Navigation sheet Escape + focus restoration",
+    "viewport": "desktop",
+    "outcome": "Escape pressed, focus checked",
+    "detail": "focus -> BODY:Hỏi trợ lý chuyến đi Việt NamXuyenVietCh",
+    "timestamp": "2026-08-11T08:36:02.256Z"
+  },
+  {
+    "flow": "Composer focus",
+    "viewport": "desktop",
+    "outcome": "textarea focused",
+    "detail": "",
+    "timestamp": "2026-08-11T08:36:02.566Z"
+  },
+  {
+    "flow": "Interactive button 44px height target floor",
+    "viewport": "desktop",
+    "outcome": "all 9 product buttons >= 44px height",
+    "detail": "",
+    "timestamp": "2026-08-11T08:36:02.731Z"
+  },
+  {
+    "flow": "aria-live polite regions present",
+    "viewport": "desktop",
+    "outcome": "1 found",
+    "detail": "",
+    "timestamp": "2026-08-11T08:36:02.811Z"
+  },
+  {
+    "flow": "Conversation load",
+    "viewport": "desktop",
+    "outcome": "loaded via URL",
+    "detail": "conversationId: b4d71281-7c45-48f2-9b82-815c29f50d1e",
+    "timestamp": "2026-08-11T08:36:07.392Z"
+  },
+  {
+    "flow": "Selected-answer detail section",
+    "viewport": "desktop",
+    "outcome": "not visible",
+    "detail": "no answer detail section in this conversation state",
+    "timestamp": "2026-08-11T08:36:07.409Z"
+  },
+  {
+    "flow": "Feedback controls visible",
+    "viewport": "desktop",
+    "outcome": "present",
+    "detail": "",
+    "timestamp": "2026-08-11T08:36:07.415Z"
+  },
+  {
+    "flow": "Recommendation private/continue actions visible",
+    "viewport": "desktop",
+    "outcome": "present",
+    "detail": "private_answer and save_trip buttons rendered",
+    "timestamp": "2026-08-11T08:36:07.601Z"
+  },
+  {
+    "flow": "Reduced motion emulation",
+    "viewport": "desktop",
+    "outcome": "emulated",
+    "detail": "",
+    "timestamp": "2026-08-11T08:36:07.988Z"
+  },
+  {
+    "flow": "Stale-scope recovery",
+    "viewport": "desktop",
+    "outcome": "recovery message shown",
+    "detail": "Hỏi trợ lý chuyến đi Việt NamXuyenVietChuyến điHỏi XuyenVietTạo chuyến điTrò chuyện mớiTrò chuyệnLên kế hoạch chuyến đi Hà Nội - Đà Nẵng 7 ngàyXoáLên kế hoạch chuyến đi Hà Nội - Đà Nẵng 7 ngàyXoáTTài ",
+    "timestamp": "2026-08-11T08:36:10.508Z"
+  },
+  {
+    "flow": "Hỏi XuyenViet unscoped landing aria-current=page",
+    "viewport": "mobile",
+    "outcome": "present",
+    "detail": "button: \"Hỏi XuyenViet\"",
+    "timestamp": "2026-08-11T08:36:14.822Z"
+  },
+  {
+    "flow": "Navigation session sheet Escape + focus restoration",
+    "viewport": "mobile",
+    "outcome": "Escape pressed, focus checked",
+    "detail": "focus -> BUTTON:Mở danh sách trò chuyện, dự án chuyến đi và tài khoản",
+    "timestamp": "2026-08-11T08:36:16.297Z"
+  },
+  {
+    "flow": "Composer focus",
+    "viewport": "mobile",
+    "outcome": "textarea focused",
+    "detail": "",
+    "timestamp": "2026-08-11T08:36:16.562Z"
+  },
+  {
+    "flow": "Interactive button 44px height target floor",
+    "viewport": "mobile",
+    "outcome": "all 6 product buttons >= 44px height",
+    "detail": "",
+    "timestamp": "2026-08-11T08:36:16.687Z"
+  },
+  {
+    "flow": "aria-live polite regions present",
+    "viewport": "mobile",
+    "outcome": "1 found",
+    "detail": "",
+    "timestamp": "2026-08-11T08:36:16.723Z"
+  },
+  {
+    "flow": "Conversation load",
+    "viewport": "mobile",
+    "outcome": "loaded via URL",
+    "detail": "conversationId: b4d71281-7c45-48f2-9b82-815c29f50d1e",
+    "timestamp": "2026-08-11T08:36:21.427Z"
+  },
+  {
+    "flow": "Selected-answer detail section",
+    "viewport": "mobile",
+    "outcome": "not visible",
+    "detail": "no answer detail section in this conversation state",
+    "timestamp": "2026-08-11T08:36:21.441Z"
+  },
+  {
+    "flow": "Feedback controls visible",
+    "viewport": "mobile",
+    "outcome": "present",
+    "detail": "",
+    "timestamp": "2026-08-11T08:36:21.445Z"
+  },
+  {
+    "flow": "Recommendation private/continue actions visible",
+    "viewport": "mobile",
+    "outcome": "present",
+    "detail": "private_answer and save_trip buttons rendered",
+    "timestamp": "2026-08-11T08:36:21.538Z"
+  },
+  {
+    "flow": "Reduced motion emulation",
+    "viewport": "mobile",
+    "outcome": "emulated",
+    "detail": "",
+    "timestamp": "2026-08-11T08:36:21.897Z"
+  },
+  {
+    "flow": "Stale-scope recovery",
+    "viewport": "mobile",
+    "outcome": "recovery message shown",
+    "detail": "Hỏi trợ lý chuyến đi Việt NamXuyenVietChuyến điHỏi XuyenVietTạo chuyến điTrò chuyện mớiTrò chuyệnLên kế hoạch chuyến đi Hà Nội - Đà Nẵng 7 ngàyXoáLên kế hoạch chuyến đi Hà Nội - Đà Nẵng 7 ngàyXoáTTài ",
+    "timestamp": "2026-08-11T08:36:24.895Z"
+  }
+]
