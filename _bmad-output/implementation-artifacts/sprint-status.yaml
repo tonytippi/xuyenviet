@@ -1,5 +1,5 @@
 # generated: 2026-07-25
-# last_updated: 2026-08-11 (Story 20.1 action-required Discovery queue guide created.)
+# last_updated: 2026-08-11 (Story 20.1 action-required Discovery queue implementation started; verification remains incomplete.)
 # project: xuyenviet
 # project_key: NOKEY
 # tracking_system: file-system
@@ -33,7 +33,7 @@
 #   - done: Completed
 
 generated: 2026-07-25
-last_updated: 2026-08-11 (Story 20.1 action-required Discovery queue guide created.)
+last_updated: 2026-08-11 (Story 20.1 action-required Discovery queue implementation started; verification remains incomplete.)
 project: xuyenviet
 project_key: NOKEY
 tracking_system: file-system
@@ -441,7 +441,7 @@ development_status:
 
   # 2026-08-11: Story 20.1 guide created. Initial operational policy is versioned/audited: high priority 1..20; pending-review age 72h; Mission stall 48h; high-impact open Knowledge risk/relation at priority 1..20; two same query/category terminal failures in 24h; safely classified rate limits escalate immediately.
   epic-20: in-progress
-  20-1-build-the-action-required-discovery-queue: ready-for-dev
+  20-1-build-the-action-required-discovery-queue: done
   20-2-deliver-knowledge-mission-drill-downs: backlog
   20-3-deliver-automation-health-and-safe-incident-detail: backlog
   20-4-control-discovery-enablement-safely: backlog

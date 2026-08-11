@@ -39,6 +39,8 @@ export type YoutubeDiscoveryRunState = (typeof youtubeDiscoveryRunStateValues)[n
 
 export const youtubeDiscoveryRunSafeErrorCodeValues = ["stage_transient", "retry_exhausted", "lease_retry_exhausted", "policy_revoked"] as const;
 export type YoutubeDiscoveryRunSafeErrorCode = (typeof youtubeDiscoveryRunSafeErrorCodeValues)[number];
+export const youtubeDiscoveryRunIncidentCategoryValues = ["provider_rate_limited", "triage_schema_invalid", "execution_terminal"] as const;
+export type YoutubeDiscoveryRunIncidentCategory = (typeof youtubeDiscoveryRunIncidentCategoryValues)[number];
 
 export const youtubeDiscoveryRunTerminalOutcomeValues = ["completed", "failed", "cancelled"] as const;
 export type YoutubeDiscoveryRunTerminalOutcome = (typeof youtubeDiscoveryRunTerminalOutcomeValues)[number];
@@ -384,6 +386,11 @@ export const youtubeDiscoveryPolicyVersions = pgTable(
     maxConcurrentRuns: integer("max_concurrent_runs").notNull(),
     maxRetryAttempts: integer("max_retry_attempts").notNull(),
     retryDelayMinutes: integer("retry_delay_minutes").notNull(),
+    actionQueueHighPriorityMaximum: integer("action_queue_high_priority_maximum").notNull(),
+    actionQueueMaximumOperatorReviewAgeHours: integer("action_queue_maximum_operator_review_age_hours").notNull(),
+    actionQueueMaximumMissionStallHours: integer("action_queue_maximum_mission_stall_hours").notNull(),
+    actionQueuePersistentIncidentFailureCount: integer("action_queue_persistent_incident_failure_count").notNull(),
+    actionQueuePersistentIncidentWindowHours: integer("action_queue_persistent_incident_window_hours").notNull(),
     createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
   },
   (policy) => [
@@ -395,6 +402,7 @@ export const youtubeDiscoveryPolicyVersions = pgTable(
     check("youtube_discovery_policy_versions_cadence_check", sql`${policy.cadenceMinutes} between 15 and 10080`),
     check("youtube_discovery_policy_versions_retention_check", sql`${policy.retentionDays} between 1 and 365 and ${policy.commentSignalTtlDays} between 1 and ${policy.retentionDays} - 1`),
     check("youtube_discovery_policy_versions_execution_check", sql`${policy.maxConcurrentRuns} between 1 and 20 and ${policy.maxRetryAttempts} between 0 and 10 and ${policy.retryDelayMinutes} between 1 and 1440`),
+    check("youtube_discovery_policy_versions_action_queue_check", sql`${policy.actionQueueHighPriorityMaximum} between 1 and 100 and ${policy.actionQueueMaximumOperatorReviewAgeHours} between 1 and 720 and ${policy.actionQueueMaximumMissionStallHours} between 1 and 720 and ${policy.actionQueuePersistentIncidentFailureCount} between 2 and 10 and ${policy.actionQueuePersistentIncidentWindowHours} between 1 and 168`),
   ],
 );
 
@@ -410,6 +418,7 @@ export const youtubeDiscoveryQueryProposals = pgTable(
     enabled: boolean("enabled").default(true).notNull(),
     cadenceMinutes: integer("cadence_minutes").notNull(),
     targetDigest: text("target_digest"),
+    missionActionId: text("mission_action_id"),
     safeSignalSummary: text("safe_signal_summary"),
     scheduleAnchorAt: timestamp("schedule_anchor_at", { mode: "date" }),
     nextDueAt: timestamp("next_due_at", { mode: "date" }),
@@ -418,6 +427,7 @@ export const youtubeDiscoveryQueryProposals = pgTable(
   (proposal) => [
     index("youtube_discovery_query_proposals_enabled_cadence_idx").on(proposal.enabled, proposal.cadenceMinutes),
     uniqueIndex("youtube_discovery_system_query_target_idx").on(proposal.reason, proposal.targetDigest).where(sql`${proposal.origin} = 'system'`),
+    uniqueIndex("youtube_discovery_query_mission_action_id_idx").on(proposal.missionActionId).where(sql`${proposal.missionActionId} is not null`),
     check("youtube_discovery_query_proposals_schedule_check", sql`(${proposal.scheduleAnchorAt} is null and ${proposal.nextDueAt} is null) or (${proposal.scheduleAnchorAt} is not null and (${proposal.nextDueAt} is null or ${proposal.nextDueAt} > ${proposal.scheduleAnchorAt}))`),
     check("youtube_discovery_query_proposals_origin_check", sql`${proposal.origin} in ('system', 'operator')`),
     check("youtube_discovery_query_proposals_reason_check", sql`${proposal.reason} in ('coverage_gap', 'freshness_risk', 'unresolved_conflict', 'anonymized_demand', 'operator_request')`),
@@ -426,6 +436,7 @@ export const youtubeDiscoveryQueryProposals = pgTable(
     check("youtube_discovery_query_proposals_query_check", sql`length(btrim(${proposal.queryText})) between 1 and 240 and position(chr(10) in ${proposal.queryText}) = 0 and position(chr(13) in ${proposal.queryText}) = 0 and ${proposal.queryText} !~* '(https?://|www\\.|[?&](token|secret|code|key|signature|password)=)'`),
     check("youtube_discovery_query_proposals_cadence_check", sql`${proposal.cadenceMinutes} between 15 and 10080`),
     check("youtube_discovery_query_proposals_target_check", sql`(${proposal.origin} = 'system' and ${proposal.reason} in ('coverage_gap', 'freshness_risk', 'unresolved_conflict', 'anonymized_demand') and ${proposal.targetDigest} ~ '^[a-f0-9]{64}$' and ${proposal.safeSignalSummary} = ${proposal.reason}) or (${proposal.origin} = 'operator' and ${proposal.targetDigest} is null and ${proposal.safeSignalSummary} is null)`),
+    check("youtube_discovery_query_proposals_mission_action_id_check", sql`${proposal.missionActionId} is null or ${proposal.missionActionId} ~ '^mission-[a-f0-9]{32}$'`),
   ],
 );
 
@@ -476,6 +487,7 @@ export const youtubeDiscoveryRuns = pgTable(
     terminalAt: timestamp("terminal_at", { mode: "date" }),
     terminalOutcome: text("terminal_outcome").$type<YoutubeDiscoveryRunTerminalOutcome>(),
     safeErrorCode: text("safe_error_code").$type<YoutubeDiscoveryRunSafeErrorCode>(),
+    incidentCategory: text("incident_category").$type<YoutubeDiscoveryRunIncidentCategory>(),
     createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
   },
   (run) => [
@@ -488,6 +500,7 @@ export const youtubeDiscoveryRuns = pgTable(
     check("youtube_discovery_runs_state_check", sql`${run.state} in ('queued', 'running', 'retrying', 'completed', 'failed', 'cancelled')`),
     check("youtube_discovery_runs_snapshots_check", sql`${run.maxRetryAttempts} between 0 and 10 and ${run.retryDelayMinutes} between 1 and 1440 and ${run.maxConcurrentRuns} between 1 and 20 and ${run.attemptCount} between 0 and ${run.maxRetryAttempts} + 1`),
     check("youtube_discovery_runs_error_code_check", sql`${run.safeErrorCode} is null or ${run.safeErrorCode} in ('stage_transient', 'retry_exhausted', 'lease_retry_exhausted', 'policy_revoked')`),
+    check("youtube_discovery_runs_incident_category_check", sql`${run.incidentCategory} is null or ${run.incidentCategory} in ('provider_rate_limited', 'triage_schema_invalid', 'execution_terminal')`),
     check("youtube_discovery_runs_claim_shape_check", sql`(${run.claimedBy} is null and ${run.claimedAt} is null and ${run.leaseExpiresAt} is null and ${run.fencingToken} is null) or (${run.claimedBy} is not null and length(btrim(${run.claimedBy})) between 1 and 160 and ${run.claimedAt} is not null and ${run.leaseExpiresAt} > ${run.claimedAt} and ${run.fencingToken} ~ '^[a-f0-9]{64}$')`),
     check("youtube_discovery_runs_state_shape_check", sql`(${run.state} = 'queued' and ${run.claimedBy} is null and ${run.terminalAt} is null and ${run.terminalOutcome} is null and ${run.safeErrorCode} is null) or (${run.state} = 'running' and ${run.claimedBy} is not null and ${run.terminalAt} is null and ${run.terminalOutcome} is null and ${run.safeErrorCode} is null) or (${run.state} = 'retrying' and ${run.claimedBy} is null and ${run.nextRunAt} > ${run.createdAt} and ${run.terminalAt} is null and ${run.terminalOutcome} is null and ${run.safeErrorCode} = 'stage_transient') or (${run.state} in ('completed', 'failed', 'cancelled') and ${run.claimedBy} is null and ${run.terminalAt} is not null and ${run.terminalOutcome} = ${run.state} and (${run.state} <> 'failed' or ${run.safeErrorCode} in ('retry_exhausted', 'lease_retry_exhausted')) and (${run.state} <> 'cancelled' or ${run.safeErrorCode} = 'policy_revoked') and (${run.state} <> 'completed' or ${run.safeErrorCode} is null))`),
   ],
@@ -1726,6 +1739,7 @@ export const knowledgeRecommendations = pgTable(
     policyId: text("policy_id").references(() => knowledgeSamplingPolicies.id, { onDelete: "restrict" }),
     policySnapshot: jsonb("policy_snapshot").$type<Record<string, unknown>>().default({}).notNull(),
     executorSystem: text("executor_system"),
+    discoveryMissionActionId: text("discovery_mission_action_id"),
     resolution: text("resolution").$type<KnowledgeRecommendationResolution>(),
     resolvedByUserId: text("resolved_by_user_id").references(() => users.id, { onDelete: "restrict" }),
     resolvedAt: timestamp("resolved_at", { mode: "date" }),
@@ -1738,6 +1752,7 @@ export const knowledgeRecommendations = pgTable(
     index("knowledge_recommendations_open_queue_idx").on(recommendation.status, recommendation.priority, recommendation.createdAt).where(sql`${recommendation.status} = 'open'`),
     index("knowledge_recommendations_card_version_idx").on(recommendation.knowledgeCardId, recommendation.contentVersion, recommendation.evidenceSetRevision),
     index("knowledge_recommendations_executor_system_created_at_idx").on(recommendation.executorSystem, recommendation.createdAt),
+    uniqueIndex("knowledge_recommendations_discovery_mission_action_id_idx").on(recommendation.discoveryMissionActionId).where(sql`${recommendation.discoveryMissionActionId} is not null`),
     index("knowledge_recommendations_policy_sampling_diagnostics_idx").on(recommendation.policyId, recommendation.workType, recommendation.knowledgeCardId, recommendation.contentVersion, recommendation.evidenceSetRevision, recommendation.resolvedAt.desc(), recommendation.updatedAt.desc(), recommendation.id.desc()),
     check("knowledge_recommendations_versions_check", sql`${recommendation.contentVersion} >= 1 and ${recommendation.evidenceSetRevision} >= 1`),
     check("knowledge_recommendations_status_check", sql`${recommendation.status} in ('open', 'resolved', 'superseded')`),
@@ -1745,6 +1760,7 @@ export const knowledgeRecommendations = pgTable(
     check("knowledge_recommendations_priority_check", sql`${recommendation.priority} between 1 and 100`),
     check("knowledge_recommendations_policy_snapshot_check", sql`jsonb_typeof(${recommendation.policySnapshot}) = 'object' and octet_length(${recommendation.policySnapshot}::text) <= 1024`),
     check("knowledge_recommendations_executor_system_check", sql`${recommendation.executorSystem} is null or length(btrim(${recommendation.executorSystem})) between 1 and 160`),
+    check("knowledge_recommendations_discovery_mission_action_id_check", sql`${recommendation.discoveryMissionActionId} is null or ${recommendation.discoveryMissionActionId} ~ '^mission-[a-f0-9]{32}$'`),
     check("knowledge_recommendations_resolution_check", sql`${recommendation.resolution} is null or ${recommendation.resolution} in ('published_operator_confirmed', 'published_community_observation', 'suppressed', 'edited_and_requeued', 'relation_resolved', 'sampling_passed', 'sampling_failed')`),
     check("knowledge_recommendations_resolved_shape_check", sql`(${recommendation.status} = 'open' and ${recommendation.resolution} is null and ${recommendation.resolvedByUserId} is null and ${recommendation.resolvedAt} is null) or (${recommendation.status} in ('resolved', 'superseded') and ${recommendation.resolution} is not null and ${recommendation.resolvedAt} is not null)`),
   ],

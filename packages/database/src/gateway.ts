@@ -58,6 +58,7 @@ export type AiGatewayExtractionFailure = {
   model: string;
   latencyMs: number;
   errorCode: "gateway_http_error" | "gateway_network_error" | "invalid_gateway_response" | "client_stream_aborted";
+  failureKind?: "rate_limited" | "other";
   requestMetadata: GatewayRequestMetadata;
 };
 
@@ -113,13 +114,13 @@ export async function streamInitialAiAskAnswer({
     if (!response.ok) {
       logGatewayFailure({ errorCode: "gateway_http_error", latencyMs, model, timeoutMs: gatewayTimeoutMs, status: response.status, statusText: response.statusText });
 
-       return { ok: false, provider: "ai_gateway", model, latencyMs, errorCode: "gateway_http_error", requestMetadata: getGatewayRequestMetadata(response) };
+        return { ok: false, provider: "ai_gateway", model, latencyMs, errorCode: "gateway_http_error", requestMetadata: getGatewayRequestMetadata(response) };
     }
 
     if (!response.body) {
       logGatewayFailure({ errorCode: "invalid_gateway_response", latencyMs, model, timeoutMs: gatewayTimeoutMs, reason: "missing_stream_body" });
 
-       return { ok: false, provider: "ai_gateway", model, latencyMs, errorCode: "invalid_gateway_response", requestMetadata: getGatewayRequestMetadata(response) };
+        return { ok: false, provider: "ai_gateway", model, latencyMs, errorCode: "invalid_gateway_response", requestMetadata: getGatewayRequestMetadata(response) };
     }
 
     const streamResult = await readOpenAiCompatibleStream(response.body, onDelta);
@@ -158,7 +159,7 @@ export async function streamInitialAiAskAnswer({
       reason: gatewayFailureReason(error),
     });
 
-     return { ok: false, provider: "ai_gateway", model, latencyMs, errorCode: "gateway_network_error", requestMetadata: { providerRequestId: null } };
+        return { ok: false, provider: "ai_gateway", model, latencyMs, errorCode: "gateway_network_error", requestMetadata: { providerRequestId: null } };
   } finally {
     if (abortSignal) {
       abortSignal.removeEventListener("abort", onExternalAbort);
@@ -271,7 +272,7 @@ async function completeGatewayPrompt({
     if (!response.ok) {
       logGatewayFailure({ errorCode: "gateway_http_error", latencyMs, model, timeoutMs: gatewayTimeoutMs, status: response.status, statusText: response.statusText, purpose });
 
-       return { ok: false, provider: "ai_gateway", model, latencyMs, errorCode: "gateway_http_error", requestMetadata: getGatewayRequestMetadata(response) };
+        return { ok: false, provider: "ai_gateway", model, latencyMs, errorCode: "gateway_http_error", failureKind: response.status === 429 ? "rate_limited" : "other", requestMetadata: getGatewayRequestMetadata(response) };
     }
 
     const payload = await response.json().catch(() => null) as unknown;
@@ -279,7 +280,7 @@ async function completeGatewayPrompt({
     if (isRecord(payload) && isRecord(payload.error)) {
       logGatewayFailure({ errorCode: "invalid_gateway_response", latencyMs, model, timeoutMs: gatewayTimeoutMs, reason: "provider_error_in_body", purpose });
 
-       return { ok: false, provider: "ai_gateway", model, latencyMs, errorCode: "invalid_gateway_response", requestMetadata: getGatewayRequestMetadata(response) };
+        return { ok: false, provider: "ai_gateway", model, latencyMs, errorCode: "invalid_gateway_response", failureKind: "other", requestMetadata: getGatewayRequestMetadata(response) };
     }
 
     const content = parseCompletionContent(payload);
@@ -287,7 +288,7 @@ async function completeGatewayPrompt({
     if (!content) {
       logGatewayFailure({ errorCode: "invalid_gateway_response", latencyMs, model, timeoutMs: gatewayTimeoutMs, reason: "missing_completion_content", purpose });
 
-       return { ok: false, provider: "ai_gateway", model, latencyMs, errorCode: "invalid_gateway_response", requestMetadata: getGatewayRequestMetadata(response) };
+        return { ok: false, provider: "ai_gateway", model, latencyMs, errorCode: "invalid_gateway_response", failureKind: "other", requestMetadata: getGatewayRequestMetadata(response) };
     }
 
     return {
@@ -305,7 +306,7 @@ async function completeGatewayPrompt({
     if (abortSignal?.aborted) {
       logGatewayFailure({ errorCode: "client_stream_aborted", latencyMs, model, timeoutMs: gatewayTimeoutMs, reason: "client_aborted", purpose });
 
-       return { ok: false, provider: "ai_gateway", model, latencyMs, errorCode: "client_stream_aborted", requestMetadata: { providerRequestId: null } };
+        return { ok: false, provider: "ai_gateway", model, latencyMs, errorCode: "client_stream_aborted", failureKind: "other", requestMetadata: { providerRequestId: null } };
     }
 
     logGatewayFailure({
@@ -317,7 +318,7 @@ async function completeGatewayPrompt({
       purpose,
     });
 
-     return { ok: false, provider: "ai_gateway", model, latencyMs, errorCode: "gateway_network_error", requestMetadata: { providerRequestId: null } };
+     return { ok: false, provider: "ai_gateway", model, latencyMs, errorCode: "gateway_network_error", failureKind: "other", requestMetadata: { providerRequestId: null } };
   } finally {
     if (abortSignal) {
       abortSignal.removeEventListener("abort", onExternalAbort);

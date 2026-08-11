@@ -20,7 +20,7 @@ describe("admin YouTube Discovery review UI boundary", () => {
     const source = await readFile("apps/admin/app/knowledge/youtube-discovery-review/review.tsx", "utf8");
     expect(source).toContain('credentials: "include"');
     expect(source).toContain('cache: "no-store"');
-    expect(source).toContain('if (initial && queue.items[0] && selectedId.current === null && selectionAtStart === selectionGeneration.current) choose(queue.items[0], preserveStatus);');
+    expect(source).toContain('if (initial && queue.items[0] && !requestedRecommendationId && selectedId.current === null && selectionAtStart === selectionGeneration.current) choose(queue.items[0], preserveStatus);');
     expect(source).toContain('onClick={() => choose(item)}');
     expect(source).toContain('const detailRequestId = useRef(0)');
     expect(source).toContain('const decisionRequestId = useRef(0)');
@@ -85,10 +85,34 @@ describe("admin YouTube Discovery review UI boundary", () => {
     expect(source).toContain('</div></div> : <p className="mt-4 text-slate-600">Chọn một ứng viên để xem chi tiết.</p>}{needsDecisionRefresh ?');
     expect(source).toContain('disabled={isAccepting || isDeciding || isReconciling}');
     expect(source).not.toMatch(/youtube:capture|capture\//);
+    expect(source).toContain('const requestedRecommendationId = validRecommendationId(searchParams.get("recommendationId"))');
+    expect(source).toContain('if (initial && queue.items[0] && !requestedRecommendationId');
+    expect(source).toContain('async function admitDeepLink(recommendationId: string)');
+    expect(source).toContain('if (!response.ok || !parsed || requestId !== detailRequestId.current) throw new Error("unavailable");');
+    expect(source).toContain('Ứng viên trong liên kết không còn khả dụng.');
   });
 
   test("includes the Discovery review route in the admin shell navigation", async () => {
     const source = await readFile("apps/admin/app/admin-access-gate.tsx", "utf8");
-    expect(source).toContain('{ href: "/knowledge/youtube-discovery-review", label: "Xem xét khám phá YouTube", eyebrow: "Discovery" }');
+    expect(source).toContain('{ href: "/knowledge/youtube-discovery", label: "Việc cần xử lý Discovery", eyebrow: "Discovery" }');
+  });
+
+  test("validates opaque Mission and Health action IDs before rendering them", async () => {
+    const [mission, health] = await Promise.all([
+      readFile("apps/admin/app/knowledge/youtube-discovery/mission/[actionId]/page.tsx", "utf8"),
+      readFile("apps/admin/app/knowledge/youtube-discovery/health/[actionId]/page.tsx", "utf8"),
+    ]);
+    expect(mission).toContain('/^mission-[a-f0-9]{32}$/.test(actionId)');
+    expect(mission).toContain("Nhu cầu trong liên kết không khả dụng.");
+    expect(health).toContain('/^[a-f0-9-]{36}:(provider_rate_limited|triage_schema_invalid|execution_terminal)$/.test(actionId)');
+    expect(health).toContain("Sự cố trong liên kết không khả dụng.");
+  });
+
+  test("renders action queue copy from closed local codes without adapter labels", async () => {
+    const source = await readFile("apps/admin/app/knowledge/youtube-discovery/queue.tsx", "utf8");
+    expect(source).toContain('mission_no_enabled_query: "Chưa có truy vấn đang bật"');
+    for (const reason of ["review_pending", "review_aged", "mission_no_progress", "mission_disabled", "mission_no_enabled_query", "provider_rate_limited", "triage_schema_invalid", "execution_persistent_failure", "knowledge_risk", "knowledge_relation"]) expect(source).toContain(reason);
+    expect(source).toContain("{reasonCopy[item.reason]}");
+    expect(source).not.toContain("item.label");
   });
 });

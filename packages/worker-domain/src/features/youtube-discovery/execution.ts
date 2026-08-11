@@ -5,6 +5,7 @@ import { searchYoutubeVideos } from "./youtube-search";
 import { enrichYoutubeVideo } from "./youtube-enrichment";
 
 type DiscoveryStageResult = "complete" | "cancelled" | "stage_transient";
+type DiscoveryIncidentCategory = "provider_rate_limited" | "triage_schema_invalid";
 const planningPortTimeoutMs = 1_000;
 // Keep external work comfortably inside the active five-minute run lease.
 const executionStageTimeoutMs = 240_000;
@@ -35,6 +36,7 @@ export async function runYoutubeDiscoveryPoll(workerId: string): Promise<WorkerP
   const active = await cancelYoutubeDiscoveryRunIfDisabled(claim.claim);
   if (active !== "active") return observationFor(claim.claim, active === "cancelled" ? "success" : "contended");
   let stageResult: DiscoveryStageResult;
+  let incidentCategory: DiscoveryIncidentCategory | null = null;
   try {
     // The test seam exercises generic lease mechanics only; real provider work
     // must first read an enabled proposal through the fenced query accessor.
@@ -72,7 +74,11 @@ export async function runYoutubeDiscoveryPoll(workerId: string): Promise<WorkerP
                 if (stored !== "completed") throw new Error("youtube_enrichment_contended");
                 const triage = await runYoutubeDiscoveryTriage(activeClaim, candidate.videoId, controller.signal, executionDeadlineAt);
                 if (triage === "cancelled") return observationFor(activeClaim, "success");
-                if (triage !== "completed") throw new Error(triage === "deadline_exhausted" ? "youtube_triage_deadline_exhausted" : triage === "retry" ? "youtube_triage_transient" : "youtube_triage_contended");
+                if (triage !== "completed") {
+                  if (triage === "schema_invalid") incidentCategory = "triage_schema_invalid";
+                  else if (triage === "rate_limited") incidentCategory = "provider_rate_limited";
+                  throw new Error(triage === "deadline_exhausted" ? "youtube_triage_deadline_exhausted" : triage === "retry" ? "youtube_triage_transient" : "youtube_triage_contended");
+                }
                 // Check durable idempotency before crossing the opaque owner-port boundary.
                 const bundle = await getYoutubeDiscoveryRecommendationBundle(activeClaim, candidate.videoId);
                 if (bundle === "completed") continue;
@@ -100,7 +106,7 @@ export async function runYoutubeDiscoveryPoll(workerId: string): Promise<WorkerP
     stageResult = error instanceof Error && error.message === "youtube_enrichment_cancelled" ? "cancelled" : "stage_transient";
   }
   if (stageResult === "cancelled") return observationFor(claim.claim, "success");
-  const disposition = stageResult === "complete" ? await finishYoutubeDiscoveryRun(claim.claim) : await retryYoutubeDiscoveryRun(claim.claim);
+  const disposition = stageResult === "complete" ? await finishYoutubeDiscoveryRun(claim.claim) : await retryYoutubeDiscoveryRun(claim.claim, incidentCategory);
   return observationFor(claim.claim, disposition === "completed" ? "success" : disposition === "retrying" ? "retry" : disposition === "failed" ? "failure" : disposition === "cancelled" ? "success" : "contended");
 }
 
@@ -110,7 +116,7 @@ async function runYoutubeDiscoveryRecommendation(claim: NonNullable<Awaited<Retu
   return persisted;
 }
 
-async function runYoutubeDiscoveryTriage(claim: NonNullable<Awaited<ReturnType<typeof claimNextYoutubeDiscoveryRun>>["claim"]>, videoId: string, signal: AbortSignal, executionDeadlineAt: number): Promise<"completed" | "cancelled" | "contended" | "deadline_exhausted" | "retry"> {
+async function runYoutubeDiscoveryTriage(claim: NonNullable<Awaited<ReturnType<typeof claimNextYoutubeDiscoveryRun>>["claim"]>, videoId: string, signal: AbortSignal, executionDeadlineAt: number): Promise<"completed" | "cancelled" | "contended" | "deadline_exhausted" | "retry" | "rate_limited" | "schema_invalid"> {
   if ((await cancelYoutubeDiscoveryRunIfDisabled(claim, undefined, true)) !== "active") return "cancelled";
   const bundle = await getYoutubeDiscoveryTriageBundle(claim, videoId);
   if (bundle === "succeeded") return "completed";
@@ -139,12 +145,12 @@ async function runYoutubeDiscoveryTriage(claim: NonNullable<Awaited<ReturnType<t
   }
   if (!response.ok) {
     const persisted = await persistYoutubeDiscoveryTriage(claim, { candidateId: bundle.candidateId, status: "gateway_failed", model, provider: response.provider, modelName: response.model, latencyMs: response.latencyMs, errorCode: response.errorCode, providerRequestId: response.requestMetadata.providerRequestId });
-    return persisted === "completed" ? "retry" : persisted;
+    return persisted === "completed" ? response.failureKind === "rate_limited" ? "rate_limited" : "retry" : persisted;
   }
   let parsed: unknown = null; try { parsed = JSON.parse(response.content); } catch { /* invalid output is deliberately not retained */ }
   const assessment = parseYoutubeDiscoveryTriageAssessment(parsed, bundle.signals.map((signal) => signal.signal));
   const persisted = await persistYoutubeDiscoveryTriage(claim, assessment ? { candidateId: bundle.candidateId, status: "succeeded", assessment, model, provider: response.provider, modelName: response.model, latencyMs: response.latencyMs, ...response.usage, providerRequestId: response.requestMetadata.providerRequestId } : { candidateId: bundle.candidateId, status: "invalid_output", model, provider: response.provider, modelName: response.model, latencyMs: response.latencyMs, errorCode: "invalid_output", ...response.usage, providerRequestId: response.requestMetadata.providerRequestId });
-  return !assessment && persisted === "completed" ? "retry" : persisted;
+  return !assessment && persisted === "completed" ? "schema_invalid" : persisted;
 }
 
 async function runYoutubeDiscoveryExecutionStage(claim: NonNullable<Awaited<ReturnType<typeof claimNextYoutubeDiscoveryRun>>["claim"]>, queryText: string, signal: AbortSignal) {

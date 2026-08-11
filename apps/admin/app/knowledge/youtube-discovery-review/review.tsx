@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { parseAdminYoutubeDiscoveryAcceptReviewResult, parseAdminYoutubeDiscoveryDeferReviewResult, parseAdminYoutubeDiscoveryReviewDetail, parseAdminYoutubeDiscoveryReviewQueue, parseAdminYoutubeDiscoverySkipReviewResult, type AdminYoutubeDiscoveryReviewDetail, type AdminYoutubeDiscoveryReviewQueueItem } from "@xuyenviet/contracts";
 import { youtubeDiscoveryReviewCopy } from "./review-copy";
 
@@ -12,6 +13,8 @@ function origin() { const value = process.env.NEXT_PUBLIC_API_ORIGIN; if (!value
 function signIn() { window.location.assign(`${origin()}/auth/google?${new URLSearchParams({ returnUrl: `${window.location.origin}/knowledge/youtube-discovery-review` })}`); }
 
 export function YoutubeDiscoveryReview() {
+  const searchParams = useSearchParams();
+  const requestedRecommendationId = validRecommendationId(searchParams.get("recommendationId")) ? searchParams.get("recommendationId") : null;
   const [items, setItems] = useState<AdminYoutubeDiscoveryReviewQueueItem[]>([]);
   const [cursor, setCursor] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
@@ -58,7 +61,7 @@ export function YoutubeDiscoveryReview() {
       if (generation !== queueGeneration.current) return;
       setItems((current) => initial ? queue.items : [...current, ...queue.items.filter((item) => !new Set(current.map(({ recommendationId }) => recommendationId)).has(item.recommendationId))]);
       setCursor(queue.nextCursor);
-      if (initial && queue.items[0] && selectedId.current === null && selectionAtStart === selectionGeneration.current) choose(queue.items[0], preserveStatus);
+      if (initial && queue.items[0] && !requestedRecommendationId && selectedId.current === null && selectionAtStart === selectionGeneration.current) choose(queue.items[0], preserveStatus);
       if (!preserveStatus) setStatus(queue.items.length ? `Đã tải ${queue.items.length} mục xem xét.` : "Không còn ứng viên cần xem xét.");
       return queue;
     } finally { if (!initial) { loadingMore.current = false; setIsLoadingMore(false); } }
@@ -79,8 +82,20 @@ export function YoutubeDiscoveryReview() {
       setStatus("Không thể tải chi tiết ứng viên.");
     }
   }
+  async function admitDeepLink(recommendationId: string) {
+    const requestId = ++detailRequestId.current;
+    try {
+      const { response, body } = await request(`/v1/admin/knowledge/youtube-discovery/review/${encodeURIComponent(recommendationId)}`);
+      const parsed = parseAdminYoutubeDiscoveryReviewDetail(body);
+      if (!response.ok || !parsed || requestId !== detailRequestId.current) throw new Error("unavailable");
+      decisionRequestId.current += 1; selectionGeneration.current += 1; selectedId.current = recommendationId;
+      setSelected(recommendationId); setDetail(parsed); setIsReconciling(parsed.actionAvailability === "reconciling"); setStatus(`Đã chọn ${parsed.title ?? "ứng viên không có tiêu đề"}.`);
+    } catch { if (requestId === detailRequestId.current) setStatus("Ứng viên trong liên kết không còn khả dụng."); }
+  }
   useEffect(() => { void load(null, true).catch(() => setStatus("Không thể tải hàng đợi xem xét.")); // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  useEffect(() => { if (requestedRecommendationId) void admitDeepLink(requestedRecommendationId); // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [requestedRecommendationId]);
   useEffect(() => { if (showDetail) detailHeading.current?.focus(); }, [showDetail]);
   useEffect(() => {
     if (showDetail) return;
@@ -163,3 +178,5 @@ export function YoutubeDiscoveryReview() {
   const inspector = <section aria-labelledby="candidate-detail" className="min-w-0 rounded-xl border p-4"><button className="mb-4 min-h-11 rounded border px-4 font-semibold lg:hidden" disabled={isAccepting || isDeciding} onClick={returnToQueue} type="button">Quay lại hàng đợi</button><h2 id="candidate-detail" ref={detailHeading} tabIndex={-1} className="text-xl font-bold outline-none">Chi tiết ứng viên</h2>{detail ? <div className="mt-4 grid gap-4"><dl className="grid gap-3"><div><dt className="font-semibold">URL chuẩn</dt><dd className="break-all">{detail.canonicalUrl}</dd></div><div><dt className="font-semibold">Truy vấn khám phá</dt><dd>{detail.queryText}</dd><dd className="text-sm text-slate-600">{youtubeDiscoveryReviewCopy.queryReason[detail.queryReason]}</dd></div><div><dt className="font-semibold">Lý do xếp hạng</dt><dd>{youtubeDiscoveryReviewCopy.reason[detail.reason]}</dd></div><div><dt className="font-semibold">Kết quả thu thập trước</dt><dd>{capture[detail.priorCaptureOutcome]}</dd></div></dl><div><p className="font-semibold">Yếu tố và lưu ý</p><div className="mt-2 flex flex-wrap gap-2">{[...detail.factors, ...detail.penalties].map((code) => <span className="rounded-full border px-3 py-1 text-sm" key={code}>{factors[code]}</span>)}</div></div><div><p className="font-semibold">Tín hiệu dẫn xuất</p><div className="mt-2 flex flex-wrap gap-2">{detail.signals.map((signal) => <span className="rounded-full border px-3 py-1 text-sm" key={signal}>{signals[signal]}</span>)}</div></div><p aria-live="polite" className="text-sm text-slate-600">{isReconciling || detail.actionAvailability === "reconciling" ? youtubeDiscoveryReviewCopy.accept.reconciling : "Chọn một quyết định cho ứng viên này."}</p><div className="flex flex-wrap gap-3"><button className="min-h-11 rounded bg-emerald-800 px-4 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60" disabled={actionsDisabled} onClick={() => void accept()} type="button">{isAccepting ? "Đang chấp nhận..." : "Chấp nhận"}</button><button className="min-h-11 rounded border px-4 font-semibold disabled:cursor-not-allowed disabled:opacity-60" disabled={actionsDisabled} onClick={() => void terminalDecision("defer")} type="button">{isDeciding ? "Đang xử lý..." : "Để sau"}</button><button className="min-h-11 rounded border px-4 font-semibold disabled:cursor-not-allowed disabled:opacity-60" disabled={actionsDisabled} onClick={() => void terminalDecision("skip")} type="button">{isDeciding ? "Đang xử lý..." : "Bỏ qua"}</button></div></div> : <p className="mt-4 text-slate-600">Chọn một ứng viên để xem chi tiết.</p>}{needsDecisionRefresh ? <button className="mt-4 min-h-11 rounded border px-4 font-semibold" onClick={() => void retryDecisionRefresh()} type="button">Làm mới trạng thái quyết định</button> : null}</section>;
   return <main className="mx-auto max-w-7xl p-4 text-slate-900 sm:p-8"><header><p className="text-sm font-semibold text-emerald-800">YOUTUBE DISCOVERY</p><h1 className="mt-2 text-3xl font-bold">Xem xét ứng viên</h1><p className="mt-3 text-slate-600">Xếp hạng là ngữ cảnh vận hành, không xác nhận nội dung, thu thập hay xuất bản.</p></header><p aria-live="polite" className="mt-4" role="status">{status}</p><div className="mt-6 lg:grid lg:grid-cols-[minmax(18rem,0.8fr)_minmax(0,1.2fr)] lg:gap-6"><div className={showDetail ? "hidden lg:block" : "block"}>{queue}</div><div className={showDetail ? "block" : "hidden lg:block"}>{inspector}</div></div></main>;
 }
+
+function validRecommendationId(value: string | null): value is string { return value !== null && /^[A-Za-z0-9_-]{1,128}$/.test(value); }

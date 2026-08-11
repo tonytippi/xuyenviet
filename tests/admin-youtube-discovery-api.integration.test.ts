@@ -29,7 +29,7 @@ async function browserSession(userId: string, role: "operator" | "traveler") {
 
 beforeEach(async () => {
   await resetTestDatabase();
-  port = { list: vi.fn().mockResolvedValue({ items: [query] }), listReview: vi.fn().mockResolvedValue({ items: [], nextCursor: null }), getReview: vi.fn().mockResolvedValue(null), acceptReview: vi.fn().mockResolvedValue({ outcome: "submitted" }), deferReview: vi.fn().mockResolvedValue({ outcome: "deferred" }), skipReview: vi.fn().mockResolvedValue({ outcome: "skipped" }), create: vi.fn().mockResolvedValue(query), edit: vi.fn().mockResolvedValue(query), reprioritize: vi.fn().mockResolvedValue(query), pause: vi.fn().mockResolvedValue({ ...query, enabled: false, nextRunAt: null, pausedReason: "operator" }), resume: vi.fn().mockResolvedValue(query) };
+  port = { list: vi.fn().mockResolvedValue({ items: [query] }), listReview: vi.fn().mockResolvedValue({ items: [], nextCursor: null }), listActionRequired: vi.fn().mockResolvedValue({ items: [], nextCursor: null }), getReview: vi.fn().mockResolvedValue(null), acceptReview: vi.fn().mockResolvedValue({ outcome: "submitted" }), deferReview: vi.fn().mockResolvedValue({ outcome: "deferred" }), skipReview: vi.fn().mockResolvedValue({ outcome: "skipped" }), create: vi.fn().mockResolvedValue(query), edit: vi.fn().mockResolvedValue(query), reprioritize: vi.fn().mockResolvedValue(query), pause: vi.fn().mockResolvedValue({ ...query, enabled: false, nextRunAt: null, pausedReason: "operator" }), resume: vi.fn().mockResolvedValue(query) };
   const identities = createPostgresApiIdentityRepository(getTestDatabaseUrl(), browserAuth.sessionLookupKey, browserAuth.oauthTransactionProtectionKey);
   const ApiModule = createApiModule(identities, { conversationSummaries: { async listOwnedConversationSummaryRows() { return []; } }, browserAuth, adminYoutubeDiscovery: port as unknown as AdminYoutubeDiscoveryPort });
   @Module({ imports: [ApiModule] }) class TestModule {}
@@ -108,6 +108,21 @@ describe("admin YouTube Discovery direct API", () => {
     await request(app.getHttpServer()).get("/v1/admin/knowledge/youtube-discovery/review/recommendation-1").set({ Cookie: operator.cookie }).expect(200, reviewDetail);
     expect(port.listReview).toHaveBeenCalledWith(expect.objectContaining({ userId: "operator" }), null);
     expect(port.getReview).toHaveBeenCalledWith(expect.objectContaining({ userId: "operator" }), "recommendation-1");
+  });
+
+  test("admits the protected action-required queue and rejects malformed cursors before admission", async () => {
+    const operator = await browserSession("operator", "operator");
+    await request(app.getHttpServer()).get("/v1/admin/knowledge/youtube-discovery/action-required").set({ Cookie: operator.cookie }).expect(200, { items: [], nextCursor: null });
+    expect(port.listActionRequired).toHaveBeenCalledWith(expect.objectContaining({ userId: "operator" }), null);
+    await request(app.getHttpServer()).get("/v1/admin/knowledge/youtube-discovery/action-required?cursor=bad").set({ Cookie: operator.cookie }).expect(400).expect(({ body }) => expect(body).toMatchObject({ code: "validation_error" }));
+    expect(port.listActionRequired).toHaveBeenCalledOnce();
+  });
+
+  test("denies anonymous and traveler action-required reads before port admission", async () => {
+    await request(app.getHttpServer()).get("/v1/admin/knowledge/youtube-discovery/action-required").expect(401);
+    const traveler = await browserSession("traveler", "traveler");
+    await request(app.getHttpServer()).get("/v1/admin/knowledge/youtube-discovery/action-required").set({ Cookie: traveler.cookie }).expect(403);
+    expect(port.listActionRequired).not.toHaveBeenCalled();
   });
 
   test("admits only an exact CSRF-protected Accept command and returns its closed outcome", async () => {

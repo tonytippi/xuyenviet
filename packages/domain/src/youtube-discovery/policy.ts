@@ -16,6 +16,11 @@ export type YoutubeDiscoveryPolicy = Readonly<{
   maxConcurrentRuns: number;
   maxRetryAttempts: number;
   retryDelayMinutes: number;
+  actionQueueHighPriorityMaximum: number;
+  actionQueueMaximumOperatorReviewAgeHours: number;
+  actionQueueMaximumMissionStallHours: number;
+  actionQueuePersistentIncidentFailureCount: number;
+  actionQueuePersistentIncidentWindowHours: number;
 }>;
 
 export const defaultYoutubeDiscoveryPolicy: YoutubeDiscoveryPolicy = Object.freeze({
@@ -36,6 +41,11 @@ export const defaultYoutubeDiscoveryPolicy: YoutubeDiscoveryPolicy = Object.free
   maxConcurrentRuns: 1,
   maxRetryAttempts: 3,
   retryDelayMinutes: 15,
+  actionQueueHighPriorityMaximum: 20,
+  actionQueueMaximumOperatorReviewAgeHours: 72,
+  actionQueueMaximumMissionStallHours: 48,
+  actionQueuePersistentIncidentFailureCount: 2,
+  actionQueuePersistentIncidentWindowHours: 24,
 });
 
 export class YoutubeDiscoveryPolicyValidationError extends Error {
@@ -50,7 +60,7 @@ export function parseYoutubeDiscoveryPolicy(input: unknown): YoutubeDiscoveryPol
     throw new YoutubeDiscoveryPolicyValidationError();
   }
   const policy = { ...defaultYoutubeDiscoveryPolicy, ...input };
-  if (typeof policy.enabled !== "boolean" || !score(policy.minimumCandidateScore) || !score(policy.priorityScoreWeight) || !score(policy.freshnessScoreWeight) || !rankingPolicy(policy) || !integerBetween(policy.cadenceMinutes, 15, 10_080) || !integerBetween(policy.retentionDays, 1, 365) || !integerBetween(policy.commentSignalTtlDays, 1, policy.retentionDays - 1) || !integerBetween(policy.maxConcurrentRuns, 1, 20) || !integerBetween(policy.maxRetryAttempts, 0, 10) || !integerBetween(policy.retryDelayMinutes, 1, 1_440)) {
+  if (typeof policy.enabled !== "boolean" || !score(policy.minimumCandidateScore) || !score(policy.priorityScoreWeight) || !score(policy.freshnessScoreWeight) || !rankingPolicy(policy) || !integerBetween(policy.cadenceMinutes, 15, 10_080) || !integerBetween(policy.retentionDays, 1, 365) || !integerBetween(policy.commentSignalTtlDays, 1, policy.retentionDays - 1) || !integerBetween(policy.maxConcurrentRuns, 1, 20) || !integerBetween(policy.maxRetryAttempts, 0, 10) || !integerBetween(policy.retryDelayMinutes, 1, 1_440) || !integerBetween(policy.actionQueueHighPriorityMaximum, 1, 100) || !integerBetween(policy.actionQueueMaximumOperatorReviewAgeHours, 1, 720) || !integerBetween(policy.actionQueueMaximumMissionStallHours, 1, 720) || !integerBetween(policy.actionQueuePersistentIncidentFailureCount, 2, 10) || !integerBetween(policy.actionQueuePersistentIncidentWindowHours, 1, 168)) {
     throw new YoutubeDiscoveryPolicyValidationError();
   }
   return Object.freeze(policy);

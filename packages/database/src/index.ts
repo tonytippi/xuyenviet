@@ -34,6 +34,7 @@ export * from "./knowledge-lifecycle";
 export * from "./knowledge-corridor";
 export * from "./knowledge-draft-review";
 export * from "./knowledge-discovery-signals";
+export * from "./knowledge-discovery-action-inputs";
 export * from "./knowledge-youtube-capture-eligibility";
 export * from "./knowledge-readiness-evidence";
 export * from "./knowledge-recommendations";

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { encodeAdminYoutubeDiscoveryReviewCursor, parseAdminYoutubeDiscoveryAcceptCommand, parseAdminYoutubeDiscoveryAcceptReviewResult, parseAdminYoutubeDiscoveryDeferCommand, parseAdminYoutubeDiscoveryDeferReviewResult, parseAdminYoutubeDiscoveryQuery, parseAdminYoutubeDiscoveryQueryList, parseAdminYoutubeDiscoveryReviewCursor, parseAdminYoutubeDiscoveryReviewDetail, parseAdminYoutubeDiscoveryReviewQueue, parseAdminYoutubeDiscoverySkipCommand, parseAdminYoutubeDiscoverySkipReviewResult } from "@xuyenviet/contracts";
+import { encodeAdminYoutubeDiscoveryActionRequiredCursor, encodeAdminYoutubeDiscoveryReviewCursor, parseAdminYoutubeDiscoveryAcceptCommand, parseAdminYoutubeDiscoveryAcceptReviewResult, parseAdminYoutubeDiscoveryActionRequiredCursor, parseAdminYoutubeDiscoveryActionRequiredQueue, parseAdminYoutubeDiscoveryDeferCommand, parseAdminYoutubeDiscoveryDeferReviewResult, parseAdminYoutubeDiscoveryQuery, parseAdminYoutubeDiscoveryQueryList, parseAdminYoutubeDiscoveryReviewCursor, parseAdminYoutubeDiscoveryReviewDetail, parseAdminYoutubeDiscoveryReviewQueue, parseAdminYoutubeDiscoverySkipCommand, parseAdminYoutubeDiscoverySkipReviewResult } from "@xuyenviet/contracts";
 
 const query = { id: "proposal-1", origin: "operator" as const, queryText: "Da Lat route", reason: "operator_request" as const, priority: 50, enabled: true, cadenceMinutes: 60, nextRunAt: "2026-08-07T00:00:00.000Z", pausedReason: null };
 
@@ -54,5 +54,30 @@ describe("admin YouTube Discovery contract", () => {
     expect(parseAdminYoutubeDiscoveryDeferReviewResult({ outcome: "skipped" })).toBeNull();
     expect(parseAdminYoutubeDiscoverySkipReviewResult({ outcome: "skipped" })).toEqual({ outcome: "skipped" });
     expect(parseAdminYoutubeDiscoverySkipReviewResult({ outcome: "deferred", audit: {} })).toBeNull();
+  });
+
+  test("requires exact bounded action-required projections and versioned cursors", () => {
+    const item = { kind: "health_incident" as const, actionId: "query-1:provider_rate_limited", destination: "health" as const, reason: "provider_rate_limited" as const, priority: 1, occurredAt: "2026-08-07T00:00:00.000Z" };
+    const cursor = encodeAdminYoutubeDiscoveryActionRequiredCursor({ version: 1, urgency: 0, priority: 1, occurredAt: item.occurredAt, kind: item.kind, actionId: item.actionId });
+    expect(parseAdminYoutubeDiscoveryActionRequiredCursor(cursor)).toEqual({ version: 1, urgency: 0, priority: 1, occurredAt: item.occurredAt, kind: item.kind, actionId: item.actionId });
+    expect(parseAdminYoutubeDiscoveryActionRequiredCursor("yda2.bad")).toBeNull();
+    expect(parseAdminYoutubeDiscoveryActionRequiredQueue({ items: [item], nextCursor: cursor })).not.toBeNull();
+    expect(parseAdminYoutubeDiscoveryActionRequiredQueue({ items: [{ ...item, providerPayload: {} }], nextCursor: null })).toBeNull();
+    expect(parseAdminYoutubeDiscoveryActionRequiredQueue({ items: [{ ...item, label: "provider/source/Knowledge text" }], nextCursor: null })).toBeNull();
+    expect(parseAdminYoutubeDiscoveryActionRequiredQueue({ items: [{ ...item, reason: "retry_exhausted" }], nextCursor: null })).toBeNull();
+    expect(parseAdminYoutubeDiscoveryActionRequiredQueue({ items: [{ ...item, kind: "mission_need", destination: "health", reason: "provider_rate_limited" }], nextCursor: null })).toBeNull();
+    expect(parseAdminYoutubeDiscoveryActionRequiredQueue({ items: [{ ...item, kind: "candidate_review", destination: "review", reason: "knowledge_risk" }], nextCursor: null })).toBeNull();
+    expect(parseAdminYoutubeDiscoveryActionRequiredQueue({ items: [
+      { kind: "candidate_review", actionId: "candidate-1", destination: "review", reason: "review_pending", priority: 1, occurredAt: item.occurredAt },
+      { kind: "candidate_review", actionId: "candidate-2", destination: "review", reason: "review_aged", priority: 1, occurredAt: item.occurredAt },
+      { kind: "mission_need", actionId: "mission-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", destination: "mission", reason: "mission_no_progress", priority: 1, occurredAt: item.occurredAt },
+      { kind: "mission_need", actionId: "mission-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", destination: "mission", reason: "mission_disabled", priority: 1, occurredAt: item.occurredAt },
+      { kind: "mission_need", actionId: "mission-cccccccccccccccccccccccccccccccc", destination: "mission", reason: "mission_no_enabled_query", priority: 1, occurredAt: item.occurredAt },
+      item,
+      { kind: "health_incident", actionId: "query-1:triage_schema_invalid", destination: "health", reason: "triage_schema_invalid", priority: 1, occurredAt: item.occurredAt },
+      { kind: "health_incident", actionId: "query-1:execution_terminal", destination: "health", reason: "execution_persistent_failure", priority: 1, occurredAt: item.occurredAt },
+      { kind: "knowledge_recommendation", actionId: "knowledge-risk", destination: "knowledge_recommendation", reason: "knowledge_risk", priority: 1, occurredAt: item.occurredAt },
+      { kind: "knowledge_recommendation", actionId: "knowledge-relation", destination: "knowledge_recommendation", reason: "knowledge_relation", priority: 1, occurredAt: item.occurredAt },
+    ], nextCursor: null })).not.toBeNull();
   });
 });

@@ -17,6 +17,11 @@ export type YoutubeDiscoveryPolicyAuditSummary = Readonly<{
   maxConcurrentRuns: number;
   maxRetryAttempts: number;
   retryDelayMinutes: number;
+  actionQueueHighPriorityMaximum: number;
+  actionQueueMaximumOperatorReviewAgeHours: number;
+  actionQueueMaximumMissionStallHours: number;
+  actionQueuePersistentIncidentFailureCount: number;
+  actionQueuePersistentIncidentWindowHours: number;
 }>;
 
 export type YoutubeDiscoveryQueryProposalAuditSummary = Readonly<{
@@ -108,6 +113,37 @@ export function parseAdminYoutubeDiscoveryReviewDetail(value: unknown): AdminYou
   return safeQueryText(value.queryText) && ["coverage_gap", "freshness_risk", "unresolved_conflict", "anonymized_demand", "operator_request"].includes(value.queryReason as string) && finiteScore(value.score) && codes(value.factors, ["relevance", "expected_value", "freshness_fit"], 3) && codes(value.penalties, ["commercial_risk", "duplicate_risk"], 2) && (value.factors as unknown[]).length + (value.penalties as unknown[]).length <= 5 && codes(value.signals, ["recent_discussion", "stale_or_changed_warning", "practical_question_demand", "creator_responsiveness", "commercial_risk", "contradictory_discussion"], 6) && (value.priorCaptureOutcome === "eligible" || value.priorCaptureOutcome === "already_compatible" || value.priorCaptureOutcome === "unavailable") ? value as AdminYoutubeDiscoveryReviewDetail : null;
 }
 
+export const adminYoutubeDiscoveryActionRequiredPageSize = 20;
+export type AdminYoutubeDiscoveryActionRequiredKind = "candidate_review" | "mission_need" | "health_incident" | "knowledge_recommendation";
+type AdminYoutubeDiscoveryActionRequiredBase = Readonly<{ actionId: string; priority: number; occurredAt: string }>;
+export type AdminYoutubeDiscoveryActionRequiredItem =
+  | Readonly<AdminYoutubeDiscoveryActionRequiredBase & { kind: "candidate_review"; destination: "review"; reason: "review_pending" | "review_aged" }>
+  | Readonly<AdminYoutubeDiscoveryActionRequiredBase & { kind: "mission_need"; destination: "mission"; reason: "mission_no_progress" | "mission_disabled" | "mission_no_enabled_query" }>
+  | Readonly<AdminYoutubeDiscoveryActionRequiredBase & { kind: "health_incident"; destination: "health"; reason: "provider_rate_limited" | "triage_schema_invalid" | "execution_persistent_failure" }>
+  | Readonly<AdminYoutubeDiscoveryActionRequiredBase & { kind: "knowledge_recommendation"; destination: "knowledge_recommendation"; reason: "knowledge_risk" | "knowledge_relation" }>;
+export type AdminYoutubeDiscoveryActionRequiredCursor = Readonly<{ version: 1; urgency: number; priority: number; occurredAt: string; kind: AdminYoutubeDiscoveryActionRequiredKind; actionId: string }>;
+export type AdminYoutubeDiscoveryActionRequiredQueue = Readonly<{ items: AdminYoutubeDiscoveryActionRequiredItem[]; nextCursor: string | null }>;
+
+export function encodeAdminYoutubeDiscoveryActionRequiredCursor(cursor: AdminYoutubeDiscoveryActionRequiredCursor): string {
+  if (!actionCursor(cursor)) throw new Error("Invalid YouTube Discovery action-required cursor.");
+  return `yda1.${btoa(JSON.stringify(cursor)).replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "")}`;
+}
+export function parseAdminYoutubeDiscoveryActionRequiredCursor(value: unknown): AdminYoutubeDiscoveryActionRequiredCursor | null {
+  if (typeof value !== "string" || !/^yda1\.[A-Za-z0-9_-]{1,512}$/.test(value)) return null;
+  try { const encoded = value.slice(5).replaceAll("-", "+").replaceAll("_", "/"); const parsed: unknown = JSON.parse(atob(encoded + "=".repeat((4 - encoded.length % 4) % 4))); return actionCursor(parsed) ? parsed : null; } catch { return null; }
+}
+export function parseAdminYoutubeDiscoveryActionRequiredItem(value: unknown): AdminYoutubeDiscoveryActionRequiredItem | null {
+  if (!record(value) || !exactKeys(value, ["kind", "actionId", "destination", "reason", "priority", "occurredAt"])) return null;
+  const combination = (value.kind === "candidate_review" && value.destination === "review" && (value.reason === "review_pending" || value.reason === "review_aged"))
+    || (value.kind === "mission_need" && value.destination === "mission" && (value.reason === "mission_no_progress" || value.reason === "mission_disabled" || value.reason === "mission_no_enabled_query"))
+    || (value.kind === "health_incident" && value.destination === "health" && (value.reason === "provider_rate_limited" || value.reason === "triage_schema_invalid" || value.reason === "execution_persistent_failure"))
+    || (value.kind === "knowledge_recommendation" && value.destination === "knowledge_recommendation" && (value.reason === "knowledge_risk" || value.reason === "knowledge_relation"));
+  return combination && identifier(value.actionId) && Number.isSafeInteger(value.priority) && (value.priority as number) >= 1 && (value.priority as number) <= 100 && isoTimestamp(value.occurredAt) ? value as AdminYoutubeDiscoveryActionRequiredItem : null;
+}
+export function parseAdminYoutubeDiscoveryActionRequiredQueue(value: unknown): AdminYoutubeDiscoveryActionRequiredQueue | null {
+  return record(value) && exactKeys(value, ["items", "nextCursor"]) && Array.isArray(value.items) && value.items.length <= adminYoutubeDiscoveryActionRequiredPageSize && value.items.every((item) => parseAdminYoutubeDiscoveryActionRequiredItem(item) !== null) && (value.nextCursor === null || parseAdminYoutubeDiscoveryActionRequiredCursor(value.nextCursor) !== null) ? value as AdminYoutubeDiscoveryActionRequiredQueue : null;
+}
+
 function record(value: unknown): value is Record<string, unknown> { return typeof value === "object" && value !== null && !Array.isArray(value); }
 function exactKeys(value: Record<string, unknown>, keys: string[]) { return Object.keys(value).length === keys.length && keys.every((key) => key in value); }
 function identifier(value: unknown): value is string { return typeof value === "string" && value.trim() === value && value.length > 0 && value.length <= 128; }
@@ -119,3 +155,4 @@ function canonicalUrl(value: unknown): boolean { return typeof value === "string
 function finiteScore(value: unknown): boolean { return typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 1; }
 function codes(value: unknown, allowed: readonly string[], maximum: number): boolean { return Array.isArray(value) && value.length <= maximum && value.every((code) => typeof code === "string" && allowed.includes(code)) && new Set(value).size === value.length; }
 function reviewCursor(value: unknown): value is AdminYoutubeDiscoveryReviewCursor { return record(value) && exactKeys(value, ["score", "createdAt", "recommendationId"]) && finiteScore(value.score) && reviewCursorTimestamp(value.createdAt) && identifier(value.recommendationId); }
+function actionCursor(value: unknown): value is AdminYoutubeDiscoveryActionRequiredCursor { return record(value) && exactKeys(value, ["version", "urgency", "priority", "occurredAt", "kind", "actionId"]) && value.version === 1 && Number.isSafeInteger(value.urgency) && (value.urgency as number) >= 0 && (value.urgency as number) <= 9 && Number.isSafeInteger(value.priority) && (value.priority as number) >= 1 && (value.priority as number) <= 100 && isoTimestamp(value.occurredAt) && (value.kind === "candidate_review" || value.kind === "mission_need" || value.kind === "health_incident" || value.kind === "knowledge_recommendation") && identifier(value.actionId); }
