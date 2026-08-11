@@ -1,6 +1,6 @@
 # AI-First YouTube Discovery Proposal
 
-**Status:** Approved and partially implemented. The active PRD addendum ratifies this bounded URL-only capability. Epic 18 and Epic 19 are implemented; Epic 20 control-tower delivery remains in progress. The PRD continues to exclude fully automated scraping at scale: Discovery uses only documented YouTube Data API metadata and bounded AI triage. It produces a ranked list of canonical video URLs for operator review; an operator accepts a URL through the existing Knowledge intake API, then `youtube:capture` remains manual. Discovery never writes or owns a Knowledge `source`.
+**Status:** Approved and partially implemented. The active PRD owns the bounded URL-only product contract in UJ-6, FR-66..78, NFR-19..20, SC-13..14, and AC-34..41. Epic 18 and Epic 19 are implemented; Epic 20 control-tower delivery remains in progress. The PRD excludes fully automated scraping at scale: Discovery uses only documented YouTube Data API metadata and bounded AI triage. It produces a ranked list of canonical video URLs for operator review; an operator accepts a URL through the existing Knowledge intake API, then `youtube:capture` remains manual. Discovery never writes or owns a Knowledge `source`.
 
 ## Purpose
 
@@ -34,10 +34,10 @@ The current Knowledge pipeline owns the canonical lifecycle for readable capture
 immutable capture version
   -> one canonical ingestion job
   -> triage -> extraction -> independent judgment -> relation/conflict
-  -> active | suppressed | review_recommended | verify_first | failed
+  -> completed | failed; completed candidates: apply | needs_operator | discard
 ```
 
-Only policy-eligible active cards can enter traveler retrieval. Automation routes grounded high-risk road, safety, EV, price, availability, booking, promotion, and opening-hours claims to `verify_first`; an authorized operator may revise or publish the card with its available validated evidence. A one-source operator-authorized publication does not imply a corroborated community pattern. Conflicted claims cannot become factual itinerary premises. These are established in the active PRD and architecture spine.
+Only policy-eligible active cards can enter traveler retrieval. Automation routes grounded high-risk road, safety, EV, price, availability, booking, promotion, and opening-hours claims to `needs_operator`; the card remains non-retrievable in `pending_operator` until an authorized operator revises, publishes, or suppresses it with its available validated evidence. A one-source operator-authorized publication does not imply a corroborated community pattern. Conflicted claims cannot become factual itinerary premises. These are established in the active PRD and architecture spine.
 
 Facebook capture established useful operational boundaries that this proposal preserves: separate capture archive, safe audit actor, idempotent replay after a production write failure, bounded operator-only source material, and no raw source content in operational logs. See [Facebook Capture Operations](../runbooks/facebook-capture.md).
 
@@ -205,7 +205,7 @@ Operator review acceptance submits a URL only to existing Knowledge intake; it d
 
 ## Delivery Status
 
-The PRD addendum, Discovery architecture/UX spines, and Epics 18-20 supersede this proposal as delivery authority.
+The active PRD is the product authority. Discovery architecture/UX spines and Epics 18-20 are the implementation and delivery authorities beneath it; together they supersede this proposal as an executable specification.
 
 ### Implemented
 
@@ -235,7 +235,7 @@ See [YouTube Discovery Operations](../runbooks/youtube-discovery.md) for the exe
 - Comments affect triage only; they never become evidence, capture text, cards, source bundles, or traveler UI content.
 - Every readable Gemini capture remains immutable, content/version identified, operator-only at raw level, and atomically obtains one canonical ingestion job through the existing capture workflow.
 - AI triage cannot override hard eligibility, the manual capture boundary, privacy, evidence, verification, conflict, or publication gates.
-- Automation routes grounded high-risk claims to `verify_first`; only an authorized operator may revise or publish them with available validated evidence. Conflicted claims cannot support factual itinerary premises.
+- Automation routes grounded high-risk claims to `needs_operator`; they remain non-retrievable in `pending_operator` until an authorized operator revises, publishes, or suppresses them with available validated evidence. Conflicted claims cannot support factual itinerary premises.
 - Discovery provider deferrals retain candidate priority without notification noise; persistent failures, rate limiting, and aging high-priority review work become action-required.
 - Operators can disable discovery. Discovery acceptance can submit a candidate only to existing Knowledge intake; only the manual `youtube:capture` workflow invokes Gemini. Stopping discovery does not mutate completed knowledge.
 - Control-tower projections and logs expose only safe operational summaries, never secrets, raw comments, raw source material, model prompts/responses, provider payloads, or evidence spans.

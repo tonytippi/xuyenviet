@@ -2,6 +2,7 @@
 title: Community Knowledge Pipeline Solution Design
 status: final
 created: 2026-07-21
+updated: 2026-08-11
 audience: engineering team and knowledge operators
 companion_to: ARCHITECTURE-SPINE.md
 ---
@@ -127,7 +128,7 @@ Support: supporting | conflicting
 Display: operator_only | traveler_visible | fact_only
 ```
 
-Facebook evidence defaults to `operator_only`. A quote/link may become `traveler_visible` only when the source is accessible, the quote is short and relevant, and neither quote nor projection contains PII or sensitive content. Each evidence record carries an independence key from its canonical author/source identity; a community pattern requires two distinct active supporting keys.
+Facebook evidence and direct quotes remain `operator_only` in the public MVP. A traveler-safe XuyenViet-authored paraphrase may use `fact_only` display with practical verification guidance. A canonical source link may appear only when the source is publicly accessible without authentication or group membership, passes URL-safety policy, and is not subject to a validated removal request. Direct-quote `traveler_visible` display requires a separately approved rights and display policy. Each evidence record carries an independence key from its canonical author/source identity; a community pattern requires two distinct active supporting keys.
 
 New evidence supplements existing evidence by default. It replaces/deactivates older evidence only for volatile facts or when old evidence is no longer suitable. Retrieval selects at most three supporting and one conflicting active evidence records, favoring recency, source independence, and quality.
 
@@ -193,7 +194,7 @@ They must never include raw Facebook text, operator-only evidence, media notes, 
 | `conflicted` | `exclude`: ask, warn, search, or select a safer option without using it as a premise |
 | non-`active` lifecycle or verification requirement not `none` | `exclude` |
 
-Web search runs when active knowledge is sparse, freshness-sensitive, pending operator work, or conflicted. If it fails or is low confidence, AI Ask must say updated information could not be verified and recommend user confirmation rather than generate unsupported guidance. Search results remain external/unverified unless ingested through this same pipeline.
+Web search runs when active knowledge is sparse, freshness-sensitive, pending operator work, or conflicted. If it fails or is low confidence, AI Ask must say updated information could not be verified and recommend user confirmation rather than generate unsupported guidance. Search results retain external provenance and practical verification guidance unless ingested through this same pipeline; traveler UI does not expose the internal verification enum as a default confidence label.
 
 ## Operator Workflow
 
@@ -217,6 +218,7 @@ Quality sampling is separate from recommendation review:
 
 - Raw captured Facebook text is operator-only.
 - Delete Facebook source/capture artifacts and dependent operational artifacts after 180 days when they support no active or reviewable claim.
+- Publish a content-removal contact. A credible Facebook source, rights-holder, privacy, or safety request hides the affected traveler source link while an authorized operator validates it.
 - When a source is withdrawn, inaccessible, or subject to removal, run a retryable removal command that locks dependent evidence/cards, hides evidence/link immediately, re-evaluates cards using remaining evidence, suppresses a card that loses final eligible support, and only completes after no removed evidence remains traveler eligible.
 - Keep durable audit only for meaningful state transitions and operator actions.
 - Keep failed or replaced AI artifacts only as safe operational metadata for short retention.

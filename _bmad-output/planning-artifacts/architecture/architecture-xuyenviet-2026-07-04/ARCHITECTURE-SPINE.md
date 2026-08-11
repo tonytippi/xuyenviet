@@ -2,7 +2,7 @@
 title: XuyenViet AI Travel Information MVP Architecture Spine
 status: final
 created: 2026-07-04
-updated: 2026-08-06
+updated: 2026-08-11
 altitude: project MVP
 source_prd: ../../prds/prd-xuyenviet-2026-07-04/prd.md
 source_ux: ../../ux-designs/ux-xuyenviet-2026-07-05/EXPERIENCE.md
@@ -179,11 +179,11 @@ Rule: Captured Facebook text remains operator-only raw source material. The AI-f
 
 Rule: Capture writes must be auditable as operator/admin mutations where practical: source ID, actor or operations identity, capture timestamp, capture method, before/after raw-text presence, and non-sensitive error summary on failure.
 
-### AD-8: AI Ask Uses A Fixed Context Priority Pipeline
+### AD-8: AI Ask Uses A Mode-Aware Context Pipeline
 
-Binds: answer context priority to selected trip project context, current chat session context, active XuyenViet knowledge, web search fallback, then general model reasoning.
+Binds: answer context to one server-owned mode: unscoped answer, applied current Trip plan, hypothetical exploration, or pending-proposal review. Applied Trip state is durable planning authority; conversation and proposal inputs remain transient unless an owner-confirmed command changes the Trip.
 
-Prevents: feature teams bypassing PRD source/confidence rules or using web/general AI before owned context.
+Prevents: treating Trip and chat as competing memory authorities, loading Trip constraints into a private answer, presenting a hypothetical or pending change as committed state, or using external/general evidence before owned context and required planning needs are established.
 
 Rule: The AI orchestrator assembles a source bundle before model generation and passes explicit provenance metadata into the answer prompt.
 
@@ -192,33 +192,34 @@ sequenceDiagram
   participant User
   participant Chat
   participant Orchestrator
-  participant ChatContext
+  participant PlanningContext
   participant Retrieval
   participant Search
   participant AIGateway as AI Gateway
   participant DB
   User->>Chat: Vietnamese question
   Chat->>Orchestrator: authenticated request
-  Orchestrator->>ChatContext: load selected trip + chat context
-  Orchestrator->>Retrieval: active-card retrieval
+  Orchestrator->>PlanningContext: classify mode + load authorized context
+  PlanningContext-->>Orchestrator: current conversation or applied Trip snapshot + transient intent
+  Orchestrator->>Retrieval: active-card retrieval by required planning need
   Retrieval->>DB: current states + safe evidence summaries + filters
-  alt missing sparse fresh or conflicting
-    Orchestrator->>Search: normalized web search
+  alt required need missing, fresh, or conflicting
+    Orchestrator->>Search: minimized scoped web verification
     Search->>DB: persist web result provenance
   end
   Orchestrator->>AIGateway: source bundle + answer contract
   AIGateway-->>Orchestrator: Vietnamese answer + provenance map
   Orchestrator->>DB: store response ledger
-  Orchestrator-->>Chat: answer with sources and confidence
+  Orchestrator-->>Chat: practical answer + verification guidance + progressive source detail
 ```
 
-### AD-9: Web Search Is Provider-Adapted And Always Unverified
+### AD-9: Web Search Is Provider-Adapted, Scope-Resolved, And Externally Provenanced
 
 Binds: web fallback to a search adapter contract: query, title, URL, snippet/content, score, checkedAt, sourceType, confidence.
 
-Prevents: provider lock-in, source-less answer facts, and inconsistent external-source labels.
+Prevents: provider lock-in, source-less answer facts, unresolved geography becoming a factual premise, and technical trust labels leaking into traveler copy.
 
-Rule: Search-derived facts are labeled `unverified` until they are ingested into a card that satisfies the applicable publication policy; official/provider pages are preferred by query construction, include/exclude domains, country bias, and post-filtering.
+Rule: Search-derived information retains external provenance and never becomes reusable XuyenViet knowledge until it is ingested into a card that satisfies publication policy. Route- or place-specific web information may become a factual premise only when its applicable geography and time resolve consistently with the planning need; unresolved or mismatched results remain verification leads. Traveler UI uses practical verification guidance rather than internal labels such as `unverified`. Official/provider pages are preferred by query construction, include/exclude domains, country bias, and post-filtering.
 
 Seed: Tavily Search API for MVP fallback because it returns title, URL, content, score, Vietnam country bias, domain filters, and freshness controls. [ASSUMPTION]
 
@@ -244,7 +245,7 @@ Rule: Direct OpenAI API calls are not used. AI calls go through the OpenAI-compa
 
 Rule: YouTube video knowledge analysis, when enabled, runs only in the server-side `youtube:capture` operations script and calls a configured Gemini video-capable model using `GEMINI_API_KEY`. The key is not an AI Gateway credential and the script is its only allowed consumer; it is never exposed to browser code, request-serving routes, audit summaries, or logs. The script accepts an operator-submitted canonical individual-video URL and a versioned prompt, then persists only bounded operator-only evidence, safe metadata, usage, and audit outcomes. It must not request or persist a full transcript, media, YouTube credentials, cookies, HTML, hidden provider payloads, or raw model prompt/response logs.
 
-Rule: Gemini video analysis is evidence generation, not source verification. Every resulting knowledge card follows AD-7's canonical AI-first publication, review, verification, conflict, and retrieval policy; community/unverified labeling and high-risk verification gates remain intact. The adapter must fail closed for inaccessible, unsupported, restricted, blocked, or over-limit videos and must never fabricate a transcript or a knowledge card. Playwright/direct browser scraping and undocumented YouTube APIs are excluded from this integration.
+Rule: Gemini video analysis is evidence generation, not source verification. Every resulting knowledge card follows AD-7's canonical AI-first publication, review, verification, conflict, and retrieval policy; internal source/verification metadata and high-risk operator gates remain intact, while traveler copy follows the PRD's practical-guidance rule. The adapter must fail closed for inaccessible, unsupported, restricted, blocked, or over-limit videos and must never fabricate a transcript or a knowledge card. Playwright/direct browser scraping and undocumented YouTube APIs are excluded from this integration.
 
 ### AD-11: Answer Provenance Is Persisted, Not UI-Derived
 
@@ -328,7 +329,7 @@ Rule: The MVP retrieval path searches active `knowledge_card_search_documents` l
 
 Rule: Traveler retrieval is fail-closed. A card is retrievable only when its current `lifecycle_state` is `active`, its domain classification permits the requested use, `verification_requirement = none`, linked source metadata is traveler-safe, current active evidence exists, and all required retrieval metadata is present. Unknown, missing, stale, disabled, non-active, failed-verification, or operator-only state excludes the item.
 
-Rule: Retrieval eligibility must support current publication/knowledge/review/verification states, current active evidence, source-safe linkage, card type, route segment/location, conditions, tags, freshness-sensitive flag, displayed confidence, and source type. Lexical score may rank eligible candidates but must not override owner-row eligibility.
+Rule: Retrieval eligibility must support current publication/knowledge/review/verification states, current active evidence, source-safe linkage, card type, route segment/location, conditions, tags, freshness-sensitive flag, traveler-safe wording policy, and source type. Lexical score may rank eligible candidates but must not override owner-row eligibility.
 
 Rule: Retrieval projects one machine-readable use policy per selected card: `contextual_use` or `exclude`. `active + community_observation/community_pattern/conditional + verification_requirement = none` is `contextual_use` only within stated conditions and with state-appropriate community wording; `conflicted`, a non-active lifecycle, failed verification, or missing active evidence is `exclude`. The answer prompt must enforce this policy.
 
@@ -660,9 +661,9 @@ Usage events reference the model record or pricing version used for cost estimat
 
 Referral attribution minimum fields: referred user ID, referral code, referrer user ID when resolvable, campaign/source metadata when available, captured timestamp, and immutable first-attribution marker. MVP does not calculate reward amounts.
 
-Confidence labels are fixed for MVP: `unverified`, `community`, `curated`, `partner`, `official`.
+Internal source and verification metadata remain machine-readable for policy and audit; they are not rendered as default traveler confidence labels.
 
-Persisted knowledge-source fields are `source_type` as `curated | community` and `verification_status` as `unverified | verified`; `official` and `partner` are boolean source metadata. Displayed MVP confidence labels are derived from source metadata and card confidence. Web search results always have `verification_status = unverified`, even when their web-result source type is official/provider.
+Persisted knowledge-source fields are `source_type` as `curated | community` and `verification_status` as `unverified | verified`; `official` and `partner` are boolean source metadata. Traveler wording is derived from applicable provenance, freshness, and risk and provides practical verification guidance where needed. Web search results always have `verification_status = unverified`, even when their web-result source type is official/provider.
 
 Canonical source linkage:
 
@@ -740,7 +741,7 @@ Production must have:
 ## Deferred
 
 - Final deployment provider and hosted PostgreSQL provider.
-- Legal review of Facebook content reuse before traveler-visible quote/link display or broad group discovery.
+- A separately approved Facebook rights and display policy before any traveler-visible direct quote or broad group discovery; public-MVP traveler surfaces remain limited to XuyenViet-authored paraphrase, practical verification guidance, and canonical links that pass the PRD's public-access, URL-safety, and removal conditions.
 - Dedicated self-service privacy dashboard beyond chat/trip deletion.
 - Google Maps integration.
 - Whether selected right-detail panel state is URL-addressable or transient UI state. Default implementation may keep it transient unless shareability/back-button semantics become a story requirement.

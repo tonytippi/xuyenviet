@@ -7,9 +7,10 @@ paradigm: PostgreSQL-backed modular workflow with worker-owned scheduled executi
 scope: URL-only YouTube discovery, triage, and operator review
 status: final
 created: 2026-08-06
-updated: 2026-08-06
+updated: 2026-08-11
 binds: [youtube-discovery]
 sources:
+  - _bmad-output/planning-artifacts/prds/prd-xuyenviet-2026-07-04/prd.md
   - docs/proposals/ai-first-youtube-discovery.md
   - docs/runbooks/youtube-capture.md
   - _bmad-output/planning-artifacts/architecture/architecture-xuyenviet-2026-07-04/ARCHITECTURE-SPINE.md
@@ -17,6 +18,8 @@ companions: []
 ---
 
 # Architecture Spine - AI-First YouTube Discovery
+
+This architecture implements the active PRD's YouTube Discovery contract at UJ-6, FR-66..78, NFR-19..20, SC-13..14, and AC-34..41. It may refine mechanisms and failure handling but shall not broaden or weaken that product contract without a corresponding PRD update.
 
 ## Design Paradigm
 

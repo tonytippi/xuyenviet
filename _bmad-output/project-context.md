@@ -97,7 +97,7 @@ _This file contains critical rules and patterns that AI agents must follow when 
 
 - Do not add Auth.js, BFF credentials, Next route-handler domain ownership, server-action writers, or direct database imports to presentation applications. Story 14.1 owns NestJS Google OAuth and opaque browser sessions.
 - Do not make AI calls for unauthenticated users, invalid submissions, or blocked routes. No conversation, context, retrieval, usage, or provider call should be created in those paths.
-- Do not treat web search, Facebook, copied posts, or image-derived facts as approved knowledge. They remain unverified until operator approval.
+- Do not treat raw web search, Facebook, copied posts, images, YouTube metadata, comments, or Discovery candidates as reusable traveler knowledge. Only evidence-eligible active knowledge cards may enter normal internal retrieval under the PRD publication policy. Direct Facebook quotes and captured text remain operator-only in the public MVP; traveler surfaces may use only a safe XuyenViet-authored paraphrase and practical verification guidance. A canonical source link must satisfy the PRD's public-access, URL-safety, and removal conditions.
 - Do not expose `raw_source_material`, operator-only notes, provider payloads, secrets, or admin controls to normal travelers.
 - Do not render source/confidence UI from parsed answer text. Source/confidence must come from stored provenance once that feature exists.
 - Do not stream user-visible AI answers before retrieval/search context and provenance ledger inputs are assembled.
@@ -124,4 +124,4 @@ _This file contains critical rules and patterns that AI agents must follow when 
 - Review periodically for outdated rules.
 - Remove rules that become obvious or no longer prevent likely mistakes.
 
-Last Updated: 2026-08-05
+Last Updated: 2026-08-11

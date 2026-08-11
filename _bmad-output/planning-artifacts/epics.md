@@ -101,15 +101,15 @@ FR-23A: Queue unreadable Facebook URLs for later operator-run capture.
 FR-23B: Capture only confirmed, operator-only visible Facebook material without browser credentials, cookies, tokens, local storage, full HTML, or hidden data.
 FR-23C: Use canonical ingestion-job technical status as the primary Facebook capture queue status, filter, count, and ordering signal; completed jobs expose aggregate candidate counts without rolling publication outcomes into technical status.
 FR-24: AI-triage source material, extract structured claims, and validate each against a source-text evidence span.
-FR-24A: Classify triaged sources as rejected, context-only, candidate, or verify-first and retain decision reasons.
-FR-24B: Use an independent AI judge, separate from extraction, for publication/suppression/review decisions.
+FR-24A: Classify triaged source material as rejected, context-only, or candidate-bearing and retain candidate disposition and decision reasons.
+FR-24B: Use an independent AI judge, separate from extraction, to assign `apply`, `needs_operator`, or `discard`.
 FR-24C: Discover and process every independently useful atomic claim from a submitted immutable source version without an accepted-fact quota.
 FR-24D: Give each discovered candidate an independent, immutable completed AI disposition/reason or a failed outcome with no business disposition; complete source ingestion only after discovery is terminal and every candidate is completed or failed, while retaining idempotent observability counters only.
 FR-24E: Prevent work for an earlier superseded capture version from mutating active knowledge while preserving intelligible historical ingestion behavior.
 FR-25: Make claims searchable without human approval only when evidence, specificity, actionability, privacy, commercial-risk, and conflict policy pass.
 FR-25A: Create risk-prioritized review recommendations, not mandatory approval gates, for risky, weak, conflicting, duplicate, or context-missing claims.
-FR-25B: Quality-sample 15% of auto-active claims for the first four weeks; create one immutable, non-actionable sampling obligation for every needs_operator candidate; record exact cohorts before high-severity containment and either open fenced risk work for remediable cards or suppress/de-index unsafe cards.
-FR-26: Support the fixed MVP confidence labels: unverified, community, curated, partner, official.
+FR-25B: Support quality sampling of active claims without delaying normal ingestion, keep sampling separate from actionable operator work, and contain only the affected cohort after a high-severity failure.
+FR-26: Preserve machine-readable source classification, verification, evidence, freshness, and provenance for policy and audit without exposing them as default traveler confidence labels.
 FR-27: Mark changing price, schedule, availability, road, hours, weather, or service facts as freshness-sensitive.
 FR-28: Reach a seed set of 100 active, evidence-grounded Hanoi-to-HCMC knowledge cards.
 FR-28A: Provide authorized operators an aggregate-only active-corridor seed-coverage report with complete retrieval metadata/evidence, taxonomy and route/location gaps, and current work signals without raw capture content, URLs, quotes, provider payloads, or removal internals.
@@ -119,7 +119,7 @@ FR-31: Use web fallback for missing, sparse, freshness-sensitive, uncertain, or 
 FR-32: Persist and audit whether answer information came from chat/trip, knowledge cards, web, or general reasoning without making those categories default traveler-facing copy.
 FR-33: Warn travelers to verify changing details before action or booking.
 FR-34: Never present unverified collected information as guaranteed fact.
-FR-35: Label search results external/unverified unless later ingested under publication policy.
+FR-35: Retain external provenance and practical verification guidance for web information; use a route- or place-specific fact as a factual premise only when its geography and time match the planning need.
 FR-36: Prefer official/provider pages in web fallback.
 FR-37: Do not treat Facebook-derived information as official except from identifiable official/provider pages.
 FR-37A: Use state-appropriate uncertainty wording for community observation, pattern, and conditional claims.
@@ -182,7 +182,7 @@ NFR-18: Before public launch, approve Railway ownership, domains/DNS/CSP/OAuth c
 - Use an OpenAI-compatible Gateway adapter and managed model catalog; every model call declares purpose, model, prompt version, source bundle, and output schema where applicable.
 - Persist assistant-message provenance row-per-source-item in the same transaction as the final message; render source UI from stored provenance only.
 - Keep chat/project deletion owner-scoped and propagate it to messages, context, embeddings, and any derived retrievable content.
-- Build source-versioned knowledge ingestion as one transactional, leased, compare-and-swap job: queued, triaging, extracting, judging, relating, then published/suppressed/review-recommended/verify-first/failed.
+- Build source-versioned knowledge ingestion as one transactional, leased, compare-and-swap job: queued, triaging, extracting, judging, relating, then completed or failed, with immutable candidate dispositions of `apply`, `needs_operator`, or `discard`.
 - Use immutable capture artifacts and bounded evidence; Facebook raw material remains operator-only and is retained/deleted under the 180-day policy.
 - Use independent AI judgment plus deterministic hard gates and thresholds; the canonical aggregate is `knowledge_card`, not a separate persistent claim.
 - Keep publication, knowledge, review, and verification states independent. High-risk road, safety, EV, price, hours, availability, booking, and promotion facts require verification and caveat-only use until corroborated.
@@ -256,6 +256,8 @@ UX-DR23: Admin knowledge workflows stay separate, structured, explicit, and desk
 UX-DR24: Referral attribution is silent and introduces no reward/credit/ranking/payout UI.
 
 ### YouTube Discovery Requirements (2026-08-06)
+
+These `YTD-*` identifiers are retained as delivery aliases for the implemented Discovery tranche. The product contract is authoritative in the active PRD at UJ-6, FR-66..78, NFR-19..20, SC-13..14, and AC-34..41. The requirements below may add implementation and UX detail but shall not originate, broaden, or contradict product behavior; if they conflict, the PRD wins and the affected epic/story must be corrected.
 
 #### Functional Requirements
 
@@ -397,7 +399,7 @@ FR-24E: Epic 3 - Supersession-safe source-version claiming, processing, and reco
 FR-25: Epic 3 - Evidence-grounded automatic publication policy.
 FR-25A: Epic 3 - Risk-prioritized review recommendations.
 FR-25B: Epic 3 - Quality sampling.
-FR-26: Epic 3 - Confidence labels.
+FR-26: Epic 3 - Internal source, verification, evidence, freshness, and provenance metadata.
 FR-27: Epic 3 - Freshness-sensitive facts.
 FR-28: Epic 3 - Active evidence-grounded seed progress.
 FR-28A: Epic 3 Story 3.11 - Aggregate-only active evidence-grounded seed coverage; Epic 14 Story 14.4 - Direct safe admin projection.
@@ -407,7 +409,7 @@ FR-31: Epic 4 - Web fallback conditions.
 FR-32: Epic 4 - Persisted answer provenance categories.
 FR-33: Epic 4 - Changing-detail verification warnings.
 FR-34: Epic 4 - Non-guaranteed unverified wording.
-FR-35: Epic 4 - External/unverified web labels.
+FR-35: Epic 4 - External web provenance and practical verification guidance.
 FR-36: Epic 4 - Official/provider web preference.
 FR-37: Epic 3 - Facebook community-source trust policy.
 FR-37A: Epic 4 - State-appropriate community wording.
@@ -506,7 +508,7 @@ Travelers receive responsive, source-aware answers that use their trip/chat cont
 
 **FRs covered:** FR-6A, FR-29, FR-30, FR-31, FR-32, FR-33, FR-34, FR-35, FR-36, FR-37A, FR-37C, FR-47, FR-49, FR-50
 
-**Implementation notes:** Retrieval must fail closed and emit `contextual_use`, `caveat_only`, or `exclude` per current card/evidence state. Persist final response provenance, retrieval decision, and usage atomically. Search remains provider-adapted, official/provider-preferred, external/unverified, and fails with explicit verification guidance. Persisted annotation descriptors and the responsive detail inspector never parse free-form answer text or expose operator-only material.
+**Implementation notes:** Retrieval must fail closed and emit `contextual_use`, `caveat_only`, or `exclude` per current card/evidence state. Persist final response provenance, retrieval decision, and usage atomically. Search remains provider-adapted, official/provider-preferred, externally provenanced, and fails with practical verification guidance. Persisted annotation descriptors and the responsive detail inspector never parse free-form answer text or expose operator-only material.
 
 **Traceability boundary:** Epic 4 owns AI Gateway model selection and usage-cost estimation (FR-49 and FR-50). Direct exact-admin model-catalog management for FR-49A is delivered by Epic 14 Story 14.4.
 
@@ -693,7 +695,7 @@ So that a readable source can reach one safe, auditable terminal outcome.
 
 **Given** a worker owns a valid `queued` job claim
 **When** it processes the source
-**Then** the job progresses through `triaging -> extracting -> judging -> relating` to `published`, `suppressed`, `review_recommended`, `verify_first`, or `failed`
+**Then** the job progresses through `triaging -> extracting -> judging -> relating` to `completed` or `failed`, and each completed candidate retains `apply`, `needs_operator`, or `discard`
 **And** automated mutations identify `system-knowledge-pipeline` while preserving the submitter as source/job provenance.
 
 **Given** a stage completes
@@ -794,10 +796,10 @@ So that I focus on risky or uncertain facts while qualifying observations remain
 **Then** the Knowledge command compare-and-swaps card version and evidence-set revision, writes a meaningful audit event, and marks the projection dirty atomically
 **And** a changed card receives a new recommendation rather than inheriting a prior reviewed state.
 
-**Given** automatic publication or verify-first outcomes occur
+**Given** automatic publication or `needs_operator` outcomes occur
 **When** quality sampling is scheduled
-**Then** 15% of auto-active card versions during the first four weeks and 100% of verify-first outcomes receive version-bound sampling recommendations
-**And** sampling resolution records pass/fail reason codes and can raise sampling or suppress an affected policy cohort after a high-severity failure.
+**Then** policy-selected active card versions receive version-bound sampling work and every `needs_operator` candidate retains its separate immutable sampling obligation
+**And** the sampling profile and cohort thresholds come from the approved Architecture/Evaluation contract; a high-severity failure contains only the affected policy cohort.
 
 **Given** an operator opens a source ingestion outcome
 **When** candidate work is complete or in progress
@@ -957,7 +959,7 @@ So that changing road-trip details are handled honestly.
 **Given** active knowledge is absent, fewer than three relevant items for a broad question, freshness-sensitive, uncertain, or conflicted
 **When** the retrieval decision is made
 **Then** the existing provider-adapted web fallback is triggered with official/provider preference
-**And** external results remain labeled unverified.
+**And** external results retain provenance and practical guidance about what the traveler should verify, without exposing an internal confidence label by default.
 
 **Given** web search succeeds after a state-aware knowledge decision
 **When** the assistant response and provenance are persisted
@@ -990,7 +992,7 @@ So that I can decide what to verify before acting.
 **Given** a Facebook-derived evidence record is operator-only or has no traveler display permission
 **When** traveler trust details render
 **Then** the raw post, quote, and link remain hidden
-**And** a traveler-visible quote/link appears only when the explicit safe display policy permits it.
+**And** direct Facebook quotes remain operator-only; traveler surfaces may show only a XuyenViet-authored paraphrase plus a canonical link that satisfies the PRD public-access, URL-safety, and removal conditions.
 
 ### Story 4.7: Verify AI-First Retrieval and Answer Safety
 
@@ -2095,7 +2097,7 @@ So that card state, actionable work, audits, and search eligibility never diverg
 **Then** the card becomes `active` with verification requirement `none`
 **And** it writes required audit/index-dirty effects atomically.
 
-**Given** a verify-first candidate, conflict, or new evidence for a suppressed card requires operator action
+**Given** a `needs_operator` candidate, conflict, or new evidence for a suppressed card requires operator action
 **When** the command resolves the transition
 **Then** the card becomes `pending_operator`
 **And** exactly one same-fence primary recommendation is open with the appropriate type.
@@ -2213,6 +2215,25 @@ So that the clean-break migration remains safe as the pipeline evolves.
 **And** any environmental blocker is recorded exactly in the implementation artifact.
 
 ### YouTube Discovery Coverage Map (2026-08-06)
+
+#### PRD Authority Mapping
+
+| Delivery alias | PRD authority |
+|---|---|
+| `YTD-FR1` | FR-66 |
+| `YTD-FR2` | FR-67 |
+| `YTD-FR3` | FR-68; AC-35 |
+| `YTD-FR4`, `YTD-FR5` | FR-69; AC-34 |
+| `YTD-FR6` | FR-70; AC-36 |
+| `YTD-FR7` | FR-71; AC-37 |
+| `YTD-FR8` | FR-72; AC-37 |
+| `YTD-FR9`, `YTD-FR10` | FR-73, FR-74; AC-37, AC-38 |
+| `YTD-FR11` | FR-75; AC-39 |
+| `YTD-FR12` | FR-76; AC-40 |
+| `YTD-FR13` | FR-77 |
+| `YTD-NFR1` through `YTD-NFR6` | FR-74, FR-78; NFR-19; AC-36, AC-38, AC-40 |
+| `YTD-NFR7`, `YTD-NFR8` | NFR-20; AC-41 |
+| `YTD-UX1` through `YTD-UX8` | UJ-6; FR-72, FR-73, FR-75; AC-37, AC-39, AC-41 |
 
 YTD-FR1: Epic 18 - System and operator query proposals.
 YTD-FR2: Epic 18 - Query management and scheduling context.
