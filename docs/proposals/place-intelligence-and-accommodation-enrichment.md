@@ -4,6 +4,8 @@
 
 Định hướng được ghi nhận ngày 2026-07-24 và cập nhật ngày 2026-07-26 để xem xét khi cập nhật PRD, kiến trúc, UX, epic và story. Đây không phải kế hoạch triển khai được phê duyệt và không thay đổi phạm vi MVP hiện tại. Google Maps, OTA/booking và partner flows đều là MVP non-goals trong PRD hiện hành.
 
+**Delivery baseline (updated 2026-08-11):** Trip Planning Foundation hiện đã hỗ trợ accommodation như một structured trip anchor/activity và chỉ thay đổi Trip Project sau owner-confirmed proposal. Điều này là nền tảng đã triển khai, không phải phê duyệt cho `places`, Google Places/Routes, OTA/Agoda, provider snapshots, availability/price, hay accommodation shortlist. Các capability đó vẫn deferred và cần PRD/architecture mới.
+
 ## Vấn Đề
 
 Một câu hỏi phổ biến của người đi road trip là tìm chỗ ở, đặc biệt là homestay. OTA như Agoda có ích cho listing và tín hiệu booking, nhưng không bao phủ tốt các cơ sở nhỏ chỉ hoạt động qua Facebook, Zalo hoặc liên hệ trực tiếp. Ngược lại, Facebook và YouTube có nhiều trải nghiệm thực địa nhưng phân mảnh, có thể lỗi thời và không đủ để xác nhận tình trạng hiện tại.
@@ -291,7 +293,22 @@ Trước khi liên hệ Agoda Account Manager, cần có tối thiểu:
 
 Sau khi các điều kiện này đạt, gửi inquiry nêu rõ XuyenViet là Vietnamese AI-first road-trip planning assistant: dùng Agoda để hỗ trợ shortlist theo Trip Project, để người dùng click-out và tự quyết định, rồi chỉ lưu lựa chọn do owner xác nhận vào Trip Project.
 
-## Thứ Tự Đề Xuất
+## Trạng Thái Và Thứ Tự Đề Xuất
+
+### Đã Có Nền Tảng
+
+- Owner có thể quản lý accommodation trong structured Trip Project qua primary conversation và typed change proposal.
+- `confirmed` là quyết định do owner xác nhận, không phải xác nhận booking, giá, availability, hay provider validation.
+- Knowledge hiện hành tiếp tục áp dụng provenance, freshness, evidence và uncertainty policy cho các quan sát về place/hotel khi phù hợp.
+
+### Chưa Được Phê Duyệt Hoặc Triển Khai
+
+- Canonical `places`, provider references/snapshots, entity resolution, và `trip_places` model.
+- Google Maps/Places/Routes adapter, Maps deep links/contact, rating/review data, route/ETA, caching, attribution và provider terms.
+- Agoda/OTA Content/Search, availability/rate, affiliate/MSE agreement, click-out hoặc bất kỳ booking/partner flow nào.
+- Accommodation-gap prompt, deterministic trip-fit shortlist, và candidate-to-place resolution.
+
+Các hạng mục này không được suy ra từ Trip Planning Foundation. Chỉ bắt đầu sau khi PRD và architecture phê duyệt phạm vi/provider policy.
 
 1. Xác nhận PRD contract cho place identity, source classes, snapshot/provenance, user-confirmed trip state và uncertainty.
 2. Thiết kế architecture cho Google Places/Routes adapter, provider terms, caching/attribution, entity resolution, quota/cost và server-side mutation policy.

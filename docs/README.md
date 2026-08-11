@@ -20,7 +20,8 @@ Runbooks document implemented commands and their operational limits. They must m
 | Document | Status | Use |
 |---|---|---|
 | [Facebook Capture Operations](./runbooks/facebook-capture.md) | Capture implemented; production scheduling remains blocked by documented readiness gaps | Run or recover controlled Facebook capture. |
-| [YouTube Capture Operations](./runbooks/youtube-capture.md) | Submitted-video Gemini capture implemented; discovery is not implemented | Run or recover individual queued-video capture. |
+| [YouTube Capture Operations](./runbooks/youtube-capture.md) | Submitted-video Gemini capture implemented; Discovery handoff remains separate and manual | Run or recover individual queued-video capture. |
+| [YouTube Discovery Operations](./runbooks/youtube-discovery.md) | Core Discovery and candidate review implemented; control tower and rollout gates remain incomplete | Operate bounded URL discovery without crossing into Knowledge capture. |
 
 ## Proposals
 
@@ -28,8 +29,9 @@ Proposals record product direction and planning context. A proposal does not aut
 
 | Document | Status | Planning use |
 |---|---|---|
-| [AI-First YouTube Discovery](./proposals/ai-first-youtube-discovery.md) | Approved bounded URL-only Discovery scope; implementation in Epics 18-20 | Requirements context for documented-API Discovery, manual capture handoff, and control-tower delivery. |
-| [Trip Project Product Direction](./proposals/trip-project-product-direction.md) | Proposed beyond the implemented basic single-owner project | Future structured trip planning. |
+| [AI-First YouTube Discovery](./proposals/ai-first-youtube-discovery.md) | Approved; Epic 18-19 core implemented and Epic 20 control tower in progress | Requirements context and deferred delivery boundaries for documented-API Discovery. |
+| [Chat-First Trip Companion UX](./proposals/chat-first-trip-companion-ux.md) | Accepted; Stories 16.1-16.3 implemented and 16.4 verification in progress | Historical product/UX decision context. |
+| [Trip Project Product Direction](./proposals/trip-project-product-direction.md) | Trip Planning Foundation implemented; dynamic-data roadmap deferred | Historical direction for post-foundation planning capability. |
 | [Place Intelligence And Accommodation Enrichment](./proposals/place-intelligence-and-accommodation-enrichment.md) | Proposed; Maps, OTA, booking, and provider enrichment are MVP non-goals | Future opt-in, chat-first accommodation-decision assistance and place identity planning. |
 
 ## Roadmaps

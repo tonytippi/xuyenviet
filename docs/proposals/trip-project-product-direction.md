@@ -4,7 +4,7 @@
 
 Định hướng đã thống nhất ngày 2026-07-22. Tài liệu này là nguồn định hướng và bối cảnh lịch sử cho các cập nhật sau đó. Kể từ 2026-07-24, PRD hiện hành và Architecture Spine đã phê duyệt **Trip Planning Foundation** là tranche kế tiếp: Trip Project single-owner có itinerary cấu trúc, trip constraints, một conversation chính, basic Trip Home, và change proposal có xác nhận/lịch sử. PRD và Architecture Spine là nguồn chân lý cho phạm vi và contract triển khai; các phần roadmap chưa được đưa vào hai tài liệu đó vẫn chỉ là định hướng.
 
-**Implementation baseline (2026-07-23):** Khi định hướng này được viết, code chỉ có Trip Project single-owner cơ bản với title, origin/destination, dates, travelers, notes và nhiều conversation có thể liên kết với cùng một project. Structured itinerary, Trip Home, một conversation chính và change proposals hiện là **scope đã được phê duyệt nhưng chưa triển khai**; hãy theo PRD/Architecture Spine cho contract hiện hành. Weather, location, budget tracking, checklist, vault, collaboration và các capability roadmap khác trong tài liệu này vẫn chưa được phê duyệt cho Trip Planning Foundation.
+**Implementation baseline (updated 2026-08-11):** Trip Planning Foundation đã được triển khai: Trip Project single-owner có itinerary cấu trúc, trip constraints, một primary conversation với historic conversation access, deterministic Trip Home, và typed change proposal có apply/dismiss/expiry/history owner-scoped. Hãy theo PRD, Architecture Spine và sprint status cho contract và bằng chứng delivery. Weather, location, Maps/Places, dynamic route/ETA, booking/availability, budget, checklist, vault, notifications, on-trip mode và collaboration vẫn chưa được phê duyệt cho Trip Planning Foundation.
 
 ## Mục Tiêu
 
@@ -290,19 +290,24 @@ Các rule cứng tối thiểu:
 - Weather snapshot không trở thành trip memory bền vững.
 - Vị trí chính xác, booking reference hoặc dữ liệu nhạy cảm không được đưa vào link chia sẻ hay prompt/provider khi không cần.
 
-## Lộ Trình Đề Xuất
+## Trạng Thái Delivery
 
-Các bước 1 và 2 đã được gộp thành Trip Planning Foundation được PRD phê duyệt, nhưng chưa phải bằng chứng rằng chúng đã được triển khai. Các bước còn lại vẫn là thứ tự định hướng, không phải cam kết MVP.
+PRD, Architecture Spine, Epic 7 và sprint status đã thay thế phần delivery của tài liệu này.
 
-1. **Trip planning foundation:** điểm neo, ràng buộc, ngày/chặng, activity có trạng thái ý tưởng/dự kiến/đã chốt/phương án B và một conversation chính.
-2. **Trip Home và change proposal:** ưu tiên quyết định gấp rồi hôm nay/kế tiếp; chat-first composer; AI proposal có xác nhận và history.
-3. **Weather-aware planning:** forecast tối thiểu 7 ngày theo địa điểm/thời gian, weather impact và đề xuất điều chỉnh; không tự mutation.
-4. **One-time current location:** location theo request để hỗ trợ truy vấn gần đây, weather hiện tại, chỗ nghỉ/ăn/chơi/sạc; không lưu lịch sử.
-5. **Google Maps integration:** geocoding, place search, route/ETA, deep link navigation và map như lớp hỗ trợ itinerary.
-6. **Budget và preparation:** dự toán liên kết itinerary, packing list theo trip/weather; không ưu tiên split bill hoặc vault nhạy cảm.
-7. **On-trip mode:** consent vị trí có thời hạn, Today/Next Decision theo vị trí, chặng kế tiếp, ETA và weather ngắn hạn.
-8. **Proactive safety alerts:** chỉ sau khi đã xác minh nguồn weather/cảnh báo đường, cách xử lý provider outage, geofence, notification, độ trễ dữ liệu và wording an toàn.
-9. **Collaboration:** members/roles, chia sẻ có kiểm soát, sau khi Trip foundation chứng minh giá trị.
+### Đã Triển Khai
+
+1. **Trip Planning Foundation:** anchors, legs, activities, constraints, trạng thái `idea`/`planned`/`confirmed`/`backup`, và single-owner authorization.
+2. **Primary conversation, Trip Home và change proposal:** primary conversation có giữ lịch sử linked conversation; Trip Home chọn focus deterministically; proposal chỉ áp dụng sau owner confirmation và có history/expiry/conflict protection.
+
+### Deferred, Chưa Thuộc Tranche Hiện Tại
+
+1. **Weather-aware planning** và weather snapshots/impact.
+2. **One-time current location**, persistent on-trip location, và privacy controls tương ứng.
+3. **Google Maps/Places/Routes**, dynamic route/ETA, và provider snapshots.
+4. **Budget, packing/checklist, travel vault, notification, và on-trip mode.**
+5. **Collaboration**, roles, sharing, và live co-editing.
+
+Các phần deferred chỉ là thứ tự định hướng. Chúng cần PRD, architecture và stories mới trước khi triển khai.
 
 ## Câu Hỏi Cần Xác Nhận Trước Khi Triển Khai
 

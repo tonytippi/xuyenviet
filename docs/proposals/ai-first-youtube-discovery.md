@@ -1,6 +1,6 @@
 # AI-First YouTube Discovery Proposal
 
-**Status:** Approved Discovery scope. The active PRD addendum ratifies this bounded URL-only capability. The PRD continues to exclude fully automated scraping at scale: Discovery uses only documented YouTube Data API metadata and bounded AI triage. It produces a ranked list of canonical video URLs for operator review; an operator accepts a URL through the existing Knowledge intake API, then `youtube:capture` remains manual. Discovery never writes or owns a Knowledge `source`.
+**Status:** Approved and partially implemented. The active PRD addendum ratifies this bounded URL-only capability. Epic 18 and Epic 19 are implemented; Epic 20 control-tower delivery remains in progress. The PRD continues to exclude fully automated scraping at scale: Discovery uses only documented YouTube Data API metadata and bounded AI triage. It produces a ranked list of canonical video URLs for operator review; an operator accepts a URL through the existing Knowledge intake API, then `youtube:capture` remains manual. Discovery never writes or owns a Knowledge `source`.
 
 ## Purpose
 
@@ -203,32 +203,30 @@ Use one audited, role-protected switch:
 
 Operator review acceptance submits a URL only to existing Knowledge intake; it does not schedule or execute capture. Disabling discovery fences in-flight Discovery stages before provider calls or writes, stops new Discovery work safely, and does not alter completed capture versions, knowledge cards, evidence, existing ingestion jobs, or sources created through Knowledge intake awaiting manual capture.
 
-## Alignment Required Before Epic Creation
+## Delivery Status
 
-The proposal deliberately follows the current AI-first Knowledge policy, but its new Discovery capability requires the following architecture and documentation decisions before creating an epic or story.
+The PRD addendum, Discovery architecture/UX spines, and Epics 18-20 supersede this proposal as delivery authority.
 
-1. **Ratify Discovery as URL-only and separate it from Knowledge intake and publication.** Discovery owns candidates only. It never writes a `sources` row or invokes Gemini. A Discovery accept command delegates URL submission to the existing Knowledge intake API; a later `youtube:capture` execution remains manual. Candidate review must not become a general publication prerequisite for downstream cards.
-2. **Keep the YouTube runbook unchanged for capture.** `docs/runbooks/youtube-capture.md` remains the operator-controlled, unscheduled capture contract. Scheduled Discovery is limited to query planning, YouTube API search/enrichment, and metadata triage; it must not schedule, invoke, or enqueue `youtube:capture`.
-3. **Ratify source-neutral capture semantics as inherited policy.** A readable YouTube capture appends an immutable capture version and atomically creates exactly one canonical ingestion job, exactly like readable Facebook and generic captures. Discovery candidates are not readable captures and never create ingestion jobs.
-4. **Define safe operational persistence.** Specify candidate, query proposal, run, priority, operator-review action, kill-switch, and control-tower read models. They must exclude raw comments, raw model prompts/responses, provider payloads, video media, credentials, cookies, and evidence quote/span from normal observability output.
-5. **Set initial policy values through configuration.** Define reviewable configuration for ranking weights and score bands, bounded worker concurrency/retry behavior, maximum operator-review age, and candidate retention. Do not hard-code values into scattered scripts. Ranking must not bypass the Knowledge intake and manual capture boundaries.
-6. **Confirm provider/API terms and quota operations.** The implementation must use only documented YouTube API capabilities and bounded metadata triage. Validate key restrictions, quota billing, retention expectations, and failure/rate-limit monitoring before scheduled discovery reaches production.
-7. **Refresh architecture and UX before epics.** This is a significant automated operations capability. Architecture must establish ownership, scheduling/worker invariants, persistence boundaries, safe AI-triage/usage semantics, and the manual handoff to capture. UX must define the control tower and action-required interaction before an admin surface is built.
+### Implemented
 
-## Suggested Delivery Slices
+- Discovery-only policy, audit attribution, safe persistence, and Worker execution fencing.
+- System and operator query proposals, documented YouTube Data API search, canonical URL identity/deduplication, and bounded enrichment with derived comment signals.
+- AI Gateway metadata triage, deterministic `skip`/`defer`/`consider` recommendations, ranked candidate review, and audited `accept`/`defer`/`skip` commands.
+- Knowledge intake handoff for accepted canonical URLs. Capture still requires the separate manual `youtube:capture` operation.
 
-The following is sequencing guidance, not yet an epic/story commitment.
+### In Progress
 
-1. **Policy and architecture alignment**
-   Define Discovery ownership, scheduling, configuration, operational privacy boundaries, and the manual handoff to the existing YouTube capture runbook.
-2. **Discovery foundation**
-   Add query proposals, periodic scheduling, documented YouTube search, canonical candidate identity/dedupe, safe run/audit records, the discovery kill switch, and a ranked operator review list. Discovery never invokes Gemini or creates a Knowledge source.
-3. **Enrichment and AI triage**
-   Add bounded metadata/channel enrichment, derived comment signals, typed triage, deterministic recommendation, explainable ranking, and operator-review commands that call the existing Knowledge intake API.
-4. **Control tower**
-   Deliver Knowledge Mission, Automation Health, shared action-required signals, drill-down, and operator controls. Reuse safe Discovery and existing Knowledge projections rather than exposing raw sources.
-5. **Evaluation and tuning**
-   Measure operator consideration rate, gap coverage, deferred-review age, false-positive recommendation rate, and triage usage where available. Capture and card yield remain reported by existing Knowledge operations. Adjust thresholds only through reviewed configuration.
+- Action Required queue. The initial route and queue projection are present; source-level pagination remains open.
+
+### Not Yet Delivered
+
+- Knowledge Mission drill-downs.
+- Automation Health views and incident detail.
+- Audited global Discovery enablement control.
+- Final control-tower accessibility and operational-boundary verification.
+- Production rollout validation for Worker credentials, provider quota, and failure monitoring.
+
+See [YouTube Discovery Operations](../runbooks/youtube-discovery.md) for the executable operating boundary and `_bmad-output/implementation-artifacts/sprint-status.yaml` for current story status.
 
 ## Acceptance Invariants
 

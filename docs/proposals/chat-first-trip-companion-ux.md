@@ -1,6 +1,6 @@
 # Proposal: Chat-First Trip Companion UX
 
-**Status:** Accepted direction; superseded as an implementation specification by the active PRD, Architecture Spine, and UX spines.
+**Status:** Accepted and substantially implemented; superseded as an implementation specification by the active PRD, Architecture Spine, and UX spines. Stories 16.1-16.3 are done; Story 16.4 remains in progress for final scope, trust, and accessibility evidence.
 **Date:** 2026-08-04
 **Decision requested:** Approve a chat-first UX revision so XuyenViet feels like a simple travel companion rather than a technical planning or provenance interface.
 
@@ -407,14 +407,24 @@ Evaluate with privacy-safe aggregate signals:
 
 Do not use these metrics to auto-create trips, auto-attach context, weaken owner confirmation, or hide required safety guidance.
 
-## Dependencies And Follow-Up
+## Adoption And Delivery Status
 
-This is a product and UX direction proposal. Before implementation, update the active PRD and UX spine, document the server-side recommendation contracts in architecture, then create scoped stories for:
+The active PRD, Architecture Spine, UX spines, and Epic 16 supersede this proposal as delivery authority.
 
-1. Simplified assistant answer, feedback, and progressive source disclosure.
-2. Chat-driven trip-creation recommendation and explicit project creation.
-3. Existing-trip recommendation, confirmation, and scoped-composer switching.
-4. Sidebar terminology and hierarchy revision.
-5. Decision-oriented Trip Workspace and proposal-card revision.
+### Implemented
 
-The active [PRD](../../_bmad-output/planning-artifacts/prds/prd-xuyenviet-2026-07-04/prd.md), [Architecture Spine](../../_bmad-output/planning-artifacts/architecture/architecture-xuyenviet-2026-07-04/ARCHITECTURE-SPINE.md), and [UX spines](../../_bmad-output/planning-artifacts/ux-designs/ux-xuyenviet-2026-07-05/EXPERIENCE.md) are authoritative for implementation. This proposal is retained as historical decision context only.
+- The empty chat starts with a natural-language request and does not require a chat-versus-trip choice.
+- The server provides typed owner-bound recommendations to save a Trip Project or continue in an owned project; the traveler must explicitly choose the action.
+- The shell uses explicit traveler-language trip context, an unscoped `Hỏi XuyenViet` action, and canonical project navigation.
+- Default answers use companion-style hierarchy, compact verification disclosure backed by persisted provenance, lightweight feedback, and practical Vietnamese recovery copy without technical diagnostics.
+
+### In Progress
+
+- Story 16.4 is completing the remaining durable evidence for recommendation ownership, private-turn/project isolation, trust and recovery projections, and responsive accessibility. Its remaining review item is the complete durable accessibility evidence matrix.
+
+### Deferred Or Not Proven By This Proposal
+
+- This document does not authorize maps, route providers, weather, booking, availability, budget, checklist, collaboration, or location tracking.
+- The precise visual treatment and workspace behavior are owned by the UX Spine; delivery status belongs in Epic 16 and sprint status, not in this historical proposal.
+
+The active [PRD](../../_bmad-output/planning-artifacts/prds/prd-xuyenviet-2026-07-04/prd.md), [Architecture Spine](../../_bmad-output/planning-artifacts/architecture/architecture-xuyenviet-2026-07-04/ARCHITECTURE-SPINE.md), [UX spines](../../_bmad-output/planning-artifacts/ux-designs/ux-xuyenviet-2026-07-05/EXPERIENCE.md), and [sprint status](../../_bmad-output/implementation-artifacts/sprint-status.yaml) are authoritative. This proposal is retained as historical decision context only.
