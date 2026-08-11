@@ -76,6 +76,8 @@ export function createPostgresAdminYoutubeDiscoveryPort(captureEligibility: Yout
       }
       return { outcome: await finalizeAcceptedReview(db, admission.candidateId, recommendationId, principal, outcome) };
     },
+    async deferReview(principal, recommendationId) { return decideReview(db, principal, recommendationId, "deferred"); },
+    async skipReview(principal, recommendationId) { return decideReview(db, principal, recommendationId, "skipped"); },
     async create(principal, input) {
       if (!validText(input.queryText) || !validPriority(input.priority) || !validCadence(input.cadenceMinutes)) throw new Error("Invalid YouTube Discovery query proposal.");
       const actor = actorFor(principal);
@@ -149,6 +151,23 @@ async function finalizeAcceptedReview(db: AdminYoutubeDiscoveryDatabase, candida
     await recordAuditEvent({ actor, operation: "update", targetType: "youtube_discovery_candidate_review", targetId: recommendationId, afterSummary: JSON.stringify({ decision: "accepted", intakeOutcome: outcome }) }, transaction);
     await transaction.update(youtubeDiscoveryKnowledgeHandoffs).set({ outcome, reconciling: false }).where(and(eq(youtubeDiscoveryKnowledgeHandoffs.candidateId, candidateId), eq(youtubeDiscoveryKnowledgeHandoffs.recommendationId, recommendationId)));
     return outcome;
+  });
+}
+async function decideReview<T extends "deferred" | "skipped">(db: AdminYoutubeDiscoveryDatabase, principal: RequestPrincipal, recommendationId: string, decision: T): Promise<{ outcome: T } | null> {
+  if (!validId(recommendationId)) throw new Error("Invalid YouTube Discovery review.");
+  const actor = actorFor(principal);
+  return db.transaction(async (transaction) => {
+    const [row] = await transaction.select({ candidateId: youtubeDiscoveryCandidateReviewStates.candidateId, handoffReference: youtubeDiscoveryKnowledgeHandoffs.reference }).from(youtubeDiscoveryCandidateReviewStates)
+      .innerJoin(youtubeDiscoveryRecommendations, and(eq(youtubeDiscoveryRecommendations.id, youtubeDiscoveryCandidateReviewStates.recommendationId), eq(youtubeDiscoveryRecommendations.candidateId, youtubeDiscoveryCandidateReviewStates.candidateId)))
+      .innerJoin(youtubeDiscoveryRuns, and(eq(youtubeDiscoveryRuns.id, youtubeDiscoveryRecommendations.runId), eq(youtubeDiscoveryRuns.policyVersionId, youtubeDiscoveryRecommendations.policyVersionId)))
+      .leftJoin(youtubeDiscoveryKnowledgeHandoffs, eq(youtubeDiscoveryKnowledgeHandoffs.candidateId, youtubeDiscoveryCandidateReviewStates.candidateId))
+      .where(and(eq(youtubeDiscoveryCandidateReviewStates.state, "pending"), eq(youtubeDiscoveryRecommendations.recommendation, "consider"), sql`${youtubeDiscoveryRuns.queryProposalId} is not null`, eq(youtubeDiscoveryRecommendations.id, recommendationId))).limit(1).for("update");
+    // Knowledge owns any existing handoff; terminal Discovery actions only inspect it.
+    if (!row || row.handoffReference) return null;
+    const [updated] = await transaction.update(youtubeDiscoveryCandidateReviewStates).set({ state: decision }).where(and(eq(youtubeDiscoveryCandidateReviewStates.candidateId, row.candidateId), eq(youtubeDiscoveryCandidateReviewStates.recommendationId, recommendationId), eq(youtubeDiscoveryCandidateReviewStates.state, "pending"))).returning({ candidateId: youtubeDiscoveryCandidateReviewStates.candidateId });
+    if (!updated) return null;
+    await recordAuditEvent({ actor, operation: "update", targetType: "youtube_discovery_candidate_review", targetId: recommendationId, afterSummary: JSON.stringify({ decision }) }, transaction);
+    return { outcome: decision };
   });
 }
 async function mutate(db: AdminYoutubeDiscoveryDatabase, principal: RequestPrincipal, id: string, values: Record<string, unknown>, valid: boolean, origin?: "operator") {

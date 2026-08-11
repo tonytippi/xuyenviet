@@ -29,7 +29,7 @@ async function browserSession(userId: string, role: "operator" | "traveler") {
 
 beforeEach(async () => {
   await resetTestDatabase();
-  port = { list: vi.fn().mockResolvedValue({ items: [query] }), listReview: vi.fn().mockResolvedValue({ items: [], nextCursor: null }), getReview: vi.fn().mockResolvedValue(null), acceptReview: vi.fn().mockResolvedValue({ outcome: "submitted" }), create: vi.fn().mockResolvedValue(query), edit: vi.fn().mockResolvedValue(query), reprioritize: vi.fn().mockResolvedValue(query), pause: vi.fn().mockResolvedValue({ ...query, enabled: false, nextRunAt: null, pausedReason: "operator" }), resume: vi.fn().mockResolvedValue(query) };
+  port = { list: vi.fn().mockResolvedValue({ items: [query] }), listReview: vi.fn().mockResolvedValue({ items: [], nextCursor: null }), getReview: vi.fn().mockResolvedValue(null), acceptReview: vi.fn().mockResolvedValue({ outcome: "submitted" }), deferReview: vi.fn().mockResolvedValue({ outcome: "deferred" }), skipReview: vi.fn().mockResolvedValue({ outcome: "skipped" }), create: vi.fn().mockResolvedValue(query), edit: vi.fn().mockResolvedValue(query), reprioritize: vi.fn().mockResolvedValue(query), pause: vi.fn().mockResolvedValue({ ...query, enabled: false, nextRunAt: null, pausedReason: "operator" }), resume: vi.fn().mockResolvedValue(query) };
   const identities = createPostgresApiIdentityRepository(getTestDatabaseUrl(), browserAuth.sessionLookupKey, browserAuth.oauthTransactionProtectionKey);
   const ApiModule = createApiModule(identities, { conversationSummaries: { async listOwnedConversationSummaryRows() { return []; } }, browserAuth, adminYoutubeDiscovery: port as unknown as AdminYoutubeDiscoveryPort });
   @Module({ imports: [ApiModule] }) class TestModule {}
@@ -117,6 +117,16 @@ describe("admin YouTube Discovery direct API", () => {
     expect(port.acceptReview).toHaveBeenCalledWith(expect.objectContaining({ userId: "operator", email: "operator@example.com" }), "recommendation-1");
     await request(app.getHttpServer()).post("/v1/admin/knowledge/youtube-discovery/review/recommendation-1/accept").set(headers).send({ canonicalUrl: "https://unsafe.example" }).expect(400);
     await request(app.getHttpServer()).post("/v1/admin/knowledge/youtube-discovery/review/recommendation-1/accept").set({ Cookie: operator.cookie, Origin: "https://admin.xuyenviet.app", "x-xuyenviet-csrf": "invalid" }).send({}).expect(403);
+  });
+
+  test("admits only exact CSRF-protected Defer and Skip commands with route-specific outcomes", async () => {
+    const operator = await browserSession("operator", "operator");
+    const headers = { Cookie: operator.cookie, Origin: "https://admin.xuyenviet.app", "x-xuyenviet-csrf": operator.csrf };
+    await request(app.getHttpServer()).post("/v1/admin/knowledge/youtube-discovery/review/recommendation-1/defer").set(headers).send({}).expect(201, { outcome: "deferred" });
+    await request(app.getHttpServer()).post("/v1/admin/knowledge/youtube-discovery/review/recommendation-1/skip").set(headers).send({}).expect(201, { outcome: "skipped" });
+    await request(app.getHttpServer()).post("/v1/admin/knowledge/youtube-discovery/review/recommendation-1/defer").set(headers).send({ reason: "unsafe" }).expect(400);
+    expect(port.deferReview).toHaveBeenCalledWith(expect.objectContaining({ userId: "operator" }), "recommendation-1");
+    expect(port.skipReview).toHaveBeenCalledWith(expect.objectContaining({ userId: "operator" }), "recommendation-1");
   });
 
   test("rejects malformed review cursor and identifier before port admission", async () => {

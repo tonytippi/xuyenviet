@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { encodeAdminYoutubeDiscoveryReviewCursor, parseAdminYoutubeDiscoveryAcceptCommand, parseAdminYoutubeDiscoveryAcceptReviewResult, parseAdminYoutubeDiscoveryQuery, parseAdminYoutubeDiscoveryQueryList, parseAdminYoutubeDiscoveryReviewCursor, parseAdminYoutubeDiscoveryReviewDetail, parseAdminYoutubeDiscoveryReviewQueue } from "@xuyenviet/contracts";
+import { encodeAdminYoutubeDiscoveryReviewCursor, parseAdminYoutubeDiscoveryAcceptCommand, parseAdminYoutubeDiscoveryAcceptReviewResult, parseAdminYoutubeDiscoveryDeferCommand, parseAdminYoutubeDiscoveryDeferReviewResult, parseAdminYoutubeDiscoveryQuery, parseAdminYoutubeDiscoveryQueryList, parseAdminYoutubeDiscoveryReviewCursor, parseAdminYoutubeDiscoveryReviewDetail, parseAdminYoutubeDiscoveryReviewQueue, parseAdminYoutubeDiscoverySkipCommand, parseAdminYoutubeDiscoverySkipReviewResult } from "@xuyenviet/contracts";
 
 const query = { id: "proposal-1", origin: "operator" as const, queryText: "Da Lat route", reason: "operator_request" as const, priority: 50, enabled: true, cadenceMinutes: 60, nextRunAt: "2026-08-07T00:00:00.000Z", pausedReason: null };
 
@@ -42,5 +42,17 @@ describe("admin YouTube Discovery contract", () => {
     expect(parseAdminYoutubeDiscoveryAcceptReviewResult({ outcome: "duplicate" })).toEqual({ outcome: "duplicate" });
     expect(parseAdminYoutubeDiscoveryAcceptReviewResult({ outcome: "failed", sourceId: "unsafe" })).toBeNull();
     expect(parseAdminYoutubeDiscoveryAcceptReviewResult({ outcome: "reconciling", batchId: "unsafe" })).toBeNull();
+  });
+
+  test("defer and skip accept exactly empty JSON objects with route-specific closed outcomes", () => {
+    for (const command of [parseAdminYoutubeDiscoveryDeferCommand, parseAdminYoutubeDiscoverySkipCommand]) {
+      expect(command({})).toEqual({});
+      expect(command(undefined)).toBeNull();
+      expect(command({ reason: "unsafe" })).toBeNull();
+    }
+    expect(parseAdminYoutubeDiscoveryDeferReviewResult({ outcome: "deferred" })).toEqual({ outcome: "deferred" });
+    expect(parseAdminYoutubeDiscoveryDeferReviewResult({ outcome: "skipped" })).toBeNull();
+    expect(parseAdminYoutubeDiscoverySkipReviewResult({ outcome: "skipped" })).toEqual({ outcome: "skipped" });
+    expect(parseAdminYoutubeDiscoverySkipReviewResult({ outcome: "deferred", audit: {} })).toBeNull();
   });
 });

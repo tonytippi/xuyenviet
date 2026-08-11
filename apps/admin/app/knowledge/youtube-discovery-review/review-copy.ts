@@ -7,4 +7,6 @@ export const youtubeDiscoveryReviewCopy = {
   signal: { recent_discussion: "Thảo luận gần đây", stale_or_changed_warning: "Có thể đã thay đổi", practical_question_demand: "Nhu cầu câu hỏi thực tế", creator_responsiveness: "Tác giả phản hồi", commercial_risk: "Dấu hiệu thương mại", contradictory_discussion: "Thảo luận trái chiều" },
   priorCaptureOutcome: { eligible: "Chưa có bản tương thích", already_compatible: "Đã có bản tương thích", unavailable: "Chưa thể kiểm tra" },
   accept: { pending: "Đang thêm URL", reconciling: "Đang kiểm tra kết quả thêm URL", submitted: "Đã thêm URL vào nguồn chờ xử lý. Bạn vẫn cần chạy YouTube Capture thủ công.", duplicate: "URL này đã có trong nguồn chờ xử lý hoặc đã được lưu trước đó.", failed: "Không thể thêm URL lúc này. Bạn có thể thử lại." },
+  defer: { pending: "Đang để ứng viên lại để xem sau.", deferred: "Đã để ứng viên lại để xem sau.", failed: "Không thể để ứng viên lại lúc này. Bạn có thể thử lại." },
+  skip: { pending: "Đang bỏ qua ứng viên.", skipped: "Đã bỏ qua ứng viên.", failed: "Không thể bỏ qua ứng viên lúc này. Bạn có thể thử lại." },
 } as const;

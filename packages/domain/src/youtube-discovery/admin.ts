@@ -1,4 +1,4 @@
-import type { AdminYoutubeDiscoveryAcceptReviewResult, AdminYoutubeDiscoveryQuery, AdminYoutubeDiscoveryQueryList, AdminYoutubeDiscoveryReviewCursor, AdminYoutubeDiscoveryReviewDetail, AdminYoutubeDiscoveryReviewQueue, RequestPrincipal } from "@xuyenviet/contracts";
+import type { AdminYoutubeDiscoveryAcceptReviewResult, AdminYoutubeDiscoveryDeferReviewResult, AdminYoutubeDiscoveryQuery, AdminYoutubeDiscoveryQueryList, AdminYoutubeDiscoveryReviewCursor, AdminYoutubeDiscoveryReviewDetail, AdminYoutubeDiscoveryReviewQueue, AdminYoutubeDiscoverySkipReviewResult, RequestPrincipal } from "@xuyenviet/contracts";
 import type { KnowledgeOneUrlHandoff } from "../admin-knowledge-intake";
 
 /** A cursor must continue to identify an active queue row before it can seek. */
@@ -9,6 +9,8 @@ export type AdminYoutubeDiscoveryPort = {
   listReview(principal: RequestPrincipal, cursor: AdminYoutubeDiscoveryReviewCursor | null): Promise<AdminYoutubeDiscoveryReviewQueue>;
   getReview(principal: RequestPrincipal, recommendationId: string): Promise<AdminYoutubeDiscoveryReviewDetail | null>;
   acceptReview(principal: RequestPrincipal, recommendationId: string): Promise<AdminYoutubeDiscoveryAcceptReviewResult | null>;
+  deferReview(principal: RequestPrincipal, recommendationId: string): Promise<AdminYoutubeDiscoveryDeferReviewResult | null>;
+  skipReview(principal: RequestPrincipal, recommendationId: string): Promise<AdminYoutubeDiscoverySkipReviewResult | null>;
   create(principal: RequestPrincipal, input: { queryText: string; priority: number; cadenceMinutes: number }): Promise<AdminYoutubeDiscoveryQuery>;
   edit(principal: RequestPrincipal, id: string, queryText: string): Promise<AdminYoutubeDiscoveryQuery | null>;
   reprioritize(principal: RequestPrincipal, id: string, priority: number): Promise<AdminYoutubeDiscoveryQuery | null>;

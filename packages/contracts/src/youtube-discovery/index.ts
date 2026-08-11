@@ -74,11 +74,17 @@ export type AdminYoutubeDiscoveryReviewQueueItem = Readonly<{ recommendationId: 
 export type AdminYoutubeDiscoveryReviewQueue = Readonly<{ items: AdminYoutubeDiscoveryReviewQueueItem[]; nextCursor: string | null }>;
 export type AdminYoutubeDiscoveryReviewDetail = Readonly<AdminYoutubeDiscoveryReviewQueueItem & { queryText: string; queryReason: ReviewQueryReason; score: number; factors: ReviewFactor[]; penalties: ReviewPenalty[]; signals: ReviewSignal[]; priorCaptureOutcome: ReviewPriorCaptureOutcome }>;
 export type AdminYoutubeDiscoveryAcceptReviewResult = Readonly<{ outcome: "submitted" | "duplicate" | "failed" | "reconciling" }>;
+export type AdminYoutubeDiscoveryDeferReviewResult = Readonly<{ outcome: "deferred" }>;
+export type AdminYoutubeDiscoverySkipReviewResult = Readonly<{ outcome: "skipped" }>;
 
 export function parseAdminYoutubeDiscoveryAcceptCommand(value: unknown): Record<string, never> | null { return record(value) && exactKeys(value, []) ? {} : null; }
+export function parseAdminYoutubeDiscoveryDeferCommand(value: unknown): Record<string, never> | null { return record(value) && exactKeys(value, []) ? {} : null; }
+export function parseAdminYoutubeDiscoverySkipCommand(value: unknown): Record<string, never> | null { return record(value) && exactKeys(value, []) ? {} : null; }
 export function parseAdminYoutubeDiscoveryAcceptReviewResult(value: unknown): AdminYoutubeDiscoveryAcceptReviewResult | null {
   return record(value) && exactKeys(value, ["outcome"]) && (value.outcome === "submitted" || value.outcome === "duplicate" || value.outcome === "failed" || value.outcome === "reconciling") ? value as AdminYoutubeDiscoveryAcceptReviewResult : null;
 }
+export function parseAdminYoutubeDiscoveryDeferReviewResult(value: unknown): AdminYoutubeDiscoveryDeferReviewResult | null { return record(value) && exactKeys(value, ["outcome"]) && value.outcome === "deferred" ? value as AdminYoutubeDiscoveryDeferReviewResult : null; }
+export function parseAdminYoutubeDiscoverySkipReviewResult(value: unknown): AdminYoutubeDiscoverySkipReviewResult | null { return record(value) && exactKeys(value, ["outcome"]) && value.outcome === "skipped" ? value as AdminYoutubeDiscoverySkipReviewResult : null; }
 export type AdminYoutubeDiscoveryReviewCursor = Readonly<{ score: number; createdAt: string; recommendationId: string }>;
 
 export function encodeAdminYoutubeDiscoveryReviewCursor(cursor: AdminYoutubeDiscoveryReviewCursor): string {

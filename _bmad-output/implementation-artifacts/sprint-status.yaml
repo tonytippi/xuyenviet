@@ -434,7 +434,8 @@ development_status:
   19-2-produce-deterministic-candidate-recommendations: done
   19-3-review-one-ranked-candidate-at-a-time: done
   19-4-accept-a-candidate-through-knowledge-intake: done
-  19-5-defer-skip-and-verify-candidate-decision-safety: ready-for-dev
+  # 2026-08-11: Implemented exact closed Defer/Skip commands, audited locked Discovery-only transitions, protected API routes, and server-ranked workbench recovery. Focused unit (7) and serial integration/API (14) tests, lint with 0 errors and 46 existing warnings, typecheck, build, and diff check passed. Review repairs hardened interrupted-decision reconciliation and desktop/mobile keyboard focus.
+  19-5-defer-skip-and-verify-candidate-decision-safety: done
   epic-19-retrospective: optional
 
   epic-20: backlog
