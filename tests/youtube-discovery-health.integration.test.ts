@@ -121,6 +121,39 @@ describe.sequential("YouTube Discovery Health projections", () => {
     expect(overview.latestQueryRun).toMatchObject({ state: "failed", at: expect.any(String), lastUpdatedAt: expect.any(String), freshness: "current" });
   });
 
+  test("orders and bounds paused context while fencing only live claimed runs with safe timestamps", async () => {
+    await seedTestOperator();
+    const policy = await createYoutubeDiscoveryPolicyVersion({ version: 1, isCurrent: true, actor: createSystemAuditActor("system-youtube-discovery") }, testDb);
+    const runs = await Promise.all(Array.from({ length: 25 }, () => createYoutubeDiscoveryRun({ policyVersionId: policy.id }, testDb)));
+    const now = Date.now();
+    const claimedAt = [new Date(now - 1_000), new Date(now - 2_000), new Date(now - 2_000)];
+    const terminalAt = Array.from({ length: 20 }, (_, index) => new Date(now - (index + 10) * 1_000));
+    const claim = (at: Date, leaseExpiresAt: ReturnType<typeof sql>) => ({ claimedBy: "paused-context", claimedAt: at, leaseExpiresAt, fencingToken: "a".repeat(64) });
+    await Promise.all([
+      ...runs.slice(4, 7).map((run, index) => testDb.update(youtubeDiscoveryRuns).set({ state: "cancelled", terminalAt: new Date(now - (index + 4) * 1_000), terminalOutcome: "cancelled", safeErrorCode: "policy_revoked" }).where(eq(youtubeDiscoveryRuns.id, run.id))),
+      ...runs.slice(7).map((run, index) => testDb.update(youtubeDiscoveryRuns).set({ state: "completed", terminalAt: terminalAt[index]!, terminalOutcome: "completed" }).where(eq(youtubeDiscoveryRuns.id, run.id))),
+    ]);
+    const disabled = await createYoutubeDiscoveryPolicyVersion({ version: 2, isCurrent: true, policy: { enabled: false, maxConcurrentRuns: 3 }, actor: createSystemAuditActor("system-youtube-discovery") }, testDb);
+    await Promise.all([
+      ...runs.slice(0, 3).map((run, index) => testDb.update(youtubeDiscoveryRuns).set({ state: "running", ...claim(claimedAt[index]!, sql`clock_timestamp() + interval '1 hour'`) }).where(eq(youtubeDiscoveryRuns.id, run.id))),
+      testDb.update(youtubeDiscoveryRuns).set({ state: "running", ...claim(new Date(now - 3_000), sql`clock_timestamp() - interval '1 second'`) }).where(eq(youtubeDiscoveryRuns.id, runs[3]!.id)),
+    ]);
+    const persisted = await testDb.select({ id: youtubeDiscoveryRuns.id, state: youtubeDiscoveryRuns.state, claimedAt: youtubeDiscoveryRuns.claimedAt, leaseExpiresAt: youtubeDiscoveryRuns.leaseExpiresAt }).from(youtubeDiscoveryRuns).where(eq(youtubeDiscoveryRuns.id, runs[0]!.id));
+    expect(persisted[0]).toMatchObject({ state: "running", claimedAt: claimedAt[0], leaseExpiresAt: expect.any(Date) });
+
+    const overview = await createPostgresAdminYoutubeDiscoveryPort(undefined, testDb).healthOverview();
+
+    expect(overview.pausedRuns).toEqual([
+      ...runs.slice(0, 3).sort((left, right) => claimedAt[runs.indexOf(right)]!.getTime() - claimedAt[runs.indexOf(left)]!.getTime() || left.id.localeCompare(right.id)).map((run) => ({ runId: run.id, state: "fencing_requested" as const, at: claimedAt[runs.indexOf(run)]!.toISOString() })),
+      ...runs.slice(4, 7).map((run, index) => ({ runId: run.id, state: "policy_revoked" as const, at: new Date(now - (index + 4) * 1_000).toISOString() })),
+      ...runs.slice(7, 21).map((run, index) => ({ runId: run.id, state: "completed_before_disabled" as const, at: terminalAt[index]!.toISOString() })),
+    ]);
+    expect(overview.pausedRuns).toHaveLength(20);
+    expect(overview.pausedRuns.some((run) => run.runId === runs[3]!.id)).toBe(false);
+    expect(overview.pausedRuns[0]?.at).not.toEqual(disabled.createdAt.toISOString());
+    expect(overview.pausedRuns.every((run) => Object.keys(run).sort().join(",") === "at,runId,state")).toBe(true);
+  });
+
   test("selects the latest terminal query result with a deterministic run-ID tie-breaker", async () => {
     await seedTestOperator();
     const policy = await createYoutubeDiscoveryPolicyVersion({ version: 1, isCurrent: true, policy: { cadenceMinutes: 15 }, actor: createSystemAuditActor("system-youtube-discovery") }, testDb);

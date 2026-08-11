@@ -247,10 +247,12 @@ export async function recoverExpiredYoutubeDiscoveryRuns(database: DiscoveryWrit
     let terminalCount = 0;
     let contended = false;
     for (const row of expired) {
-      const [run] = await transaction.update(youtubeDiscoveryRuns).set({ state: sql`case when ${youtubeDiscoveryRuns.attemptCount} > ${youtubeDiscoveryRuns.maxRetryAttempts} then 'failed' else 'queued' end`, claimedBy: null, claimedAt: null, leaseExpiresAt: null, fencingToken: null, nextRunAt: sql`clock_timestamp()`, terminalAt: sql`case when ${youtubeDiscoveryRuns.attemptCount} > ${youtubeDiscoveryRuns.maxRetryAttempts} then clock_timestamp() else null end`, terminalOutcome: sql`case when ${youtubeDiscoveryRuns.attemptCount} > ${youtubeDiscoveryRuns.maxRetryAttempts} then 'failed' else null end`, safeErrorCode: sql`case when ${youtubeDiscoveryRuns.attemptCount} > ${youtubeDiscoveryRuns.maxRetryAttempts} then 'lease_retry_exhausted' else null end`, incidentCategory: sql`case when ${youtubeDiscoveryRuns.attemptCount} > ${youtubeDiscoveryRuns.maxRetryAttempts} then coalesce(${youtubeDiscoveryRuns.incidentCategory}, 'execution_terminal') else ${youtubeDiscoveryRuns.incidentCategory} end` }).where(and(eq(youtubeDiscoveryRuns.id, row.id), eq(youtubeDiscoveryRuns.state, "running"), sql`${youtubeDiscoveryRuns.leaseExpiresAt} <= clock_timestamp()`)).returning();
+      const revoked = sql`not exists (select 1 from youtube_discovery_policy_versions current_policy where current_policy.is_current = true and current_policy.enabled = true and current_policy.id = ${youtubeDiscoveryRuns.policyVersionId})`;
+      const [run] = await transaction.update(youtubeDiscoveryRuns).set({ state: sql`case when ${revoked} then 'cancelled' when ${youtubeDiscoveryRuns.attemptCount} > ${youtubeDiscoveryRuns.maxRetryAttempts} then 'failed' else 'queued' end`, claimedBy: null, claimedAt: null, leaseExpiresAt: null, fencingToken: null, nextRunAt: sql`clock_timestamp()`, terminalAt: sql`case when ${revoked} or ${youtubeDiscoveryRuns.attemptCount} > ${youtubeDiscoveryRuns.maxRetryAttempts} then clock_timestamp() else null end`, terminalOutcome: sql`case when ${revoked} then 'cancelled' when ${youtubeDiscoveryRuns.attemptCount} > ${youtubeDiscoveryRuns.maxRetryAttempts} then 'failed' else null end`, safeErrorCode: sql`case when ${revoked} then 'policy_revoked' when ${youtubeDiscoveryRuns.attemptCount} > ${youtubeDiscoveryRuns.maxRetryAttempts} then 'lease_retry_exhausted' else null end`, incidentCategory: sql`case when ${revoked} then null when ${youtubeDiscoveryRuns.attemptCount} > ${youtubeDiscoveryRuns.maxRetryAttempts} then coalesce(${youtubeDiscoveryRuns.incidentCategory}, 'execution_terminal') else ${youtubeDiscoveryRuns.incidentCategory} end` }).where(and(eq(youtubeDiscoveryRuns.id, row.id), eq(youtubeDiscoveryRuns.state, "running"), sql`${youtubeDiscoveryRuns.leaseExpiresAt} <= clock_timestamp()`)).returning();
       if (!run) { contended = true; continue; }
       count += 1;
-      if (run.state === "failed") { terminalCount += 1; await recordTerminalAudit(transaction, run.id, "failed", run.attemptCount, "lease_retry_exhausted", run.policyVersionId); }
+      if (run.state === "cancelled") { terminalCount += 1; await recordTerminalAudit(transaction, run.id, "cancelled", run.attemptCount, "policy_revoked", run.policyVersionId); }
+      else if (run.state === "failed") { terminalCount += 1; await recordTerminalAudit(transaction, run.id, "failed", run.attemptCount, "lease_retry_exhausted", run.policyVersionId); }
     }
     return { count, terminalCount, contended };
   });
@@ -260,9 +262,9 @@ export async function finishYoutubeDiscoveryRun(claim: YoutubeDiscoveryRunClaim,
   return database.transaction(async (transaction) => {
     const [run] = await transaction.select({ id: youtubeDiscoveryRuns.id, attemptCount: youtubeDiscoveryRuns.attemptCount, policyVersionId: youtubeDiscoveryRuns.policyVersionId }).from(youtubeDiscoveryRuns).where(activeClaim(claim)).limit(1).for("update");
     if (!run) return "contended";
-    const [currentPolicy] = await transaction.select({ enabled: youtubeDiscoveryPolicyVersions.enabled }).from(youtubeDiscoveryPolicyVersions).where(eq(youtubeDiscoveryPolicyVersions.isCurrent, true)).limit(1).for("update");
+    const [currentPolicy] = await transaction.select({ id: youtubeDiscoveryPolicyVersions.id, enabled: youtubeDiscoveryPolicyVersions.enabled }).from(youtubeDiscoveryPolicyVersions).where(eq(youtubeDiscoveryPolicyVersions.isCurrent, true)).limit(1).for("update");
     const [proposal] = await transaction.execute(sql`select enabled from youtube_discovery_query_proposals where id = (select query_proposal_id from youtube_discovery_runs where id = ${run.id}) for update`) as Array<{ enabled: boolean }>;
-    const outcome = currentPolicy?.enabled && proposal?.enabled !== false ? "completed" : "cancelled";
+    const outcome = currentPolicy?.enabled && currentPolicy.id === run.policyVersionId && proposal?.enabled !== false ? "completed" : "cancelled";
     const safeErrorCode = outcome === "cancelled" ? "policy_revoked" : null;
     const [updated] = await transaction.update(youtubeDiscoveryRuns).set({ state: outcome, claimedBy: null, claimedAt: null, leaseExpiresAt: null, fencingToken: null, terminalAt: sql`clock_timestamp()`, terminalOutcome: outcome, safeErrorCode }).where(activeClaim(claim)).returning();
     if (!updated) return "contended";
@@ -275,9 +277,9 @@ export async function cancelYoutubeDiscoveryRunIfDisabled(claim: YoutubeDiscover
   return database.transaction(async (transaction) => {
     const [run] = await transaction.select({ id: youtubeDiscoveryRuns.id, attemptCount: youtubeDiscoveryRuns.attemptCount, policyVersionId: youtubeDiscoveryRuns.policyVersionId }).from(youtubeDiscoveryRuns).where(activeClaim(claim)).limit(1).for("update");
     if (!run) return "contended";
-    const [currentPolicy] = await transaction.select({ enabled: youtubeDiscoveryPolicyVersions.enabled }).from(youtubeDiscoveryPolicyVersions).where(eq(youtubeDiscoveryPolicyVersions.isCurrent, true)).limit(1).for("update");
+    const [currentPolicy] = await transaction.select({ id: youtubeDiscoveryPolicyVersions.id, enabled: youtubeDiscoveryPolicyVersions.enabled }).from(youtubeDiscoveryPolicyVersions).where(eq(youtubeDiscoveryPolicyVersions.isCurrent, true)).limit(1).for("update");
     const [proposal] = await transaction.execute(sql`select enabled from youtube_discovery_query_proposals where id = (select query_proposal_id from youtube_discovery_runs where id = ${run.id}) for update`) as Array<{ enabled: boolean }>;
-    if (currentPolicy?.enabled && (proposal?.enabled === true || !requireProposal && proposal === undefined)) return "active";
+    if (currentPolicy?.enabled && currentPolicy.id === run.policyVersionId && (proposal?.enabled === true || !requireProposal && proposal === undefined)) return "active";
     const [updated] = await transaction.update(youtubeDiscoveryRuns).set({ state: "cancelled", claimedBy: null, claimedAt: null, leaseExpiresAt: null, fencingToken: null, terminalAt: sql`clock_timestamp()`, terminalOutcome: "cancelled", safeErrorCode: "policy_revoked" }).where(activeClaim(claim)).returning();
     if (!updated) return "contended";
     await recordTerminalAudit(transaction, updated.id, "cancelled", updated.attemptCount, "policy_revoked", run.policyVersionId);
@@ -508,9 +510,9 @@ export async function retryYoutubeDiscoveryRun(claim: YoutubeDiscoveryRunClaim, 
   return database.transaction(async (transaction) => {
     const [run] = await transaction.select({ id: youtubeDiscoveryRuns.id, attemptCount: youtubeDiscoveryRuns.attemptCount, maxRetryAttempts: youtubeDiscoveryRuns.maxRetryAttempts, retryDelayMinutes: youtubeDiscoveryRuns.retryDelayMinutes, policyVersionId: youtubeDiscoveryRuns.policyVersionId, incidentCategory: youtubeDiscoveryRuns.incidentCategory }).from(youtubeDiscoveryRuns).where(activeClaim(claim)).limit(1).for("update");
     if (!run) return "contended";
-    const [currentPolicy] = await transaction.select({ enabled: youtubeDiscoveryPolicyVersions.enabled }).from(youtubeDiscoveryPolicyVersions).where(eq(youtubeDiscoveryPolicyVersions.isCurrent, true)).limit(1).for("update");
+    const [currentPolicy] = await transaction.select({ id: youtubeDiscoveryPolicyVersions.id, enabled: youtubeDiscoveryPolicyVersions.enabled }).from(youtubeDiscoveryPolicyVersions).where(eq(youtubeDiscoveryPolicyVersions.isCurrent, true)).limit(1).for("update");
     const [proposal] = await transaction.execute(sql`select enabled from youtube_discovery_query_proposals where id = (select query_proposal_id from youtube_discovery_runs where id = ${run.id}) for update`) as Array<{ enabled: boolean }>;
-    const outcome: YoutubeDiscoveryRunDisposition = !currentPolicy?.enabled || proposal?.enabled === false ? "cancelled" : isYoutubeDiscoveryRetryExhausted(run.attemptCount, run.maxRetryAttempts) ? "failed" : "retrying";
+    const outcome: YoutubeDiscoveryRunDisposition = !currentPolicy?.enabled || currentPolicy.id !== run.policyVersionId || proposal?.enabled === false ? "cancelled" : isYoutubeDiscoveryRetryExhausted(run.attemptCount, run.maxRetryAttempts) ? "failed" : "retrying";
     const safeErrorCode: YoutubeDiscoveryRunSafeErrorCode = outcome === "cancelled" ? "policy_revoked" : outcome === "failed" ? "retry_exhausted" : "stage_transient";
     const retryDelayMinutes = getYoutubeDiscoveryRetryDelayMinutes(run.retryDelayMinutes, run.attemptCount);
     const retainedIncidentCategory = incidentCategory ?? run.incidentCategory;
