@@ -1,6 +1,6 @@
 ---
 story_id: 20-2
-status: ready-for-dev
+status: done
 created: 2026-08-11
 epic: 20
 ---
@@ -132,7 +132,17 @@ gpu4ai/gpt-5.6-terra
 - Story status is ready-for-dev. No implementation, migration, database reset, test execution, or commit was performed while creating this story.
 - The guide locks the existing durable Mission linkage (`missionActionId`), preserves system-query text immutability, prevents read-side effects from `listReview`, and explicitly leaves seasonal grouping unavailable unless a safe persisted field is approved.
 - Story validation applied 2026-08-11: Mission detail follows only durable system proposals; every collection has cursor pagination and deterministic ordering; candidate/run/Funnel selection is explicit; routes, CSRF/request-fencing behavior, safe unavailable rendering, and unit-test registration are locked.
+- 2026-08-11: BMad code review repaired all seven findings. Focused unit `8/8`, focused serial integration/API `20/20`, typecheck, build, and diff check pass. Lint has 0 errors and 50 existing warnings. Full integration has 17 unrelated failures; no Story 20.2 test failed.
 
 ### File List
 
 - _bmad-output/implementation-artifacts/20-2-deliver-knowledge-mission-drill-downs.md
+- _bmad-output/implementation-artifacts/spec-20-2-deliver-knowledge-mission-drill-downs.md
+- packages/contracts/src/youtube-discovery/index.ts
+- packages/database/src/admin-youtube-discovery.ts
+- packages/database/src/knowledge-discovery-action-inputs.ts
+- apps/admin/app/knowledge/youtube-discovery/mission/mission.tsx
+- apps/admin/app/knowledge/youtube-discovery/mission/[actionId]/detail.tsx
+- tests/admin-youtube-discovery-contract.test.ts
+- tests/admin-youtube-discovery-mission-ui.test.ts
+- tests/youtube-discovery-mission.integration.test.ts

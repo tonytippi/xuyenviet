@@ -79,6 +79,16 @@ warnings: [oversized]
 
 ## Review Triage Log
 
+### Review Findings
+
+- [x] [Review][Patch] Mission cursors preserve PostgreSQL microseconds for valid next pages [packages/database/src/admin-youtube-discovery.ts:141]
+- [x] [Review][Patch] Coverage cursors preserve PostgreSQL microseconds for valid next pages [packages/database/src/knowledge-discovery-action-inputs.ts:29]
+- [x] [Review][Patch] Funnel counts each canonical candidate once globally [packages/database/src/admin-youtube-discovery.ts:157]
+- [x] [Review][Patch] Mission-detail contract requires a system-origin query [packages/contracts/src/youtube-discovery/index.ts:94]
+- [x] [Review][Patch] Mission UI synchronizes browser history and validates an empty priority field [apps/admin/app/knowledge/youtube-discovery/mission/mission.tsx:18]
+- [x] [Review][Patch] Mission pagination announces ranges and retains detail load-more focus [apps/admin/app/knowledge/youtube-discovery/mission/mission.tsx:45]
+- [x] [Review][Patch] Coverage view renders safe context and unavailable states [apps/admin/app/knowledge/youtube-discovery/mission/mission.tsx:65]
+
 ### 2026-08-11 -- Review pass
 - intent_gap: 0
 - bad_spec: 14 (high 14)
@@ -97,6 +107,12 @@ warnings: [oversized]
 - addressed_findings:
   - `[high]` `[patch]` Scoped candidate lineage and cursors by Mission action, paginated detail candidates, and rejected stale collection cursors.
   - `[medium]` `[patch]` Recovered detail authentication, made command fencing per action, aligned cadence validation, and rendered the mandatory ranking safety copy.
+
+### 2026-08-11 -- Follow-up review repair
+
+- Resolved all seven actionable Story 20.2 findings: microsecond-stable Coverage/Query cursors, canonical candidate Funnel deduplication, system-only detail query parsing, URL/history and priority validation, pagination announcements/focus, and complete safe Coverage context.
+- Verification passed: focused unit `8/8`; focused serial Mission integration/API `20/20`; `pnpm typecheck`; `pnpm lint` with 0 errors and 50 existing warnings; `pnpm build`; and `git diff --check`.
+- `pnpm test:integration` remains blocked by 17 unrelated failures in Facebook rerun fixtures, AI Ask, browser identity, Knowledge ingestion, validation pipe, Worker adapter, and Discovery foundation assertions. No Story 20.2 test failed.
 
 ## Auto Run Result
 

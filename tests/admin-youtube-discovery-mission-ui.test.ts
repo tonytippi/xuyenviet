@@ -13,5 +13,6 @@ describe("Mission UI interaction boundary", () => {
     expect(invalid).toEqual({ queryText: "", priority: "101", cadenceMinutes: "14" });
     expect(validateMissionQueryDraft({ queryText: "Đèo Prenn", priority: "25", cadenceMinutes: "60" }, true)).toEqual({});
     expect(validateMissionQueryDraft({ queryText: "Đèo Prenn", priority: "25", cadenceMinutes: "10081" }, true)).toEqual({ cadenceMinutes: "Chu kỳ phải từ 15 đến 10080 phút." });
+    expect(validateMissionQueryDraft({ queryText: "Đèo Prenn", priority: "", cadenceMinutes: "60" }, false)).toEqual({ priority: "Ưu tiên phải từ 1 đến 100." });
   });
 });

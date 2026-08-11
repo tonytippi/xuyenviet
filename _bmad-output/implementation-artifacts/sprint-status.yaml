@@ -443,7 +443,8 @@ development_status:
   # 2026-08-11: Story 20.1 guide created. Initial operational policy is versioned/audited: high priority 1..20; pending-review age 72h; Mission stall 48h; high-impact open Knowledge risk/relation at priority 1..20; two same query/category terminal failures in 24h; safely classified rate limits escalate immediately.
   epic-20: in-progress
   20-1-build-the-action-required-discovery-queue: in-progress
-  20-2-deliver-knowledge-mission-drill-downs: ready-for-dev
+  # 2026-08-11: All seven BMad review repairs are complete. Focused unit (8) and serial Mission integration/API (20) tests, typecheck, build, and diff check pass. Full integration remains blocked by 17 unrelated failures; no Story 20.2 test failed.
+  20-2-deliver-knowledge-mission-drill-downs: done
   20-3-deliver-automation-health-and-safe-incident-detail: backlog
   20-4-control-discovery-enablement-safely: backlog
   20-5-verify-control-tower-accessibility-and-operational-boundaries: backlog

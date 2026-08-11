@@ -56,6 +56,7 @@ describe.sequential("YouTube Discovery Mission projections", () => {
     const secondDetail = await port.getMissionDetail(actionId, nextCursor);
     expect(secondDetail?.candidates.items).toEqual([expect.objectContaining({ candidateId: candidate.candidateId, actionId })]);
     expect((await port.getMissionDetail(secondActionId, null))?.candidates.items).toEqual([expect.objectContaining({ candidateId: candidate.candidateId, actionId: secondActionId })]);
+    expect((await port.missionFunnel()).recommended).toBe(21);
     const queries = await port.listMissionQueries(null);
     await testDb.update(youtubeDiscoveryQueryProposals).set({ priority: 2 }).where(eq(youtubeDiscoveryQueryProposals.id, firstQuery.id));
     await expect(port.listMissionQueries(queries.nextCursor ? null : { version: 1, priority: firstQuery.priority, createdAt: firstQuery.createdAt.toISOString(), id: firstQuery.id })).rejects.toThrow("Invalid YouTube Discovery Mission cursor.");
