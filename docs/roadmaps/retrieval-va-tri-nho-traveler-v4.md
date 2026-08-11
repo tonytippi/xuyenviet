@@ -2,7 +2,7 @@
 
 ## Trạng thái
 
-Đề xuất ngày 2026-08-10, cập nhật từ v3 (`docs/roadmaps/retrieval-va-tri-nho-traveler-v3.md`) sau quyết định thiết kế: loại bỏ các giới hạn cứng kiểu kỹ thuật (số card, latency budget, type quota) vì chúng block việc sử dụng thay vì bảo vệ chất lượng. Đây là lộ trình định hướng, không phải build plan đã được phê duyệt. Mỗi nhóm thay đổi lớn cần PRD và architecture riêng trước khi triển khai.
+**Đã được thay thế bởi v5:** `docs/roadmaps/retrieval-va-tri-nho-traveler-v5.md` ngày 2026-08-10. V5 giữ các nguyên tắc provenance-first của tài liệu này nhưng thay đổi thứ tự ưu tiên: geographic scope correctness, card applicability, và facet coverage phải được giải quyết trước khi tăng prompt budget hoặc nâng cấp lexical/vector retrieval. Tài liệu này chỉ còn giá trị lịch sử, không dùng làm nguồn định hướng triển khai.
 
 **Thay đổi chính so với v3:**
 
