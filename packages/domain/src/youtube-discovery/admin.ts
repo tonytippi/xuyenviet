@@ -1,9 +1,10 @@
-import type { AdminYoutubeDiscoveryAcceptReviewResult, AdminYoutubeDiscoveryActionRequiredCursor, AdminYoutubeDiscoveryActionRequiredQueue, AdminYoutubeDiscoveryDeferReviewResult, AdminYoutubeDiscoveryQuery, AdminYoutubeDiscoveryQueryList, AdminYoutubeDiscoveryReviewCursor, AdminYoutubeDiscoveryReviewDetail, AdminYoutubeDiscoveryReviewQueue, AdminYoutubeDiscoverySkipReviewResult, RequestPrincipal } from "@xuyenviet/contracts";
+import type { AdminYoutubeDiscoveryAcceptReviewResult, AdminYoutubeDiscoveryActionRequiredCursor, AdminYoutubeDiscoveryActionRequiredQueue, AdminYoutubeDiscoveryDeferReviewResult, AdminYoutubeDiscoveryMissionCandidateCursor, AdminYoutubeDiscoveryMissionCandidatePage, AdminYoutubeDiscoveryMissionCoverage, AdminYoutubeDiscoveryMissionCoverageCursor, AdminYoutubeDiscoveryMissionCoveragePage, AdminYoutubeDiscoveryMissionDetail, AdminYoutubeDiscoveryMissionFunnel, AdminYoutubeDiscoveryMissionQueryCursor, AdminYoutubeDiscoveryMissionQueryPage, AdminYoutubeDiscoveryQuery, AdminYoutubeDiscoveryQueryList, AdminYoutubeDiscoveryReviewCursor, AdminYoutubeDiscoveryReviewDetail, AdminYoutubeDiscoveryReviewQueue, AdminYoutubeDiscoverySkipReviewResult, RequestPrincipal } from "@xuyenviet/contracts";
 import type { KnowledgeOneUrlHandoff } from "../admin-knowledge-intake";
 
 /** A cursor must continue to identify an active queue row before it can seek. */
 export class YoutubeDiscoveryReviewCursorValidationError extends Error {}
 export class YoutubeDiscoveryActionRequiredCursorValidationError extends Error {}
+export class YoutubeDiscoveryMissionCursorValidationError extends Error {}
 
 export type YoutubeDiscoveryMissionActionInput = Readonly<{ actionId: string; priority: number; createdAt: Date }>;
 export type YoutubeDiscoveryKnowledgeActionInput = Readonly<{ recommendationId: string; workType: "risk" | "relation"; priority: number; createdAt: Date }>;
@@ -11,6 +12,10 @@ export type YoutubeDiscoveryActionOwnerPorts = Readonly<{
   admitsActionCursor(cursor: AdminYoutubeDiscoveryActionRequiredCursor): Promise<boolean>;
   listMissionNeeds(policy: Readonly<{ highPriorityMaximum: number }>): Promise<YoutubeDiscoveryMissionActionInput[]>;
   listKnowledgeRecommendations(policy: Readonly<{ highPriorityMaximum: number }>): Promise<YoutubeDiscoveryKnowledgeActionInput[]>;
+}>;
+export type YoutubeDiscoveryMissionOwnerPorts = Readonly<{
+  listMissionCoverage(cursor: AdminYoutubeDiscoveryMissionCoverageCursor | null): Promise<AdminYoutubeDiscoveryMissionCoveragePage>;
+  getMissionDetail(actionId: string): Promise<AdminYoutubeDiscoveryMissionCoverage | null>;
 }>;
 
 export type AdminYoutubeDiscoveryPort = {
@@ -26,6 +31,11 @@ export type AdminYoutubeDiscoveryPort = {
   reprioritize(principal: RequestPrincipal, id: string, priority: number): Promise<AdminYoutubeDiscoveryQuery | null>;
   pause(principal: RequestPrincipal, id: string): Promise<AdminYoutubeDiscoveryQuery | null>;
   resume(principal: RequestPrincipal, id: string): Promise<AdminYoutubeDiscoveryQuery | null>;
+  listMissionCoverage(cursor: AdminYoutubeDiscoveryMissionCoverageCursor | null): Promise<AdminYoutubeDiscoveryMissionCoveragePage>;
+  listMissionQueries(cursor: AdminYoutubeDiscoveryMissionQueryCursor | null): Promise<AdminYoutubeDiscoveryMissionQueryPage>;
+  listMissionCandidates(cursor: AdminYoutubeDiscoveryMissionCandidateCursor | null): Promise<AdminYoutubeDiscoveryMissionCandidatePage>;
+  missionFunnel(): Promise<AdminYoutubeDiscoveryMissionFunnel>;
+  getMissionDetail(actionId: string, cursor: AdminYoutubeDiscoveryMissionCandidateCursor | null): Promise<AdminYoutubeDiscoveryMissionDetail | null>;
 };
 
-export type AdminYoutubeDiscoveryDependencies = { captureEligibility?: { check(videoId: string): Promise<"eligible" | "already_compatible" | "unavailable"> }; knowledgeHandoff?: KnowledgeOneUrlHandoff; actionOwners?: YoutubeDiscoveryActionOwnerPorts };
+export type AdminYoutubeDiscoveryDependencies = { captureEligibility?: { check(videoId: string): Promise<"eligible" | "already_compatible" | "unavailable"> }; knowledgeHandoff?: KnowledgeOneUrlHandoff; actionOwners?: YoutubeDiscoveryActionOwnerPorts; missionOwners?: YoutubeDiscoveryMissionOwnerPorts };

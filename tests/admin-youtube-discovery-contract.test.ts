@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { encodeAdminYoutubeDiscoveryActionRequiredCursor, encodeAdminYoutubeDiscoveryReviewCursor, parseAdminYoutubeDiscoveryAcceptCommand, parseAdminYoutubeDiscoveryAcceptReviewResult, parseAdminYoutubeDiscoveryActionRequiredCursor, parseAdminYoutubeDiscoveryActionRequiredQueue, parseAdminYoutubeDiscoveryDeferCommand, parseAdminYoutubeDiscoveryDeferReviewResult, parseAdminYoutubeDiscoveryQuery, parseAdminYoutubeDiscoveryQueryList, parseAdminYoutubeDiscoveryReviewCursor, parseAdminYoutubeDiscoveryReviewDetail, parseAdminYoutubeDiscoveryReviewQueue, parseAdminYoutubeDiscoverySkipCommand, parseAdminYoutubeDiscoverySkipReviewResult } from "@xuyenviet/contracts";
+import { encodeAdminYoutubeDiscoveryActionRequiredCursor, encodeAdminYoutubeDiscoveryMissionCandidateCursor, encodeAdminYoutubeDiscoveryMissionCoverageCursor, encodeAdminYoutubeDiscoveryMissionQueryCursor, encodeAdminYoutubeDiscoveryReviewCursor, parseAdminYoutubeDiscoveryAcceptCommand, parseAdminYoutubeDiscoveryAcceptReviewResult, parseAdminYoutubeDiscoveryActionRequiredCursor, parseAdminYoutubeDiscoveryActionRequiredQueue, parseAdminYoutubeDiscoveryDeferCommand, parseAdminYoutubeDiscoveryDeferReviewResult, parseAdminYoutubeDiscoveryMissionCandidatePage, parseAdminYoutubeDiscoveryMissionCoveragePage, parseAdminYoutubeDiscoveryMissionDetail, parseAdminYoutubeDiscoveryMissionFunnel, parseAdminYoutubeDiscoveryMissionQueryPage, parseAdminYoutubeDiscoveryQuery, parseAdminYoutubeDiscoveryQueryList, parseAdminYoutubeDiscoveryReviewCursor, parseAdminYoutubeDiscoveryReviewDetail, parseAdminYoutubeDiscoveryReviewQueue, parseAdminYoutubeDiscoverySkipCommand, parseAdminYoutubeDiscoverySkipReviewResult } from "@xuyenviet/contracts";
 
 const query = { id: "proposal-1", origin: "operator" as const, queryText: "Da Lat route", reason: "operator_request" as const, priority: 50, enabled: true, cadenceMinutes: 60, nextRunAt: "2026-08-07T00:00:00.000Z", pausedReason: null };
 
@@ -79,5 +79,21 @@ describe("admin YouTube Discovery contract", () => {
       { kind: "knowledge_recommendation", actionId: "knowledge-risk", destination: "knowledge_recommendation", reason: "knowledge_risk", priority: 1, occurredAt: item.occurredAt },
       { kind: "knowledge_recommendation", actionId: "knowledge-relation", destination: "knowledge_recommendation", reason: "knowledge_relation", priority: 1, occurredAt: item.occurredAt },
     ], nextCursor: null })).not.toBeNull();
+  });
+
+  test("requires endpoint-specific Mission pages, current-state funnel, and unavailable safe context", () => {
+    const coverage = { actionId: "mission-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", priority: 1, createdAt: "2026-08-07T00:00:00.000Z", corridor: null, location: "Đà Lạt", routeSegment: null, taxonomy: "place", freshness: "sensitive" as const, conflict: "none" as const, demand: "unavailable" as const, seasonalContext: "unavailable" as const };
+    const coverageCursor = encodeAdminYoutubeDiscoveryMissionCoverageCursor({ version: 1, priority: 1, createdAt: coverage.createdAt, actionId: coverage.actionId });
+    expect(parseAdminYoutubeDiscoveryMissionCoveragePage({ items: [coverage], nextCursor: coverageCursor })).not.toBeNull();
+    expect(parseAdminYoutubeDiscoveryMissionCoveragePage({ items: [{ ...coverage, sourceId: "unsafe" }], nextCursor: null })).toBeNull();
+    const queryCursor = encodeAdminYoutubeDiscoveryMissionQueryCursor({ version: 1, priority: 50, createdAt: coverage.createdAt, id: query.id });
+    expect(parseAdminYoutubeDiscoveryMissionQueryPage({ items: [query], nextCursor: queryCursor })).not.toBeNull();
+    const candidate = { candidateId: "candidate-1", actionId: coverage.actionId, priority: 1, rank: 0, rankedAt: coverage.createdAt, rankingState: "recommended" as const, recommendationId: "recommendation-1", recommendation: "consider" as const, candidateState: "pending" as const, reviewAvailable: true };
+    const candidateCursor = encodeAdminYoutubeDiscoveryMissionCandidateCursor({ version: 1, actionId: coverage.actionId, priority: 1, rank: 0, rankedAt: coverage.createdAt, candidateId: candidate.candidateId });
+    expect(parseAdminYoutubeDiscoveryMissionCandidatePage({ items: [candidate], nextCursor: candidateCursor })).not.toBeNull();
+    expect(parseAdminYoutubeDiscoveryMissionCandidatePage({ items: [{ ...candidate, reviewAvailable: true, candidateState: "accepted" }], nextCursor: null })).toBeNull();
+    expect(parseAdminYoutubeDiscoveryMissionDetail({ coverage, query: { ...query, origin: "system", reason: "coverage_gap" }, latestRun: { state: "unavailable", createdAt: null, retryCount: null, terminalCategory: "unavailable" }, candidates: { items: [candidate], nextCursor: null } })).not.toBeNull();
+    expect(parseAdminYoutubeDiscoveryMissionFunnel({ asOf: coverage.createdAt, discovered: 1, enriched: 1, triaged: 1, recommended: 1, pendingReview: 1, accepted: 0, deferred: 0, skipped: 0 })).not.toBeNull();
+    expect(parseAdminYoutubeDiscoveryMissionFunnel({ asOf: coverage.createdAt, discovered: -1, enriched: 0, triaged: 0, recommended: 0, pendingReview: 0, accepted: 0, deferred: 0, skipped: 0 })).toBeNull();
   });
 });

@@ -1,7 +1,8 @@
-import { and, asc, eq, or, sql } from "drizzle-orm";
-import type { YoutubeDiscoveryActionOwnerPorts } from "@xuyenviet/domain";
+import { and, asc, eq, gt, or, sql } from "drizzle-orm";
+import { adminYoutubeDiscoveryMissionPageSize, encodeAdminYoutubeDiscoveryMissionCoverageCursor, type AdminYoutubeDiscoveryMissionCoverageCursor } from "@xuyenviet/contracts";
+import { YoutubeDiscoveryMissionCursorValidationError, type YoutubeDiscoveryActionOwnerPorts, type YoutubeDiscoveryMissionOwnerPorts } from "@xuyenviet/domain";
 import { getDb } from "./client";
-import { knowledgeRecommendations } from "./schema";
+import { knowledgeCards, knowledgeRecommendations } from "./schema";
 
 /** Knowledge owns these bounded queue inputs and never reads Discovery state. */
 export function createKnowledgeDiscoveryActionOwnerPorts(): YoutubeDiscoveryActionOwnerPorts {
@@ -19,4 +20,19 @@ export function createKnowledgeDiscoveryActionOwnerPorts(): YoutubeDiscoveryActi
        return rows.map((row) => ({ recommendationId: row.recommendationId, workType: row.workType as "risk" | "relation", priority: row.priority, createdAt: row.createdAt }));
     },
   };
+}
+
+/** Knowledge owns the safe labels and admission state for Mission coverage. */
+export function createKnowledgeDiscoveryMissionOwnerPorts(): YoutubeDiscoveryMissionOwnerPorts {
+  const page = async (cursor: AdminYoutubeDiscoveryMissionCoverageCursor | null) => {
+    if (cursor) {
+      const [anchor] = await getDb().select({ actionId: knowledgeRecommendations.discoveryMissionActionId }).from(knowledgeRecommendations).where(and(eq(knowledgeRecommendations.discoveryMissionActionId, cursor.actionId), eq(knowledgeRecommendations.priority, cursor.priority), eq(knowledgeRecommendations.createdAt, new Date(cursor.createdAt)), eq(knowledgeRecommendations.status, "open"), eq(knowledgeRecommendations.workType, "missing_context"))).limit(1);
+      if (!anchor) throw new YoutubeDiscoveryMissionCursorValidationError("Invalid YouTube Discovery Mission cursor.");
+    }
+    const rows = await getDb().select({ actionId: knowledgeRecommendations.discoveryMissionActionId, priority: knowledgeRecommendations.priority, createdAt: knowledgeRecommendations.createdAt, location: knowledgeCards.locationName, routeSegment: knowledgeCards.routeSegment, taxonomy: knowledgeCards.type, freshnessSensitive: knowledgeCards.freshnessSensitive, knowledgeState: knowledgeCards.knowledgeState }).from(knowledgeRecommendations).innerJoin(knowledgeCards, eq(knowledgeCards.id, knowledgeRecommendations.knowledgeCardId)).where(and(eq(knowledgeRecommendations.status, "open"), eq(knowledgeRecommendations.workType, "missing_context"), sql`${knowledgeRecommendations.discoveryMissionActionId} is not null`, cursor ? or(gt(knowledgeRecommendations.priority, cursor.priority), and(eq(knowledgeRecommendations.priority, cursor.priority), gt(knowledgeRecommendations.createdAt, new Date(cursor.createdAt))), and(eq(knowledgeRecommendations.priority, cursor.priority), eq(knowledgeRecommendations.createdAt, new Date(cursor.createdAt)), gt(knowledgeRecommendations.discoveryMissionActionId, cursor.actionId))) : undefined)).orderBy(asc(knowledgeRecommendations.priority), asc(knowledgeRecommendations.createdAt), asc(knowledgeRecommendations.discoveryMissionActionId)).limit(adminYoutubeDiscoveryMissionPageSize + 1);
+    const items = rows.slice(0, adminYoutubeDiscoveryMissionPageSize).flatMap((row) => row.actionId ? [{ actionId: row.actionId, priority: row.priority, createdAt: row.createdAt.toISOString(), corridor: null, location: row.location ?? null, routeSegment: row.routeSegment ?? null, taxonomy: row.taxonomy ?? null, freshness: row.freshnessSensitive ? "sensitive" as const : "fresh" as const, conflict: row.knowledgeState === "conflicted" ? "present" as const : "none" as const, demand: "unavailable" as const, seasonalContext: "unavailable" as const }] : []);
+    const last = items.at(-1);
+    return { items, nextCursor: rows.length > adminYoutubeDiscoveryMissionPageSize && last ? encodeAdminYoutubeDiscoveryMissionCoverageCursor({ version: 1, priority: last.priority, createdAt: last.createdAt, actionId: last.actionId }) : null };
+  };
+  return { listMissionCoverage: page, async getMissionDetail(actionId) { const result = await page(null); if (result.items.find((item) => item.actionId === actionId)) return result.items.find((item) => item.actionId === actionId)!; const [row] = await getDb().select({ actionId: knowledgeRecommendations.discoveryMissionActionId, priority: knowledgeRecommendations.priority, createdAt: knowledgeRecommendations.createdAt, location: knowledgeCards.locationName, routeSegment: knowledgeCards.routeSegment, taxonomy: knowledgeCards.type, freshnessSensitive: knowledgeCards.freshnessSensitive, knowledgeState: knowledgeCards.knowledgeState }).from(knowledgeRecommendations).innerJoin(knowledgeCards, eq(knowledgeCards.id, knowledgeRecommendations.knowledgeCardId)).where(and(eq(knowledgeRecommendations.discoveryMissionActionId, actionId), eq(knowledgeRecommendations.status, "open"), eq(knowledgeRecommendations.workType, "missing_context"))).limit(1); return row?.actionId ? { actionId: row.actionId, priority: row.priority, createdAt: row.createdAt.toISOString(), corridor: null, location: row.location ?? null, routeSegment: row.routeSegment ?? null, taxonomy: row.taxonomy ?? null, freshness: row.freshnessSensitive ? "sensitive" : "fresh", conflict: row.knowledgeState === "conflicted" ? "present" : "none", demand: "unavailable", seasonalContext: "unavailable" } : null; } };
 }

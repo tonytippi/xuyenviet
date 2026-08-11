@@ -4,7 +4,7 @@ import request from "supertest";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import { createPostgresApiIdentityRepository } from "@xuyenviet/database";
-import { YoutubeDiscoveryReviewCursorValidationError, type AdminYoutubeDiscoveryPort } from "@xuyenviet/domain";
+import { YoutubeDiscoveryMissionCursorValidationError, YoutubeDiscoveryReviewCursorValidationError, type AdminYoutubeDiscoveryPort } from "@xuyenviet/domain";
 import { createApiModule } from "../apps/api/src/app.module";
 import { csrfHash, csrfNonce } from "../apps/api/src/auth/browser-auth";
 import { userRoles, users } from "@/db/schema";
@@ -29,7 +29,7 @@ async function browserSession(userId: string, role: "operator" | "traveler") {
 
 beforeEach(async () => {
   await resetTestDatabase();
-  port = { list: vi.fn().mockResolvedValue({ items: [query] }), listReview: vi.fn().mockResolvedValue({ items: [], nextCursor: null }), listActionRequired: vi.fn().mockResolvedValue({ items: [], nextCursor: null }), getReview: vi.fn().mockResolvedValue(null), acceptReview: vi.fn().mockResolvedValue({ outcome: "submitted" }), deferReview: vi.fn().mockResolvedValue({ outcome: "deferred" }), skipReview: vi.fn().mockResolvedValue({ outcome: "skipped" }), create: vi.fn().mockResolvedValue(query), edit: vi.fn().mockResolvedValue(query), reprioritize: vi.fn().mockResolvedValue(query), pause: vi.fn().mockResolvedValue({ ...query, enabled: false, nextRunAt: null, pausedReason: "operator" }), resume: vi.fn().mockResolvedValue(query) };
+  port = { list: vi.fn().mockResolvedValue({ items: [query] }), listReview: vi.fn().mockResolvedValue({ items: [], nextCursor: null }), listActionRequired: vi.fn().mockResolvedValue({ items: [], nextCursor: null }), getReview: vi.fn().mockResolvedValue(null), acceptReview: vi.fn().mockResolvedValue({ outcome: "submitted" }), deferReview: vi.fn().mockResolvedValue({ outcome: "deferred" }), skipReview: vi.fn().mockResolvedValue({ outcome: "skipped" }), create: vi.fn().mockResolvedValue(query), edit: vi.fn().mockResolvedValue(query), reprioritize: vi.fn().mockResolvedValue(query), pause: vi.fn().mockResolvedValue({ ...query, enabled: false, nextRunAt: null, pausedReason: "operator" }), resume: vi.fn().mockResolvedValue(query), listMissionCoverage: vi.fn().mockResolvedValue({ items: [], nextCursor: null }), listMissionQueries: vi.fn().mockResolvedValue({ items: [], nextCursor: null }), listMissionCandidates: vi.fn().mockResolvedValue({ items: [], nextCursor: null }), missionFunnel: vi.fn().mockResolvedValue({ asOf: "2026-08-07T00:00:00.000Z", discovered: 0, enriched: 0, triaged: 0, recommended: 0, pendingReview: 0, accepted: 0, deferred: 0, skipped: 0 }), getMissionDetail: vi.fn().mockResolvedValue(null) };
   const identities = createPostgresApiIdentityRepository(getTestDatabaseUrl(), browserAuth.sessionLookupKey, browserAuth.oauthTransactionProtectionKey);
   const ApiModule = createApiModule(identities, { conversationSummaries: { async listOwnedConversationSummaryRows() { return []; } }, browserAuth, adminYoutubeDiscovery: port as unknown as AdminYoutubeDiscoveryPort });
   @Module({ imports: [ApiModule] }) class TestModule {}
@@ -123,6 +123,36 @@ describe("admin YouTube Discovery direct API", () => {
     const traveler = await browserSession("traveler", "traveler");
     await request(app.getHttpServer()).get("/v1/admin/knowledge/youtube-discovery/action-required").set({ Cookie: traveler.cookie }).expect(403);
     expect(port.listActionRequired).not.toHaveBeenCalled();
+  });
+
+  test("admits separate guarded Mission endpoints and rejects extra query keys before port admission", async () => {
+    const operator = await browserSession("operator", "operator");
+    const coverage = { actionId: "mission-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", priority: 1, createdAt: "2026-08-07T00:00:00.000Z", corridor: null, location: null, routeSegment: null, taxonomy: null, freshness: "fresh" as const, conflict: "none" as const, demand: "unavailable" as const, seasonalContext: "unavailable" as const };
+    const missionQuery = { ...query, origin: "system" as const, reason: "coverage_gap" as const };
+    const candidate = { candidateId: "candidate-1", actionId: coverage.actionId, priority: 1, rank: 0, rankedAt: coverage.createdAt, rankingState: "recommended" as const, recommendationId: "recommendation-1", recommendation: "consider" as const, candidateState: "pending" as const, reviewAvailable: true };
+    port.listMissionCoverage.mockResolvedValueOnce({ items: [coverage], nextCursor: null });
+    port.listMissionQueries.mockResolvedValueOnce({ items: [missionQuery], nextCursor: null });
+    port.listMissionCandidates.mockResolvedValueOnce({ items: [candidate], nextCursor: null });
+    port.getMissionDetail.mockResolvedValueOnce({ coverage, query: missionQuery, latestRun: { state: "unavailable", createdAt: null, retryCount: null, terminalCategory: "unavailable" }, candidates: { items: [candidate], nextCursor: null } });
+    await request(app.getHttpServer()).get("/v1/admin/knowledge/youtube-discovery/mission/coverage").set({ Cookie: operator.cookie }).expect(200, { items: [coverage], nextCursor: null });
+    await request(app.getHttpServer()).get("/v1/admin/knowledge/youtube-discovery/mission/queries").set({ Cookie: operator.cookie }).expect(200, { items: [missionQuery], nextCursor: null });
+    await request(app.getHttpServer()).get("/v1/admin/knowledge/youtube-discovery/mission/candidates").set({ Cookie: operator.cookie }).expect(200, { items: [candidate], nextCursor: null });
+    await request(app.getHttpServer()).get(`/v1/admin/knowledge/youtube-discovery/mission/${coverage.actionId}`).set({ Cookie: operator.cookie }).expect(200);
+    await request(app.getHttpServer()).get("/v1/admin/knowledge/youtube-discovery/mission/coverage?unsafe=yes").set({ Cookie: operator.cookie }).expect(400);
+    await request(app.getHttpServer()).get(`/v1/admin/knowledge/youtube-discovery/mission/${coverage.actionId}?cursor=x`).set({ Cookie: operator.cookie }).expect(400);
+    expect(port.listMissionCoverage).toHaveBeenCalledOnce();
+    await request(app.getHttpServer()).get("/v1/admin/knowledge/youtube-discovery/mission/funnel").expect(401);
+    expect(port.missionFunnel).not.toHaveBeenCalled();
+  });
+
+  test("maps stale Coverage and Queries cursors to validation failures", async () => {
+    const operator = await browserSession("operator", "operator");
+    port.listMissionCoverage.mockRejectedValueOnce(new YoutubeDiscoveryMissionCursorValidationError("Invalid YouTube Discovery Mission cursor."));
+    port.listMissionQueries.mockRejectedValueOnce(new YoutubeDiscoveryMissionCursorValidationError("Invalid YouTube Discovery Mission cursor."));
+    const coverageCursor = "ydmc1.eyJ2ZXJzaW9uIjoxLCJwcmlvcml0eSI6MSwiY3JlYXRlZEF0IjoiMjAyNi0wOC0wN1QwMDowMDowMC4wMDBaIiwiYWN0aW9uSWQiOiJtaXNzaW9uLWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhIn0";
+    const queryCursor = "ydmq1.eyJ2ZXJzaW9uIjoxLCJwcmlvcml0eSI6NTAsImNyZWF0ZWRBdCI6IjIwMjYtMDgtMDdUMDA6MDA6MDAuMDAwWiIsImlkIjoicHJvcG9zYWwtMSJ9";
+    await request(app.getHttpServer()).get(`/v1/admin/knowledge/youtube-discovery/mission/coverage?cursor=${coverageCursor}`).set({ Cookie: operator.cookie }).expect(400).expect(({ body }) => expect(body).toMatchObject({ code: "validation_error" }));
+    await request(app.getHttpServer()).get(`/v1/admin/knowledge/youtube-discovery/mission/queries?cursor=${queryCursor}`).set({ Cookie: operator.cookie }).expect(400).expect(({ body }) => expect(body).toMatchObject({ code: "validation_error" }));
   });
 
   test("admits only an exact CSRF-protected Accept command and returns its closed outcome", async () => {
