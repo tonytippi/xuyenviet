@@ -3,6 +3,7 @@ title: 'Deliver Knowledge Mission Drill-Downs'
 type: 'feature'
 created: '2026-08-11'
 baseline_revision: '1ea67ae'
+final_revision: '77241b3'
 status: 'done'
 review_loop_iteration: 1
 followup_review_recommended: false
