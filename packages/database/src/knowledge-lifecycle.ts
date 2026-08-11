@@ -1,4 +1,5 @@
 import { and, asc, eq, gt, inArray, isNull, sql } from "drizzle-orm";
+import { randomUUID } from "node:crypto";
 
 import type { KnowledgeLifecycleTrigger, TransitionKnowledgeCardInput, TransitionKnowledgeCardResult } from "@xuyenviet/domain";
 
@@ -300,7 +301,7 @@ async function lifecycleEffects(transaction: LifecycleTransaction, input: Transi
 }
 
 async function openWork(transaction: LifecycleTransaction, input: TransitionKnowledgeCardInput, cardId: string, contentVersion: number, evidenceSetRevision: number, workType: "verification" | "relation" | "risk" | "missing_context" | "sampling", policySnapshot: Record<string, unknown>, policyId?: string | null, obligationIds?: readonly string[]) {
-  const [work] = await transaction.insert(knowledgeRecommendations).values({ knowledgeCardId: cardId, contentVersion, evidenceSetRevision, workType, priority: workPriority(workType), policyId: policyId ?? null, policySnapshot, executorSystem: input.actor.kind === "system" ? input.actor.system : null }).onConflictDoNothing().returning({ id: knowledgeRecommendations.id });
+  const [work] = await transaction.insert(knowledgeRecommendations).values({ knowledgeCardId: cardId, contentVersion, evidenceSetRevision, workType, priority: workPriority(workType), policyId: policyId ?? null, policySnapshot, executorSystem: input.actor.kind === "system" ? input.actor.system : null, discoveryMissionActionId: workType === "missing_context" ? `mission-${randomUUID().replaceAll("-", "")}` : null }).onConflictDoNothing().returning({ id: knowledgeRecommendations.id });
   if (workType === "sampling" && work && obligationIds?.length) await transaction.insert(knowledgeSamplingRecommendationObligations).values(obligationIds.map((obligationId) => ({ recommendationId: work.id, obligationId }))).onConflictDoNothing();
 }
 

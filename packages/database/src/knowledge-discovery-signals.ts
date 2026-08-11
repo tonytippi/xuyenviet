@@ -15,7 +15,7 @@ export function createKnowledgeDiscoveryQuerySignalPort(database: KnowledgeSigna
       const rows = await database.transaction(async (transaction) => {
         await transaction.execute(sql.raw(`set local statement_timeout = ${planningSignalStatementTimeoutMs}`));
         if (signal?.aborted) throw new Error("Planning signal read aborted.");
-        return transaction.select({ workType: knowledgeRecommendations.workType, priority: knowledgeRecommendations.priority, knowledgeState: knowledgeCards.knowledgeState, freshnessSensitive: knowledgeCards.freshnessSensitive, locationName: knowledgeCards.locationName, routeSegment: knowledgeCards.routeSegment, taxonomy: knowledgeCards.type }).from(knowledgeRecommendations).innerJoin(knowledgeCards, eq(knowledgeCards.id, knowledgeRecommendations.knowledgeCardId)).where(and(
+        return transaction.select({ actionId: knowledgeRecommendations.discoveryMissionActionId, workType: knowledgeRecommendations.workType, priority: knowledgeRecommendations.priority, knowledgeState: knowledgeCards.knowledgeState, freshnessSensitive: knowledgeCards.freshnessSensitive, locationName: knowledgeCards.locationName, routeSegment: knowledgeCards.routeSegment, taxonomy: knowledgeCards.type }).from(knowledgeRecommendations).innerJoin(knowledgeCards, eq(knowledgeCards.id, knowledgeRecommendations.knowledgeCardId)).where(and(
           eq(knowledgeRecommendations.status, "open"),
           eq(knowledgeRecommendations.contentVersion, knowledgeCards.contentVersion),
           eq(knowledgeRecommendations.evidenceSetRevision, knowledgeCards.evidenceSetRevision),
@@ -31,7 +31,7 @@ export function createKnowledgeDiscoveryQuerySignalPort(database: KnowledgeSigna
       const signals = rows.flatMap((row) => {
         const geography = safeLabel(row.locationName) ?? safeLabel(row.routeSegment) ?? "Vietnam";
         const reason: SafeDiscoveryQueryReason | null = row.workType === "missing_context" ? "coverage_gap" : row.workType === "risk" && row.freshnessSensitive ? "freshness_risk" : row.workType === "relation" || row.knowledgeState === "conflicted" ? "unresolved_conflict" : null;
-        return reason ? [{ reason, geography, taxonomy: row.taxonomy.replaceAll("_", " "), priority: row.priority }] : [];
+        return reason ? [{ reason, geography, taxonomy: row.taxonomy.replaceAll("_", " "), priority: row.priority, ...(row.workType === "missing_context" && row.actionId ? { missionActionId: row.actionId } : {}) }] : [];
       });
       return { status: "available", signals };
     } catch (error) {

@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 
 export const safeDiscoveryQueryReasons = ["coverage_gap", "freshness_risk", "unresolved_conflict", "anonymized_demand"] as const;
 export type SafeDiscoveryQueryReason = (typeof safeDiscoveryQueryReasons)[number];
-export type SafeDiscoveryQuerySignal = Readonly<{ reason: SafeDiscoveryQueryReason; geography: string; taxonomy: string; priority: number }>;
+export type SafeDiscoveryQuerySignal = Readonly<{ reason: SafeDiscoveryQueryReason; geography: string; taxonomy: string; priority: number; missionActionId?: string }>;
 export type DiscoveryQuerySignalPortResult = Readonly<{ status: "available"; signals: readonly SafeDiscoveryQuerySignal[] }> | Readonly<{ status: "unavailable"; code: "source_unavailable" | "source_timeout" | "source_invalid" }>;
 export type KnowledgeDiscoveryQuerySignalPort = Readonly<{ readSignals(signal?: AbortSignal): Promise<DiscoveryQuerySignalPortResult> }>;
 export type AiAskDiscoveryQuerySignalPort = Readonly<{ readSignals(signal?: AbortSignal): Promise<DiscoveryQuerySignalPortResult> }>;
@@ -29,13 +29,13 @@ export function deriveDiscoveryQueries(results: readonly unknown[]): { queries: 
     if (!parsed) { unavailableCodes.push("source_invalid"); continue; }
     if (parsed.status === "unavailable") { unavailableCodes.push(parsed.code); continue; }
     for (const normalized of parsed.signals) {
-      const key = `${normalized.reason}\u0000${normalized.geography}\u0000${normalized.taxonomy}`;
+      const key = `${normalized.reason}\u0000${normalized.geography}\u0000${normalized.taxonomy}\u0000${normalized.missionActionId ?? ""}`;
       const existing = merged.get(key);
       if (!existing || normalized.priority > existing.priority) merged.set(key, normalized);
     }
   }
   return {
-    queries: [...merged.values()].sort(compareSignal).map((signal) => ({ ...signal, targetDigest: createHash("sha256").update(`${signal.reason}\u0000${signal.geography}\u0000${signal.taxonomy}`, "utf8").digest("hex"), queryText: `${signal.geography} ${signal.taxonomy}` })),
+    queries: [...merged.values()].sort(compareSignal).map((signal) => ({ ...signal, targetDigest: createHash("sha256").update(`${signal.reason}\u0000${signal.geography}\u0000${signal.taxonomy}\u0000${signal.missionActionId ?? ""}`, "utf8").digest("hex"), queryText: `${signal.geography} ${signal.taxonomy}` })),
     unavailableCodes: [...new Set(unavailableCodes)].sort(),
   };
 }
@@ -51,9 +51,9 @@ export function createUnavailableAiAskDiscoveryQuerySignalPort(): AiAskDiscovery
 function normalize(value: SafeDiscoveryQuerySignal): SafeDiscoveryQuerySignal | null {
   const geography = value.geography.normalize("NFC").trim();
   const taxonomy = value.taxonomy.normalize("NFC").trim();
-  return isReason(value.reason) && safeText.test(geography) && safeText.test(taxonomy) && Number.isSafeInteger(value.priority) && value.priority >= 1 && value.priority <= 100 ? { reason: value.reason, geography, taxonomy, priority: value.priority } : null;
+  return isReason(value.reason) && safeText.test(geography) && safeText.test(taxonomy) && Number.isSafeInteger(value.priority) && value.priority >= 1 && value.priority <= 100 && (value.missionActionId === undefined || /^mission-[a-f0-9]{32}$/.test(value.missionActionId)) ? { reason: value.reason, geography, taxonomy, priority: value.priority, ...(value.missionActionId ? { missionActionId: value.missionActionId } : {}) } : null;
 }
-function isSignal(value: unknown): value is SafeDiscoveryQuerySignal { return record(value) && exactKeys(value, ["reason", "geography", "taxonomy", "priority"]) && isReason(value.reason) && typeof value.geography === "string" && typeof value.taxonomy === "string" && Number.isSafeInteger(value.priority); }
+function isSignal(value: unknown): value is SafeDiscoveryQuerySignal { return record(value) && (exactKeys(value, ["reason", "geography", "taxonomy", "priority"]) || exactKeys(value, ["reason", "geography", "taxonomy", "priority", "missionActionId"])) && isReason(value.reason) && typeof value.geography === "string" && typeof value.taxonomy === "string" && Number.isSafeInteger(value.priority) && (value.missionActionId === undefined || typeof value.missionActionId === "string"); }
 function isReason(value: unknown): value is SafeDiscoveryQueryReason { return safeDiscoveryQueryReasons.includes(value as SafeDiscoveryQueryReason); }
 function compareSignal(a: SafeDiscoveryQuerySignal, b: SafeDiscoveryQuerySignal) { return a.reason.localeCompare(b.reason) || a.geography.localeCompare(b.geography) || a.taxonomy.localeCompare(b.taxonomy); }
 function record(value: unknown): value is Record<string, unknown> { return typeof value === "object" && value !== null && !Array.isArray(value); }
