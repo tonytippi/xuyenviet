@@ -32,11 +32,11 @@ describe("admin YouTube Discovery Health UI boundary", () => {
     expect(overview).toContain('policy: { ...current.policy, enabled: result.enabled }');
     expect(overview).toContain('querySchedule: result.enabled');
     expect(overview).toContain('latestQueryRun: result.enabled || current.latestQueryRun.state !== "retrying"');
-    expect(overview).toContain('await load(true)');
+    expect(overview).toContain('await load(true, true)');
     expect(overview).toContain("Trạng thái đã xác nhận được giữ nguyên");
     expect(overview).toContain('const [retryCommand, setRetryCommand] = useState<{ enabled: boolean } | null>(null)');
     expect(overview).toContain('setRetryCommand({ enabled });');
-    expect(overview).toContain('if (await load(true)) setRetryCommand(null);');
+    expect(overview).toContain('if (await load(true, true)) setRetryCommand(null);');
     expect(overview).toContain('onClick={() => onChange(retryCommand.enabled, true)}');
     expect(overview).toContain('>Thử lại cập nhật Discovery</button>');
     expect(overview).toContain("Công việc khi Discovery tắt");
@@ -62,7 +62,8 @@ describe("admin YouTube Discovery Health UI boundary", () => {
     expect(client).toContain('value === "unavailable" ? "Không khả dụng"');
     expect(client).toContain("Thử lại lúc:");
     expect(client).not.toContain("providerPayload");
-    expect(detail).toContain('/^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}:(provider_rate_limited|triage_schema_invalid|execution_terminal)$/.test(actionId)');
+    expect(detail).toContain('try { groupId = decodeURIComponent(actionId); } catch');
+    expect(detail).toContain('/^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}:(provider_rate_limited|triage_schema_invalid|execution_terminal)$/.test(groupId)');
     expect(detail).not.toContain("Mã tham chiếu: {actionId}");
   });
 });

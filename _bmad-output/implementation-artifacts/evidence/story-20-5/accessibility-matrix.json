@@ -1,0 +1,569 @@
+[
+  {
+    "flow": "evidence metadata",
+    "viewport": "meta",
+    "outcome": "pass",
+    "detail": "fixture=story-20-5-local; admin=http://localhost:3003; api=http://localhost:3001; narrow method=320 CSS pixels (400%-zoom-equivalent reflow)",
+    "timestamp": "2026-08-12T07:26:07.568Z"
+  },
+  {
+    "flow": "browser version",
+    "viewport": "meta",
+    "outcome": "pass",
+    "detail": "149.0.7827.55",
+    "timestamp": "2026-08-12T07:26:07.634Z"
+  },
+  {
+    "flow": "action-queue: reachable",
+    "viewport": "desktop",
+    "outcome": "pass",
+    "detail": "runtime URL http://localhost:3003/knowledge/youtube-discovery",
+    "timestamp": "2026-08-12T07:26:09.689Z"
+  },
+  {
+    "flow": "action-queue: keyboard focus",
+    "viewport": "desktop",
+    "outcome": "pass",
+    "detail": "heading focused",
+    "timestamp": "2026-08-12T07:26:09.699Z"
+  },
+  {
+    "flow": "action-queue: sequential reflow",
+    "viewport": "desktop",
+    "outcome": "pass",
+    "detail": "document 1440px / viewport 1440px",
+    "timestamp": "2026-08-12T07:26:09.701Z"
+  },
+  {
+    "flow": "action-queue: 44px targets",
+    "viewport": "desktop",
+    "outcome": "pass",
+    "detail": "",
+    "timestamp": "2026-08-12T07:26:09.701Z"
+  },
+  {
+    "flow": "action-queue: polite status",
+    "viewport": "desktop",
+    "outcome": "pass",
+    "detail": "1 region(s)",
+    "timestamp": "2026-08-12T07:26:09.701Z"
+  },
+  {
+    "flow": "action-queue: destination keyboard activation",
+    "viewport": "desktop",
+    "outcome": "pass",
+    "detail": "runtime URL http://localhost:3003/knowledge/youtube-discovery/health/cda71b77-e3aa-4cdd-8daf-38b1ba7ddc53%3Aprovider_rate_limited",
+    "timestamp": "2026-08-12T07:26:10.752Z"
+  },
+  {
+    "flow": "review: reachable",
+    "viewport": "desktop",
+    "outcome": "pass",
+    "detail": "runtime URL http://localhost:3003/knowledge/youtube-discovery-review?recommendationId=4aae15f7-c578-4c24-9197-6413e22d44d0",
+    "timestamp": "2026-08-12T07:26:12.162Z"
+  },
+  {
+    "flow": "review: keyboard focus",
+    "viewport": "desktop",
+    "outcome": "pass",
+    "detail": "heading focused",
+    "timestamp": "2026-08-12T07:26:12.166Z"
+  },
+  {
+    "flow": "review: sequential reflow",
+    "viewport": "desktop",
+    "outcome": "pass",
+    "detail": "document 1440px / viewport 1440px",
+    "timestamp": "2026-08-12T07:26:12.167Z"
+  },
+  {
+    "flow": "review: 44px targets",
+    "viewport": "desktop",
+    "outcome": "pass",
+    "detail": "",
+    "timestamp": "2026-08-12T07:26:12.167Z"
+  },
+  {
+    "flow": "review: polite status",
+    "viewport": "desktop",
+    "outcome": "pass",
+    "detail": "1 region(s)",
+    "timestamp": "2026-08-12T07:26:12.167Z"
+  },
+  {
+    "flow": "review: accept reconciliation",
+    "viewport": "desktop",
+    "outcome": "fail",
+    "detail": "controlled fixture did not expose Accept",
+    "timestamp": "2026-08-12T07:26:12.294Z"
+  },
+  {
+    "flow": "mission: reachable",
+    "viewport": "desktop",
+    "outcome": "pass",
+    "detail": "runtime URL http://localhost:3003/knowledge/youtube-discovery/mission?view=queries",
+    "timestamp": "2026-08-12T07:26:13.758Z"
+  },
+  {
+    "flow": "mission: keyboard focus",
+    "viewport": "desktop",
+    "outcome": "pass",
+    "detail": "heading focused",
+    "timestamp": "2026-08-12T07:26:13.766Z"
+  },
+  {
+    "flow": "mission: sequential reflow",
+    "viewport": "desktop",
+    "outcome": "pass",
+    "detail": "document 1440px / viewport 1440px",
+    "timestamp": "2026-08-12T07:26:13.767Z"
+  },
+  {
+    "flow": "mission: 44px targets",
+    "viewport": "desktop",
+    "outcome": "pass",
+    "detail": "",
+    "timestamp": "2026-08-12T07:26:13.767Z"
+  },
+  {
+    "flow": "mission: polite status",
+    "viewport": "desktop",
+    "outcome": "pass",
+    "detail": "1 region(s)",
+    "timestamp": "2026-08-12T07:26:13.767Z"
+  },
+  {
+    "flow": "mission: invalid query focus",
+    "viewport": "desktop",
+    "outcome": "pass",
+    "detail": "empty draft returned focus to the invalid query input",
+    "timestamp": "2026-08-12T07:26:13.979Z"
+  },
+  {
+    "flow": "mission-detail: reachable",
+    "viewport": "desktop",
+    "outcome": "pass",
+    "detail": "runtime URL http://localhost:3003/knowledge/youtube-discovery/mission/mission-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "timestamp": "2026-08-12T07:26:15.896Z"
+  },
+  {
+    "flow": "mission-detail: keyboard focus",
+    "viewport": "desktop",
+    "outcome": "pass",
+    "detail": "heading focused",
+    "timestamp": "2026-08-12T07:26:15.902Z"
+  },
+  {
+    "flow": "mission-detail: sequential reflow",
+    "viewport": "desktop",
+    "outcome": "pass",
+    "detail": "document 1440px / viewport 1440px",
+    "timestamp": "2026-08-12T07:26:15.904Z"
+  },
+  {
+    "flow": "mission-detail: 44px targets",
+    "viewport": "desktop",
+    "outcome": "pass",
+    "detail": "",
+    "timestamp": "2026-08-12T07:26:15.904Z"
+  },
+  {
+    "flow": "mission-detail: polite status",
+    "viewport": "desktop",
+    "outcome": "pass",
+    "detail": "1 region(s)",
+    "timestamp": "2026-08-12T07:26:15.904Z"
+  },
+  {
+    "flow": "health: reachable",
+    "viewport": "desktop",
+    "outcome": "pass",
+    "detail": "runtime URL http://localhost:3003/knowledge/youtube-discovery/health",
+    "timestamp": "2026-08-12T07:26:17.486Z"
+  },
+  {
+    "flow": "health: keyboard focus",
+    "viewport": "desktop",
+    "outcome": "pass",
+    "detail": "heading focused",
+    "timestamp": "2026-08-12T07:26:17.490Z"
+  },
+  {
+    "flow": "health: sequential reflow",
+    "viewport": "desktop",
+    "outcome": "pass",
+    "detail": "document 1440px / viewport 1440px",
+    "timestamp": "2026-08-12T07:26:17.491Z"
+  },
+  {
+    "flow": "health: 44px targets",
+    "viewport": "desktop",
+    "outcome": "pass",
+    "detail": "",
+    "timestamp": "2026-08-12T07:26:17.491Z"
+  },
+  {
+    "flow": "health: polite status",
+    "viewport": "desktop",
+    "outcome": "pass",
+    "detail": "1 region(s)",
+    "timestamp": "2026-08-12T07:26:17.491Z"
+  },
+  {
+    "flow": "health-incident: reachable",
+    "viewport": "desktop",
+    "outcome": "pass",
+    "detail": "runtime URL http://localhost:3003/knowledge/youtube-discovery/health/cda71b77-e3aa-4cdd-8daf-38b1ba7ddc53%3Aprovider_rate_limited",
+    "timestamp": "2026-08-12T07:26:18.672Z"
+  },
+  {
+    "flow": "health-incident: keyboard focus",
+    "viewport": "desktop",
+    "outcome": "pass",
+    "detail": "heading focused",
+    "timestamp": "2026-08-12T07:26:18.678Z"
+  },
+  {
+    "flow": "health-incident: sequential reflow",
+    "viewport": "desktop",
+    "outcome": "pass",
+    "detail": "document 1440px / viewport 1440px",
+    "timestamp": "2026-08-12T07:26:18.679Z"
+  },
+  {
+    "flow": "health-incident: 44px targets",
+    "viewport": "desktop",
+    "outcome": "pass",
+    "detail": "",
+    "timestamp": "2026-08-12T07:26:18.679Z"
+  },
+  {
+    "flow": "health-incident: polite status",
+    "viewport": "desktop",
+    "outcome": "pass",
+    "detail": "1 region(s)",
+    "timestamp": "2026-08-12T07:26:18.679Z"
+  },
+  {
+    "flow": "enablement: reachable",
+    "viewport": "desktop",
+    "outcome": "pass",
+    "detail": "runtime URL http://localhost:3003/knowledge/youtube-discovery/health",
+    "timestamp": "2026-08-12T07:26:19.787Z"
+  },
+  {
+    "flow": "enablement: keyboard focus",
+    "viewport": "desktop",
+    "outcome": "pass",
+    "detail": "heading focused",
+    "timestamp": "2026-08-12T07:26:19.791Z"
+  },
+  {
+    "flow": "enablement: sequential reflow",
+    "viewport": "desktop",
+    "outcome": "pass",
+    "detail": "document 1440px / viewport 1440px",
+    "timestamp": "2026-08-12T07:26:19.792Z"
+  },
+  {
+    "flow": "enablement: 44px targets",
+    "viewport": "desktop",
+    "outcome": "pass",
+    "detail": "",
+    "timestamp": "2026-08-12T07:26:19.792Z"
+  },
+  {
+    "flow": "enablement: polite status",
+    "viewport": "desktop",
+    "outcome": "pass",
+    "detail": "1 region(s)",
+    "timestamp": "2026-08-12T07:26:19.792Z"
+  },
+  {
+    "flow": "enablement: confirmed status",
+    "viewport": "desktop",
+    "outcome": "pass",
+    "detail": "Discovery đã tắt.",
+    "timestamp": "2026-08-12T07:26:19.962Z"
+  },
+  {
+    "flow": "viewport runtime",
+    "viewport": "desktop",
+    "outcome": "fail",
+    "detail": "locator.focus: Timeout 30000ms exceeded.\nCall log:\n\u001b[2m  - waiting for getByRole('button', { name: 'Tắt Discovery' })\u001b[22m\n",
+    "timestamp": "2026-08-12T07:26:49.963Z"
+  },
+  {
+    "flow": "action-queue: reachable",
+    "viewport": "narrow-320",
+    "outcome": "pass",
+    "detail": "runtime URL http://localhost:3003/knowledge/youtube-discovery",
+    "timestamp": "2026-08-12T07:26:51.173Z"
+  },
+  {
+    "flow": "action-queue: keyboard focus",
+    "viewport": "narrow-320",
+    "outcome": "pass",
+    "detail": "heading focused",
+    "timestamp": "2026-08-12T07:26:51.180Z"
+  },
+  {
+    "flow": "action-queue: sequential reflow",
+    "viewport": "narrow-320",
+    "outcome": "pass",
+    "detail": "document 320px / viewport 320px",
+    "timestamp": "2026-08-12T07:26:51.181Z"
+  },
+  {
+    "flow": "action-queue: 44px targets",
+    "viewport": "narrow-320",
+    "outcome": "pass",
+    "detail": "",
+    "timestamp": "2026-08-12T07:26:51.181Z"
+  },
+  {
+    "flow": "action-queue: polite status",
+    "viewport": "narrow-320",
+    "outcome": "pass",
+    "detail": "1 region(s)",
+    "timestamp": "2026-08-12T07:26:51.181Z"
+  },
+  {
+    "flow": "action-queue: destination keyboard activation",
+    "viewport": "narrow-320",
+    "outcome": "pass",
+    "detail": "runtime URL http://localhost:3003/knowledge/youtube-discovery/health/cda71b77-e3aa-4cdd-8daf-38b1ba7ddc53%3Aprovider_rate_limited",
+    "timestamp": "2026-08-12T07:26:51.319Z"
+  },
+  {
+    "flow": "review: reachable",
+    "viewport": "narrow-320",
+    "outcome": "pass",
+    "detail": "runtime URL http://localhost:3003/knowledge/youtube-discovery-review?recommendationId=4aae15f7-c578-4c24-9197-6413e22d44d0",
+    "timestamp": "2026-08-12T07:26:52.340Z"
+  },
+  {
+    "flow": "review: keyboard focus",
+    "viewport": "narrow-320",
+    "outcome": "pass",
+    "detail": "heading focused",
+    "timestamp": "2026-08-12T07:26:52.344Z"
+  },
+  {
+    "flow": "review: sequential reflow",
+    "viewport": "narrow-320",
+    "outcome": "pass",
+    "detail": "document 320px / viewport 320px",
+    "timestamp": "2026-08-12T07:26:52.345Z"
+  },
+  {
+    "flow": "review: 44px targets",
+    "viewport": "narrow-320",
+    "outcome": "pass",
+    "detail": "",
+    "timestamp": "2026-08-12T07:26:52.345Z"
+  },
+  {
+    "flow": "review: polite status",
+    "viewport": "narrow-320",
+    "outcome": "pass",
+    "detail": "1 region(s)",
+    "timestamp": "2026-08-12T07:26:52.345Z"
+  },
+  {
+    "flow": "mission: reachable",
+    "viewport": "narrow-320",
+    "outcome": "pass",
+    "detail": "runtime URL http://localhost:3003/knowledge/youtube-discovery/mission?view=queries",
+    "timestamp": "2026-08-12T07:26:53.379Z"
+  },
+  {
+    "flow": "mission: keyboard focus",
+    "viewport": "narrow-320",
+    "outcome": "pass",
+    "detail": "heading focused",
+    "timestamp": "2026-08-12T07:26:53.383Z"
+  },
+  {
+    "flow": "mission: sequential reflow",
+    "viewport": "narrow-320",
+    "outcome": "pass",
+    "detail": "document 320px / viewport 320px",
+    "timestamp": "2026-08-12T07:26:53.384Z"
+  },
+  {
+    "flow": "mission: 44px targets",
+    "viewport": "narrow-320",
+    "outcome": "pass",
+    "detail": "",
+    "timestamp": "2026-08-12T07:26:53.384Z"
+  },
+  {
+    "flow": "mission: polite status",
+    "viewport": "narrow-320",
+    "outcome": "pass",
+    "detail": "1 region(s)",
+    "timestamp": "2026-08-12T07:26:53.384Z"
+  },
+  {
+    "flow": "mission: invalid query focus",
+    "viewport": "narrow-320",
+    "outcome": "pass",
+    "detail": "empty draft returned focus to the invalid query input",
+    "timestamp": "2026-08-12T07:26:53.470Z"
+  },
+  {
+    "flow": "mission-detail: reachable",
+    "viewport": "narrow-320",
+    "outcome": "pass",
+    "detail": "runtime URL http://localhost:3003/knowledge/youtube-discovery/mission/mission-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "timestamp": "2026-08-12T07:26:54.508Z"
+  },
+  {
+    "flow": "mission-detail: keyboard focus",
+    "viewport": "narrow-320",
+    "outcome": "pass",
+    "detail": "heading focused",
+    "timestamp": "2026-08-12T07:26:54.513Z"
+  },
+  {
+    "flow": "mission-detail: sequential reflow",
+    "viewport": "narrow-320",
+    "outcome": "pass",
+    "detail": "document 320px / viewport 320px",
+    "timestamp": "2026-08-12T07:26:54.514Z"
+  },
+  {
+    "flow": "mission-detail: 44px targets",
+    "viewport": "narrow-320",
+    "outcome": "pass",
+    "detail": "",
+    "timestamp": "2026-08-12T07:26:54.514Z"
+  },
+  {
+    "flow": "mission-detail: polite status",
+    "viewport": "narrow-320",
+    "outcome": "pass",
+    "detail": "1 region(s)",
+    "timestamp": "2026-08-12T07:26:54.514Z"
+  },
+  {
+    "flow": "health: reachable",
+    "viewport": "narrow-320",
+    "outcome": "pass",
+    "detail": "runtime URL http://localhost:3003/knowledge/youtube-discovery/health",
+    "timestamp": "2026-08-12T07:26:55.536Z"
+  },
+  {
+    "flow": "health: keyboard focus",
+    "viewport": "narrow-320",
+    "outcome": "pass",
+    "detail": "heading focused",
+    "timestamp": "2026-08-12T07:26:55.540Z"
+  },
+  {
+    "flow": "health: sequential reflow",
+    "viewport": "narrow-320",
+    "outcome": "pass",
+    "detail": "document 320px / viewport 320px",
+    "timestamp": "2026-08-12T07:26:55.541Z"
+  },
+  {
+    "flow": "health: 44px targets",
+    "viewport": "narrow-320",
+    "outcome": "pass",
+    "detail": "",
+    "timestamp": "2026-08-12T07:26:55.541Z"
+  },
+  {
+    "flow": "health: polite status",
+    "viewport": "narrow-320",
+    "outcome": "pass",
+    "detail": "1 region(s)",
+    "timestamp": "2026-08-12T07:26:55.541Z"
+  },
+  {
+    "flow": "health-incident: reachable",
+    "viewport": "narrow-320",
+    "outcome": "pass",
+    "detail": "runtime URL http://localhost:3003/knowledge/youtube-discovery/health/cda71b77-e3aa-4cdd-8daf-38b1ba7ddc53%3Aprovider_rate_limited",
+    "timestamp": "2026-08-12T07:26:56.613Z"
+  },
+  {
+    "flow": "health-incident: keyboard focus",
+    "viewport": "narrow-320",
+    "outcome": "pass",
+    "detail": "heading focused",
+    "timestamp": "2026-08-12T07:26:56.617Z"
+  },
+  {
+    "flow": "health-incident: sequential reflow",
+    "viewport": "narrow-320",
+    "outcome": "pass",
+    "detail": "document 320px / viewport 320px",
+    "timestamp": "2026-08-12T07:26:56.617Z"
+  },
+  {
+    "flow": "health-incident: 44px targets",
+    "viewport": "narrow-320",
+    "outcome": "pass",
+    "detail": "",
+    "timestamp": "2026-08-12T07:26:56.617Z"
+  },
+  {
+    "flow": "health-incident: polite status",
+    "viewport": "narrow-320",
+    "outcome": "pass",
+    "detail": "1 region(s)",
+    "timestamp": "2026-08-12T07:26:56.617Z"
+  },
+  {
+    "flow": "enablement: reachable",
+    "viewport": "narrow-320",
+    "outcome": "pass",
+    "detail": "runtime URL http://localhost:3003/knowledge/youtube-discovery/health",
+    "timestamp": "2026-08-12T07:26:57.632Z"
+  },
+  {
+    "flow": "enablement: keyboard focus",
+    "viewport": "narrow-320",
+    "outcome": "pass",
+    "detail": "heading focused",
+    "timestamp": "2026-08-12T07:26:57.637Z"
+  },
+  {
+    "flow": "enablement: sequential reflow",
+    "viewport": "narrow-320",
+    "outcome": "pass",
+    "detail": "document 320px / viewport 320px",
+    "timestamp": "2026-08-12T07:26:57.637Z"
+  },
+  {
+    "flow": "enablement: 44px targets",
+    "viewport": "narrow-320",
+    "outcome": "pass",
+    "detail": "",
+    "timestamp": "2026-08-12T07:26:57.637Z"
+  },
+  {
+    "flow": "enablement: polite status",
+    "viewport": "narrow-320",
+    "outcome": "pass",
+    "detail": "1 region(s)",
+    "timestamp": "2026-08-12T07:26:57.637Z"
+  },
+  {
+    "flow": "enablement: confirmed status",
+    "viewport": "narrow-320",
+    "outcome": "pass",
+    "detail": "Discovery đã bật.",
+    "timestamp": "2026-08-12T07:26:57.718Z"
+  },
+  {
+    "flow": "viewport runtime",
+    "viewport": "narrow-320",
+    "outcome": "fail",
+    "detail": "locator.focus: Timeout 30000ms exceeded.\nCall log:\n\u001b[2m  - waiting for getByRole('button', { name: 'Bật Discovery' })\u001b[22m\n",
+    "timestamp": "2026-08-12T07:27:27.718Z"
+  }
+]

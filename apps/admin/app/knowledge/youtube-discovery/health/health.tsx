@@ -16,16 +16,17 @@ export function YoutubeDiscoveryHealth() {
   const [pending, setPending] = useState(false);
   const [retryCommand, setRetryCommand] = useState<{ enabled: boolean } | null>(null);
   const sequence = useRef(0);
+  const heading = useRef<HTMLHeadingElement>(null);
   const active = useRef<AbortController | null>(null);
-  async function load(preserveConfirmedHealth = false) {
+  async function load(preserveConfirmedHealth = false, preserveStatus = false) {
     active.current?.abort(); const controller = new AbortController(); active.current = controller; const request = ++sequence.current;
-    setFailed(false); setStatus("Đang tải sức khỏe Discovery.");
+    setFailed(false); if (!preserveStatus) setStatus("Đang tải sức khỏe Discovery.");
     try {
       const response = await fetch(`${origin()}/v1/admin/knowledge/youtube-discovery/health`, { credentials: "include", cache: "no-store", signal: controller.signal, headers: { "x-request-id": crypto.randomUUID() } });
       if (response.status === 401) { signIn(); return false; }
       const parsed = parseAdminYoutubeDiscoveryHealthOverview(await response.json().catch(() => null));
       if (!response.ok || !parsed) throw new Error("unavailable");
-      if (request === sequence.current) { setHealth(parsed); setStatus("Đã tải sức khỏe Discovery an toàn."); return true; }
+      if (request === sequence.current) { setHealth(parsed); if (!preserveStatus) setStatus("Đã tải sức khỏe Discovery an toàn."); requestAnimationFrame(() => heading.current?.focus()); return true; }
       return false;
     } catch { if (request === sequence.current && !controller.signal.aborted) { if (!preserveConfirmedHealth) setFailed(true); setStatus("Không thể tải sức khỏe Discovery lúc này."); } return false; }
   }
@@ -57,13 +58,13 @@ export function YoutubeDiscoveryHealth() {
            : { ...current.latestQueryRun, nextRunAt: null },
        } : current);
       setStatus(result.enabled ? "Discovery đã bật." : "Discovery đã tắt.");
-      if (await load(true)) setRetryCommand(null);
+      if (await load(true, true)) setRetryCommand(null);
     } catch { setStatus("Không thể cập nhật Discovery. Trạng thái đã xác nhận được giữ nguyên, hãy thử lại."); }
     finally { setPending(false); }
   }
   if (failed) return <main><h1 className="text-3xl font-bold">Sức khỏe Discovery</h1><p role="status" aria-live="polite" className="mt-4">{status}</p><button className="mt-4 min-h-11 border border-emerald-900 px-4 font-semibold" onClick={() => void load()} type="button">Thử lại</button></main>;
   if (!health) return <main><h1 className="text-3xl font-bold">Sức khỏe Discovery</h1><p role="status" aria-live="polite" className="mt-4">{status}</p></main>;
-  return <main className="mx-auto max-w-5xl min-w-0 text-slate-900"><header><p className="text-sm font-semibold text-emerald-800">YOUTUBE DISCOVERY</p><h1 className="mt-2 text-3xl font-bold">Sức khỏe Discovery</h1><p role="status" aria-live="polite" className="mt-3 text-slate-600">{status}</p><p className="mt-1 text-sm text-slate-600">{lastUpdatedNote(health.lastUpdatedAt)}</p></header><section className="mt-6 grid gap-4 sm:grid-cols-2"><PolicyControl enabled={health.policy.enabled} pending={pending} retryCommand={retryCommand} onChange={setEnabled} /><Card title="Lập kế hoạch" value={runCopy[health.planning.state]} note={runNote(health.planning, "Chưa có lần chạy lập kế hoạch")} /><Card title="Lần chạy truy vấn gần nhất" value={runCopy[health.latestQueryRun.state]} note={runNote(health.latestQueryRun, "Chưa có lần chạy truy vấn")} /><Card title="Lịch truy vấn" value={health.querySchedule.enabled === false ? "Đang tắt" : health.querySchedule.freshness === "unavailable" ? "Không khả dụng" : "Đang bật"} note={scheduleNote(health.querySchedule)} /><Card title="Hàng đợi xem xét" value={`${health.backlog.pending} cần xem, ${health.backlog.deferred} để sau`} note={health.backlog.deferredAge === "available" ? `Để sau lâu nhất: ${format(health.backlog.oldestDeferredAt!)}. ${lastUpdatedNote(health.backlog.lastUpdatedAt)}` : `Tuổi để sau không khả dụng cho dữ liệu cũ hoặc chưa có. ${lastUpdatedNote(health.backlog.lastUpdatedAt)}`} /></section><PausedRuns runs={health.pausedRuns} /><Throughput throughput={health.throughput} /><section className="mt-6 border border-[#b8c4b9] bg-[#fbf7ed] p-5"><h2 className="font-semibold">Telemetry sử dụng AI</h2><p className="mt-3 text-sm">{usageNote(health.usage)}</p></section><Incidents incidents={health.incidents} /></main>;
+  return <main className="mx-auto max-w-5xl min-w-0 text-slate-900"><header><p className="text-sm font-semibold text-emerald-800">YOUTUBE DISCOVERY</p><h1 ref={heading} tabIndex={-1} className="mt-2 text-3xl font-bold outline-none">Sức khỏe Discovery</h1><p role="status" aria-live="polite" className="mt-3 text-slate-600">{status}</p><p className="mt-1 text-sm text-slate-600">{lastUpdatedNote(health.lastUpdatedAt)}</p></header><section className="mt-6 grid gap-4 sm:grid-cols-2"><PolicyControl enabled={health.policy.enabled} pending={pending} retryCommand={retryCommand} onChange={setEnabled} /><Card title="Lập kế hoạch" value={runCopy[health.planning.state]} note={runNote(health.planning, "Chưa có lần chạy lập kế hoạch")} /><Card title="Lần chạy truy vấn gần nhất" value={runCopy[health.latestQueryRun.state]} note={runNote(health.latestQueryRun, "Chưa có lần chạy truy vấn")} /><Card title="Lịch truy vấn" value={health.querySchedule.enabled === false ? "Đang tắt" : health.querySchedule.freshness === "unavailable" ? "Không khả dụng" : "Đang bật"} note={scheduleNote(health.querySchedule)} /><Card title="Hàng đợi xem xét" value={`${health.backlog.pending} cần xem, ${health.backlog.deferred} để sau`} note={health.backlog.deferredAge === "available" ? `Để sau lâu nhất: ${format(health.backlog.oldestDeferredAt!)}. ${lastUpdatedNote(health.backlog.lastUpdatedAt)}` : `Tuổi để sau không khả dụng cho dữ liệu cũ hoặc chưa có. ${lastUpdatedNote(health.backlog.lastUpdatedAt)}`} /></section><PausedRuns runs={health.pausedRuns} /><Throughput throughput={health.throughput} /><section className="mt-6 border border-[#b8c4b9] bg-[#fbf7ed] p-5"><h2 className="font-semibold">Telemetry sử dụng AI</h2><p className="mt-3 text-sm">{usageNote(health.usage)}</p></section><Incidents incidents={health.incidents} /></main>;
 }
 
 function Card({ title, value, note }: { title: string; value: string; note: string }) { return <section className="border border-[#b8c4b9] bg-[#fbf7ed] p-5"><h2 className="font-semibold">{title}</h2><p className="mt-2 text-xl font-bold">{value}</p><p className="mt-2 text-sm text-slate-600">{note}</p></section>; }

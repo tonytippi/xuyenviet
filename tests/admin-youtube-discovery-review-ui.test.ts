@@ -12,7 +12,7 @@ describe("admin YouTube Discovery review UI boundary", () => {
       penalty: { commercial_risk: expect.any(String), duplicate_risk: expect.any(String) },
       signal: { recent_discussion: expect.any(String), stale_or_changed_warning: expect.any(String), practical_question_demand: expect.any(String), creator_responsiveness: expect.any(String), commercial_risk: expect.any(String), contradictory_discussion: expect.any(String) },
       priorCaptureOutcome: { eligible: expect.any(String), already_compatible: expect.any(String), unavailable: expect.any(String) },
-       accept: { pending: expect.any(String), reconciling: "Đang kiểm tra kết quả thêm URL", submitted: "Đã thêm URL vào nguồn chờ xử lý. Bạn vẫn cần chạy YouTube Capture thủ công.", duplicate: "URL này đã có trong nguồn chờ xử lý hoặc đã được lưu trước đó.", failed: expect.any(String) }, defer: { pending: expect.any(String), deferred: expect.any(String), failed: expect.any(String) }, skip: { pending: expect.any(String), skipped: expect.any(String), failed: expect.any(String) },
+       accept: { pending: expect.any(String), reconciling: "Đang kiểm tra kết quả thêm URL", submitted: "URL đã được gửi vào hàng đợi nạp Knowledge. Việc này chưa xác nhận trạng thái xử lý tiếp theo.", duplicate: "URL này đã có trong hàng đợi nạp Knowledge hoặc đã được lưu trước đó. Việc này chưa xác nhận trạng thái xử lý tiếp theo.", failed: expect.any(String) }, defer: { pending: expect.any(String), deferred: expect.any(String), failed: expect.any(String) }, skip: { pending: expect.any(String), skipped: expect.any(String), failed: expect.any(String) },
     });
   });
 
@@ -104,7 +104,8 @@ describe("admin YouTube Discovery review UI boundary", () => {
     ]);
     expect(mission).toContain('/^mission-[a-f0-9]{32}$/.test(actionId)');
     expect(mission).toContain("Nhu cầu trong liên kết không khả dụng.");
-    expect(health).toContain('/^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}:(provider_rate_limited|triage_schema_invalid|execution_terminal)$/.test(actionId)');
+    expect(health).toContain('try { groupId = decodeURIComponent(actionId); } catch');
+    expect(health).toContain('/^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}:(provider_rate_limited|triage_schema_invalid|execution_terminal)$/.test(groupId)');
     expect(health).toContain("Sự cố trong liên kết không khả dụng.");
   });
 

@@ -181,6 +181,22 @@ describe("admin YouTube Discovery direct API", () => {
     expect(port.acceptReview).toHaveBeenCalledWith(expect.objectContaining({ userId: "operator", email: "operator@example.com" }), "recommendation-1");
     await request(app.getHttpServer()).post("/v1/admin/knowledge/youtube-discovery/review/recommendation-1/accept").set(headers).send({ canonicalUrl: "https://unsafe.example" }).expect(400);
     await request(app.getHttpServer()).post("/v1/admin/knowledge/youtube-discovery/review/recommendation-1/accept").set({ Cookie: operator.cookie, Origin: "https://admin.xuyenviet.app", "x-xuyenviet-csrf": "invalid" }).send({}).expect(403);
+    await request(app.getHttpServer()).post("/v1/admin/knowledge/youtube-discovery/review/recommendation-1/accept").set({ Cookie: operator.cookie, Origin: "https://unsafe.example", "x-xuyenviet-csrf": operator.csrf }).send({}).expect(403);
+  });
+
+  test("admits only exact CSRF-protected operator enablement commands", async () => {
+    const traveler = await browserSession("traveler", "traveler");
+    const operator = await browserSession("operator", "operator");
+    const headers = { Cookie: operator.cookie, Origin: "https://admin.xuyenviet.app", "x-xuyenviet-csrf": operator.csrf };
+
+    await request(app.getHttpServer()).post("/v1/admin/knowledge/youtube-discovery/enablement").send({ enabled: false }).expect(401);
+    await request(app.getHttpServer()).post("/v1/admin/knowledge/youtube-discovery/enablement").set({ Cookie: traveler.cookie, Origin: "https://admin.xuyenviet.app", "x-xuyenviet-csrf": traveler.csrf }).send({ enabled: false }).expect(403);
+    await request(app.getHttpServer()).post("/v1/admin/knowledge/youtube-discovery/enablement").set(headers).send({ enabled: "false" }).expect(400);
+    await request(app.getHttpServer()).post("/v1/admin/knowledge/youtube-discovery/enablement").set({ ...headers, "x-xuyenviet-csrf": "invalid" }).send({ enabled: false }).expect(403);
+    await request(app.getHttpServer()).post("/v1/admin/knowledge/youtube-discovery/enablement").set({ ...headers, Origin: "https://unsafe.example" }).send({ enabled: false }).expect(403);
+    await request(app.getHttpServer()).post("/v1/admin/knowledge/youtube-discovery/enablement").set(headers).send({ enabled: false }).expect(201, { enabled: false, version: 2, createdAt: "2026-08-07T00:00:00.000Z", changed: true });
+    expect(port.setEnabled).toHaveBeenCalledOnce();
+    expect(port.setEnabled).toHaveBeenCalledWith(expect.objectContaining({ userId: "operator", email: "operator@example.com" }), false);
   });
 
   test("admits only exact CSRF-protected Defer and Skip commands with route-specific outcomes", async () => {

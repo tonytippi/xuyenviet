@@ -52,6 +52,12 @@ describe("admin YouTube Discovery contract", () => {
     expect(parseAdminYoutubeDiscoveryAcceptReviewResult({ outcome: "duplicate" })).toEqual({ outcome: "duplicate" });
     expect(parseAdminYoutubeDiscoveryAcceptReviewResult({ outcome: "failed", sourceId: "unsafe" })).toBeNull();
     expect(parseAdminYoutubeDiscoveryAcceptReviewResult({ outcome: "reconciling", batchId: "unsafe" })).toBeNull();
+    for (const outcome of ["submitted", "duplicate", "failed", "reconciling"] as const) {
+      expect(parseAdminYoutubeDiscoveryAcceptReviewResult({ outcome })).toEqual({ outcome });
+      for (const unsafeKey of ["rawComment", "sourceMaterial", "prompt", "providerDiagnostics", "apiKey", "captureVersionId", "evidenceSpan", "travelerContent"]) {
+        expect(parseAdminYoutubeDiscoveryAcceptReviewResult({ outcome, [unsafeKey]: "unsafe" })).toBeNull();
+      }
+    }
   });
 
   test("defer and skip accept exactly empty JSON objects with route-specific closed outcomes", () => {
@@ -89,6 +95,9 @@ describe("admin YouTube Discovery contract", () => {
       { kind: "knowledge_recommendation", actionId: "knowledge-risk", destination: "knowledge_recommendation", reason: "knowledge_risk", priority: 1, occurredAt: item.occurredAt },
       { kind: "knowledge_recommendation", actionId: "knowledge-relation", destination: "knowledge_recommendation", reason: "knowledge_relation", priority: 1, occurredAt: item.occurredAt },
     ], nextCursor: null })).not.toBeNull();
+    for (const unsafeKey of ["rawComment", "sourceMaterial", "prompt", "providerDiagnostics", "apiKey", "captureVersionId", "evidenceSpan", "travelerContent"]) {
+      expect(parseAdminYoutubeDiscoveryActionRequiredQueue({ items: [{ ...item, [unsafeKey]: "unsafe" }], nextCursor: null })).toBeNull();
+    }
   });
 
   test("requires endpoint-specific Mission pages, current-state funnel, and unavailable safe context", () => {
@@ -106,6 +115,11 @@ describe("admin YouTube Discovery contract", () => {
     expect(parseAdminYoutubeDiscoveryMissionDetail({ coverage, query, latestRun: { state: "unavailable", createdAt: null, retryCount: null, terminalCategory: "unavailable" }, candidates: { items: [candidate], nextCursor: null } })).toBeNull();
     expect(parseAdminYoutubeDiscoveryMissionFunnel({ asOf: coverage.createdAt, discovered: 1, enriched: 1, triaged: 1, recommended: 1, pendingReview: 1, accepted: 0, deferred: 0, skipped: 0 })).not.toBeNull();
     expect(parseAdminYoutubeDiscoveryMissionFunnel({ asOf: coverage.createdAt, discovered: -1, enriched: 0, triaged: 0, recommended: 0, pendingReview: 0, accepted: 0, deferred: 0, skipped: 0 })).toBeNull();
+    for (const unsafeKey of ["rawComment", "sourceMaterial", "prompt", "providerDiagnostics", "apiKey", "captureVersionId", "evidenceSpan", "travelerContent"]) {
+      expect(parseAdminYoutubeDiscoveryMissionCoveragePage({ items: [{ ...coverage, [unsafeKey]: "unsafe" }], nextCursor: null })).toBeNull();
+      expect(parseAdminYoutubeDiscoveryMissionQueryPage({ items: [{ ...query, [unsafeKey]: "unsafe" }], nextCursor: null })).toBeNull();
+      expect(parseAdminYoutubeDiscoveryMissionCandidatePage({ items: [{ ...candidate, [unsafeKey]: "unsafe" }], nextCursor: null })).toBeNull();
+    }
   });
 
   test("requires bounded Health projections and server-admitted opaque incident cursors", () => {
@@ -137,5 +151,8 @@ describe("admin YouTube Discovery contract", () => {
     expect(parseAdminYoutubeDiscoveryHealthIncidentDetail({ groupId: overview.incidents[0].actionId, category: "provider_rate_limited", items: [{ runId: "run-1", state: "failed", stage: "unavailable", phase: "retrying", at: overview.asOf, nextRunAt: null, retryCount: 1, category: "provider_rate_limited" }], nextCursor: null })).toBeNull();
     expect(parseAdminYoutubeDiscoveryHealthIncidentDetail({ groupId: overview.incidents[0].actionId, category: "provider_rate_limited", items: [{ runId: "run-1", state: "retrying", stage: "unavailable", phase: "retrying", at: overview.asOf, nextRunAt: null, retryCount: 1, category: "triage_schema_invalid" }], nextCursor: null })).toBeNull();
     expect(parseAdminYoutubeDiscoveryHealthIncidentDetail({ groupId: overview.incidents[0].actionId, category: "provider_rate_limited", items: [{ runId: "run-1", state: "retrying", phase: "retrying", at: overview.asOf, nextRunAt: "2026-08-07T00:15:00.000Z", retryCount: 1, category: "provider_rate_limited" }], nextCursor: null })).toBeNull();
+    for (const unsafeKey of ["rawComment", "sourceMaterial", "prompt", "providerDiagnostics", "apiKey", "captureVersionId", "evidenceSpan", "travelerContent"]) {
+      expect(parseAdminYoutubeDiscoveryHealthOverview({ ...overview, [unsafeKey]: "unsafe" })).toBeNull();
+    }
   });
 });
