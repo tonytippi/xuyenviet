@@ -217,6 +217,10 @@ NFR-16: The current lifecycle normalization uses a clean-break migration, reset,
 NFR-17: Before retiring a legacy worker loop, its replacement dashboard and runbook demonstrate stable lag, retry, lease recovery, duplicate-poller, and restart behavior.
 NFR-18: Before public launch, approve Railway ownership, domains/DNS/CSP/OAuth callbacks, secrets, backup/restore, monitoring, alerting, and on-call; pass connection-pool, AI-stream concurrency, and backup-restore tests.
 
+NFR-19: Discovery commands, read models, automated execution, AI usage, and retention shall be attributable and role-protected while exposing only bounded safe operational information. Raw comments, prompts/responses, provider payloads, credentials, source material, evidence, and traveler content shall not appear in Discovery records, logs, or operator projections.
+
+NFR-20: The Discovery control tower shall meet the project's operator accessibility and responsive-use standards, including keyboard operation, visible focus, color-independent status, screen-reader announcements, and retention of authorized functions on narrow layouts.
+
 ### Additional Requirements
 
 - Use a Next.js App Router TypeScript modular monolith, PostgreSQL as product/retrieval source of truth, and Drizzle-owned migrations.
@@ -278,7 +282,7 @@ AD-31-2: Audit-taking APIs accept the `AuditActor` union. User actors contain a 
 
 AD-31-3: `audit_events` and `trip_plan_change_history` persist exactly one user-or-system actor shape, enforced by application validation and database checks.
 
-AD-31-4: The system actor catalog is immutable and contains `system-ai-orchestration`, `system-knowledge-pipeline`, `system-trip-planning`, `system-facebook-capture`, and `system-youtube-capture` with server-owned labels.
+AD-31-4: The system actor catalog is immutable and contains `system-ai-orchestration`, `system-knowledge-pipeline`, `system-trip-planning`, `system-facebook-capture`, `system-youtube-capture`, and `system-youtube-discovery` with server-owned labels. Story 18.1 introduced the Discovery-specific catalog entry; this shared contract records its canonical identity without transferring Discovery ownership to Epic 8.
 
 AD-31-5: Real-user ownership, requester, submitter, reviewer, approver, referral, session, and conversation fields remain real-user foreign keys. Automated execution fields persist cataloged system executors separately.
 
@@ -543,6 +547,8 @@ FR-75: Epic 20 Stories 20.1-20.3 - Action Required, Knowledge Mission, and Autom
 FR-76: Epic 20 Story 20.2 - Route verification/conflict work to existing Knowledge ownership.
 FR-77: Epic 18 Story 18.5 - Policy-controlled safe candidate and derived-signal retention.
 FR-78: Epic 18 Stories 18.4-18.5 - Documented APIs and bounded metadata only; no scraping, transcript, media, raw-comment, or automatic-video-analysis path.
+NFR-19: Epics 18-20 - Role-protected, attributable Discovery commands, read models, automation, AI usage, retention, and bounded safe operational projections.
+NFR-20: Epic 20 Stories 20.1-20.5 - Accessible, responsive Discovery control tower with retained authorized functions on narrow layouts.
 
 ### Architecture Delta Coverage Map (2026-07-28)
 
@@ -1509,8 +1515,8 @@ So that all protected writes identify the correct kind of actor without treating
 
 **Given** a system actor is requested
 **When** its ID is validated or rendered for an audit read model
-**Then** it is exactly one server-owned catalog entry from `system-ai-orchestration`, `system-knowledge-pipeline`, `system-trip-planning`, `system-facebook-capture`, or `system-youtube-capture`
-**And** labels come from catalog metadata rather than user input, while `system-youtube-capture` is not created by seed data.
+**Then** it is exactly one server-owned catalog entry from `system-ai-orchestration`, `system-knowledge-pipeline`, `system-trip-planning`, `system-facebook-capture`, `system-youtube-capture`, or `system-youtube-discovery`
+**And** labels come from catalog metadata rather than user input, while `system-youtube-capture` is not created by seed data and `system-youtube-discovery` remains owned by the completed Discovery foundation in Story 18.1.
 
 **Given** an actor payload has a missing or blank email, an arbitrary system ID, or mixed user and system fields
 **When** an Audit-owned API validates it
@@ -3057,6 +3063,8 @@ So that convenience improvements cannot silently weaken traveler control, owner 
 ## Epic 21: Context-Complete, Trip-Aware Planning And Conversion
 
 Travelers can refine complex itinerary, route, lodging, food, and activity requests until the relevant scope has enough context; receive bounded route-aware answers that expose required gaps and freshness limits; and explicitly convert the latest useful chat context into a reviewable Trip without copying the chat or silently changing Trip state.
+
+**Implementation precondition:** Before an Epic 21 story begins, the v6.2 Trip-Aware Planning Addendum in `ux-designs/ux-xuyenviet-2026-07-05/EXPERIENCE.md` must be current and cited by the story. The implementation must preserve its planning-mode, route-limitation, required-gap, and persistent-conversion interaction contracts.
 
 ### Story 21.1: Define Versioned Planning Context Profiles And Scope Rules
 

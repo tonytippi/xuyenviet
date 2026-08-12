@@ -236,7 +236,7 @@ This product carries unusual trust load: AI guidance, remembered trip details, u
 Rules:
 
 - Never expose operator-only raw source material to travelers.
-- Label web-search information as external/unverified unless ingested into an active knowledge card that passes the publication policy.
+- When web information may affect a decision, explain in Vietnamese what may have changed and what the traveler should check before acting. Do not label it `external`, `unverified`, or with any internal source/provenance taxonomy.
 - Prefer official/provider labels when the source supports it, but still avoid guarantee language.
 - Store/display answer provenance from structured source records, not parsed answer text. Persisted entity descriptor labels/summaries may use validated answer ranges, but entity provenance and quick facts must remain bound to stored provenance/safe snapshots.
 - The storage notice explains chat/trip detail use before or at first meaningful AI Ask.
@@ -249,6 +249,13 @@ Rules:
 [DECIDED] MVP storage notice copy: `Để hỗ trợ cuộc trò chuyện và kế hoạch chuyến đi, XuyenViet có thể lưu nội dung bạn cung cấp và gửi yêu cầu đến dịch vụ AI đã cấu hình để tạo câu trả lời. Bạn có thể xóa cuộc trò chuyện hoặc dự án chuyến đi bất cứ lúc nào.` The notice includes the link label `Tìm hiểu thêm về quyền riêng tư`, remains informational rather than blocking consent, and must be reviewed if provider processing terms change.
 
 [DECIDED] Deleting a trip project also deletes its linked project chats. The confirmation must name the project and state that linked chats, stored trip context, and normal retrieval use will be removed.
+
+### v6.2 Trip-Aware Planning Addendum
+
+- **Planning modes:** A Trip-scoped answer distinguishes the current saved plan, an explored change, a pending-proposal review, and an unscoped/private question. Current-plan copy represents only applied Trip state. Exploration and pending proposals remain visibly hypothetical and cannot alter the displayed plan.
+- **Route coverage:** When a route is partial, ambiguous, unsupported, or has a stale selected path, the answer provides any safe scoped guidance, states the bounded limitation in plain Vietnamese, and offers the relevant clarification, review, or verification action. It never implies end-to-end, live navigation, traffic, closure, or guaranteed route-safety authority.
+- **Required planning needs:** If a consequential route, safety, family, vehicle, stop, or constraint need is uncovered, the answer identifies that gap concisely and offers a bounded clarification or verification action. It does not hide the gap behind unrelated recommendations.
+- **Persistent Trip conversion:** After a useful unscoped planning answer has current eligible durable context, the shell may show one persistent `Chuyển thành chuyến đi` action projected by the server. It reflects the latest eligible context, may suspend while information is ambiguous or incomplete, and changes no Trip state until the traveler explicitly converts and then applies the resulting proposal.
 
 ## Responsive & Platform
 
