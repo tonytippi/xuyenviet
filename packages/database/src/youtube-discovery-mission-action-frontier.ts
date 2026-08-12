@@ -12,7 +12,7 @@ export function createYoutubeDiscoveryMissionActionFrontier(db: MissionActionFro
     async listMissionNeeds(policy, cursor, limit) {
       const after = missionAfter(cursor);
       const rows = await db.execute(missionItems(policy, after, limit)) as MissionActionRow[];
-      const admitsCursor = !cursor || cursor.kind !== "mission_need" || Boolean((await db.execute(missionItems(policy, sql`true`, 1, cursor)) as MissionActionRow[])[0]);
+      const admitsCursor = !cursor || cursor.kind !== "mission_need" || cursor.urgency === 1 && Boolean((await db.execute(missionItems(policy, sql`true`, 1, cursor)) as MissionActionRow[])[0]);
       return { items: rows.map((row) => ({ ...row, occurredAt: new Date(row.occurredAt) })), admitsCursor };
     },
   };

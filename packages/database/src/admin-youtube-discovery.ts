@@ -417,7 +417,7 @@ async function incidentActionFrontier(db: AdminYoutubeDiscoveryDatabase, cursor:
       join youtube_discovery_query_proposals proposal on proposal.id = run.query_proposal_id
       join youtube_discovery_policy_versions policy on policy.id = run.policy_version_id
       where run.query_proposal_id is not null and run.incident_category is not null
-        and (run.terminal_at is not null or (run.state = 'retrying' and run.incident_category = 'provider_rate_limited'))
+        and ((run.state in ('failed', 'completed') and run.terminal_at is not null) or (run.state = 'retrying' and run.incident_category = 'provider_rate_limited'))
     ), latest as (
       select distinct on (query_proposal_id, incident_category) * from events
       order by query_proposal_id, incident_category, at desc, id desc

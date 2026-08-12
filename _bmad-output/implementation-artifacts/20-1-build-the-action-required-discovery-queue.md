@@ -1,6 +1,6 @@
 ---
 story_id: 20-1
-status: review
+status: done
 created: 2026-08-11
 epic: 20
 ---
@@ -48,6 +48,8 @@ so that I can act quickly without scanning a noisy dashboard or routine history.
 - [x] [Review][Patch] Reconcile legacy system-query identities before adding Mission IDs to the digest [packages/domain/src/youtube-discovery/planning.ts:38]
 - [x] [Review][Patch] Bound and paginate each action-queue source rather than loading all historical rows [packages/database/src/admin-youtube-discovery.ts:44]
 - [x] [Review][Patch] Keep the unavailable queue state distinct from a successful empty completion state [apps/admin/app/knowledge/youtube-discovery/queue.tsx:35]
+- [x] [Review][Patch] Reject non-canonical Mission cursor urgency [packages/database/src/youtube-discovery-mission-action-frontier.ts:15]
+- [x] [Review][Patch] Exclude cancelled runs from action-required incident events [packages/database/src/admin-youtube-discovery.ts:419]
 
 - [x] Extend the versioned Discovery policy and closed operational classification (AC: 1)
   - [x] Add one forward Drizzle migration, schema fields, constraints, contracts, policy creation/update paths, and audit summary fields for the five locked policy values above. Preserve existing policy-version/run snapshot semantics; a run/action projection must use its applicable policy version, not environment defaults.

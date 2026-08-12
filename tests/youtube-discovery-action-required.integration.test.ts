@@ -3,7 +3,7 @@ import { eq, sql } from "drizzle-orm";
 import { adminYoutubeDiscoveryActionRequiredPageSize, parseAdminYoutubeDiscoveryActionRequiredCursor, type AdminYoutubeDiscoveryActionRequiredCursor, type RequestPrincipal } from "@xuyenviet/contracts";
 import { YoutubeDiscoveryActionRequiredCursorValidationError } from "@xuyenviet/domain";
 
-import { aiGatewayModels, auditEvents, claimNextYoutubeDiscoveryRun, createPostgresAdminYoutubeDiscoveryPort, createSystemAuditActor, createUserAuditActor, createYoutubeDiscoveryMissionActionFrontier, createYoutubeDiscoveryPolicyVersion, createYoutubeDiscoveryQueryProposal, createYoutubeDiscoveryRun, finishYoutubeDiscoveryRun, getYoutubeDiscoveryRecommendationBundle, knowledgeCards, knowledgeRecommendations, persistYoutubeDiscoveryCandidates, persistYoutubeDiscoveryEnrichment, persistYoutubeDiscoveryRecommendation, persistYoutubeDiscoveryTriage, retryYoutubeDiscoveryRun, selectYoutubeDiscoveryTriageModel, youtubeDiscoveryCandidateReviewStates, youtubeDiscoveryCandidates, youtubeDiscoveryPolicyVersions, youtubeDiscoveryQueryProposals, youtubeDiscoveryRecommendations, youtubeDiscoveryRuns } from "@xuyenviet/database";
+import { aiGatewayModels, auditEvents, cancelYoutubeDiscoveryRunIfDisabled, claimNextYoutubeDiscoveryRun, createPostgresAdminYoutubeDiscoveryPort, createSystemAuditActor, createUserAuditActor, createYoutubeDiscoveryMissionActionFrontier, createYoutubeDiscoveryPolicyVersion, createYoutubeDiscoveryQueryProposal, createYoutubeDiscoveryRun, finishYoutubeDiscoveryRun, getYoutubeDiscoveryRecommendationBundle, knowledgeCards, knowledgeRecommendations, persistYoutubeDiscoveryCandidates, persistYoutubeDiscoveryEnrichment, persistYoutubeDiscoveryRecommendation, persistYoutubeDiscoveryTriage, retryYoutubeDiscoveryRun, selectYoutubeDiscoveryTriageModel, youtubeDiscoveryCandidateReviewStates, youtubeDiscoveryCandidates, youtubeDiscoveryPolicyVersions, youtubeDiscoveryQueryProposals, youtubeDiscoveryRecommendations, youtubeDiscoveryRuns } from "@xuyenviet/database";
 import { resetTestDatabase, seedTestOperator, testDb } from "./helpers/db";
 
 const principal: RequestPrincipal = { userId: "operator", email: "operator@example.com", roles: ["operator"], sessionId: "action-queue-session", authorizationVersion: 1 };
@@ -53,14 +53,31 @@ describe.sequential("YouTube Discovery action-required queue", () => {
     queue = await port.listActionRequired(principal, null);
     expect(queue.items.some((item) => item.actionId === `${proposal.id}:provider_rate_limited`)).toBe(false);
 
-    await failRun(policy.id, proposal.id, "provider_rate_limited");
+    const retryPolicy = await createYoutubeDiscoveryPolicyVersion({ version: 2, isCurrent: true, policy: { maxRetryAttempts: 1 }, actor: createSystemAuditActor("system-youtube-discovery") }, testDb);
+    await createYoutubeDiscoveryRun({ policyVersionId: retryPolicy.id, queryProposalId: proposal.id }, testDb);
+    const cancelledClaim = (await claimNextYoutubeDiscoveryRun({ workerId: "rate-limit-cancelled" }, testDb)).claim;
+    if (!cancelledClaim) throw new Error("expected rate-limit cancellation claim");
+    expect(await retryYoutubeDiscoveryRun(cancelledClaim, "provider_rate_limited", testDb)).toBe("retrying");
+    queue = await port.listActionRequired(principal, null);
+    expect(queue.items.some((item) => item.actionId === `${proposal.id}:provider_rate_limited`)).toBe(true);
+    await testDb.update(youtubeDiscoveryRuns).set({ nextRunAt: sql`clock_timestamp()` }).where(eq(youtubeDiscoveryRuns.id, cancelledClaim.id));
+    const cancellationClaim = (await claimNextYoutubeDiscoveryRun({ workerId: "cancel-rate-limit" }, testDb)).claim;
+    if (!cancellationClaim) throw new Error("expected cancellation claim");
+    await testDb.update(youtubeDiscoveryQueryProposals).set({ enabled: false }).where(eq(youtubeDiscoveryQueryProposals.id, proposal.id));
+    expect(await cancelYoutubeDiscoveryRunIfDisabled(cancellationClaim, testDb)).toBe("cancelled");
+    queue = await port.listActionRequired(principal, null);
+    expect(queue.items.some((item) => item.actionId === `${proposal.id}:provider_rate_limited`)).toBe(false);
+    await testDb.update(youtubeDiscoveryQueryProposals).set({ enabled: true }).where(eq(youtubeDiscoveryQueryProposals.id, proposal.id));
+
+    const terminalPolicy = await createYoutubeDiscoveryPolicyVersion({ version: 3, isCurrent: true, policy: { maxRetryAttempts: 0 }, actor: createSystemAuditActor("system-youtube-discovery") }, testDb);
+    await failRun(terminalPolicy.id, proposal.id, "provider_rate_limited");
     queue = await port.listActionRequired(principal, null);
     expect(queue.items).toEqual(expect.arrayContaining([expect.objectContaining({ actionId: `${proposal.id}:provider_rate_limited`, reason: "provider_rate_limited" })]));
 
-    await failRun(policy.id, other.id, "execution_terminal");
+    await failRun(terminalPolicy.id, other.id, "execution_terminal");
     queue = await port.listActionRequired(principal, null);
     expect(queue.items.some((item) => item.actionId === `${other.id}:execution_terminal`)).toBe(false);
-    await failRun(policy.id, other.id, "execution_terminal");
+    await failRun(terminalPolicy.id, other.id, "execution_terminal");
     queue = await port.listActionRequired(principal, null);
     expect(queue.items).toEqual(expect.arrayContaining([expect.objectContaining({ kind: "health_incident", actionId: `${other.id}:execution_terminal`, reason: "execution_persistent_failure" })]));
 
@@ -143,6 +160,19 @@ describe.sequential("YouTube Discovery action-required queue", () => {
     const queue = await createPostgresAdminYoutubeDiscoveryPort(undefined, testDb, undefined, undefined, createYoutubeDiscoveryMissionActionFrontier(testDb)).listActionRequired(principal, null);
 
     expect(queue.items.some((item) => item.actionId === actionId)).toBe(false);
+  });
+
+  test("rejects a Mission cursor with a forged urgency", async () => {
+    await queueFixture();
+    const actionId = "mission-dddddddddddddddddddddddddddddddd";
+    await testDb.insert(knowledgeCards).values({ id: "mission-cursor-card", lifecycleState: "pending_operator", knowledgeState: "community_observation", verificationRequirement: "operator_required", type: "route_note", title: "Mission cursor", summary: "Safe test summary", aiPromptVersion: "test", createdByUserId: "operator" });
+    await testDb.insert(knowledgeRecommendations).values({ knowledgeCardId: "mission-cursor-card", contentVersion: 1, evidenceSetRevision: 1, status: "open", workType: "missing_context", priority: 10, discoveryMissionActionId: actionId });
+    const port = createPostgresAdminYoutubeDiscoveryPort(undefined, testDb, undefined, undefined, createYoutubeDiscoveryMissionActionFrontier(testDb));
+    const queue = await port.listActionRequired(principal, null);
+    const mission = queue.items.find((item) => item.kind === "mission_need");
+    if (!mission) throw new Error("expected Mission action item");
+
+    await expect(port.listActionRequired(principal, { version: 1, urgency: 0, priority: mission.priority, occurredAt: mission.occurredAt, kind: mission.kind, actionId: mission.actionId })).rejects.toBeInstanceOf(YoutubeDiscoveryActionRequiredCursorValidationError);
   });
 
   test("uses current grouped run policy semantics and paginates complete owner sources", async () => {
