@@ -1,5 +1,5 @@
 # generated: 2026-07-25
-# last_updated: 2026-08-11 (Synchronized Epic 8, 14, 15, 16, 18, and 19 to done after all of their stories reached done. Story 20.3 completed. Story 20.4 guide created.)
+# last_updated: 2026-08-12 (Synchronized Epic 8, 14, 15, 16, 18, and 19 to done after all of their stories reached done. Story 20.3 completed. Story 20.4 guide created. Story 20.5 guide created.)
 # project: xuyenviet
 # project_key: NOKEY
 # tracking_system: file-system
@@ -33,7 +33,7 @@
 #   - done: Completed
 
 generated: 2026-07-25
-last_updated: 2026-08-11 (Synchronized Epic 8, 14, 15, 16, 18, and 19 to done after all of their stories reached done. Story 20.3 completed. Story 20.4 guide created.)
+last_updated: 2026-08-12 (Synchronized Epic 8, 14, 15, 16, 18, and 19 to done after all of their stories reached done. Story 20.3 completed. Story 20.4 guide created. Story 20.5 guide created.)
 project: xuyenviet
 project_key: NOKEY
 tracking_system: file-system
@@ -447,7 +447,7 @@ development_status:
   20-2-deliver-knowledge-mission-drill-downs: done
   20-3-deliver-automation-health-and-safe-incident-detail: done
   20-4-control-discovery-enablement-safely: done
-  20-5-verify-control-tower-accessibility-and-operational-boundaries: backlog
+  20-5-verify-control-tower-accessibility-and-operational-boundaries: ready-for-dev
   epic-20-retrospective: optional
 
 action_items:
