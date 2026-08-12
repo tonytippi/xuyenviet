@@ -121,6 +121,7 @@ describe("admin YouTube Discovery contract", () => {
     expect(parseAdminYoutubeDiscoveryHealthOverview({ ...overview, backlog: { ...overview.backlog, oldestDeferredAt: null } })).toBeNull();
     expect(parseAdminYoutubeDiscoveryHealthOverview({ ...overview, latestQueryRun: { ...overview.latestQueryRun, freshness: "fresh" } })).toBeNull();
     expect(parseAdminYoutubeDiscoveryHealthOverview({ ...overview, latestQueryRun: { ...overview.latestQueryRun, nextRunAt: null } })).toBeNull();
+    expect(parseAdminYoutubeDiscoveryHealthOverview({ ...overview, policy: { enabled: false }, latestQueryRun: { ...overview.latestQueryRun, nextRunAt: null } })).not.toBeNull();
     expect(parseAdminYoutubeDiscoveryHealthOverview({ ...overview, planning: { ...overview.planning, lastUpdatedAt: overview.asOf } })).toBeNull();
     expect(parseAdminYoutubeDiscoveryHealthOverview({ ...overview, throughput: { ...overview.throughput, freshness: "unavailable" } })).toBeNull();
     expect(parseAdminYoutubeDiscoveryHealthOverview({ ...overview, throughput: { ...overview.throughput, lastUpdatedAt: null, freshness: "unavailable" } })).not.toBeNull();

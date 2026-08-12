@@ -60,6 +60,11 @@ warnings: []
 - [x] `apps/admin/app/knowledge/youtube-discovery/health/health.tsx` -- replace the read-only policy card with one accessible immediate switch, confirmed/retry/reconciliation handling, disabled boundary copy, and safe paused-run presentation.
 - [x] `tests/` -- prove strict contracts, policy copying/idempotency/serialization, schedule and Worker race fences, select-only Health safety, protected API mapping, and Health UI accessibility/failure behavior.
 
+### Review Findings
+
+- [x] [Review][Patch] Confirmed enablement can retain a contradictory stale schedule [apps/admin/app/knowledge/youtube-discovery/health/health.tsx:48]
+- [x] [Review][Patch] Disabled Health can expose a retry opportunity [packages/database/src/admin-youtube-discovery.ts:201]
+
 **Acceptance Criteria:**
 - Given an authorized operator changes the global Discovery switch, when the command succeeds, then Health immediately shows persistent `Đang bật` or `Đang tắt` state and an accessible confirmed-result announcement without altering Knowledge or manual capture.
 - Given Discovery is disabled with active or historical runs, when Health loads, then it truthfully distinguishes fencing requested, policy-revoked cancellation, and completion before the disabling policy while exposing only bounded safe context.

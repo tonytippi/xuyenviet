@@ -121,6 +121,24 @@ describe.sequential("YouTube Discovery Health projections", () => {
     expect(overview.latestQueryRun).toMatchObject({ state: "failed", at: expect.any(String), lastUpdatedAt: expect.any(String), freshness: "current" });
   });
 
+  test("does not project a retry opportunity while Discovery is globally paused", async () => {
+    await seedTestOperator();
+    const policy = await createYoutubeDiscoveryPolicyVersion({ version: 1, isCurrent: true, policy: { enabled: true, cadenceMinutes: 15, maxRetryAttempts: 1 }, actor: createSystemAuditActor("system-youtube-discovery") }, testDb);
+    const proposal = await createYoutubeDiscoveryQueryProposal({ origin: "operator", reason: "operator_request", priority: 10, queryText: "Da Lat route", cadenceMinutes: 15, actor: createUserAuditActor({ userId: "operator", email: "operator@example.com" }) }, testDb);
+    await createYoutubeDiscoveryRun({ policyVersionId: policy.id, queryProposalId: proposal.id }, testDb);
+    const claim = (await claimNextYoutubeDiscoveryRun({ workerId: "health-fixture" }, testDb)).claim;
+    if (!claim) throw new Error("expected claim");
+    expect(await retryYoutubeDiscoveryRun(claim, "provider_rate_limited", testDb)).toBe("retrying");
+    await createYoutubeDiscoveryPolicyVersion({ version: 2, isCurrent: true, policy: { enabled: false, cadenceMinutes: 15 }, actor: createSystemAuditActor("system-youtube-discovery") }, testDb);
+
+    const overview = await createPostgresAdminYoutubeDiscoveryPort(undefined, testDb).healthOverview();
+
+    expect(overview.policy).toEqual({ enabled: false });
+    expect(overview.querySchedule.nextRunAt).toBeNull();
+    expect(overview.latestQueryRun).toMatchObject({ state: "retrying", nextRunAt: null });
+    expect(parseAdminYoutubeDiscoveryHealthOverview(overview)).toEqual(overview);
+  });
+
   test("orders and bounds paused context while fencing only live claimed runs with safe timestamps", async () => {
     await seedTestOperator();
     const policy = await createYoutubeDiscoveryPolicyVersion({ version: 1, isCurrent: true, actor: createSystemAuditActor("system-youtube-discovery") }, testDb);

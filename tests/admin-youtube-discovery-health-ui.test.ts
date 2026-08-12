@@ -29,7 +29,9 @@ describe("admin YouTube Discovery Health UI boundary", () => {
     expect(overview).toContain('/auth/csrf');
     expect(overview).toContain('"x-xuyenviet-csrf": csrfToken');
     expect(overview).toContain('Origin: window.location.origin');
-    expect(overview).toContain('setHealth((current) => current ? { ...current, policy: { ...current.policy, enabled: result.enabled } } : current)');
+    expect(overview).toContain('policy: { ...current.policy, enabled: result.enabled }');
+    expect(overview).toContain('querySchedule: result.enabled');
+    expect(overview).toContain('latestQueryRun: result.enabled || current.latestQueryRun.state !== "retrying"');
     expect(overview).toContain('await load(true)');
     expect(overview).toContain("Trạng thái đã xác nhận được giữ nguyên");
     expect(overview).toContain('const [retryCommand, setRetryCommand] = useState<{ enabled: boolean } | null>(null)');

@@ -45,7 +45,17 @@ export function YoutubeDiscoveryHealth() {
       if (response.status === 401) { signIn(); return; }
       const result = parseAdminYoutubeDiscoveryEnablementResult(await response.json().catch(() => null));
       if (!response.ok || !result) throw new Error("unavailable");
-      setHealth((current) => current ? { ...current, policy: { ...current.policy, enabled: result.enabled } } : current);
+       setHealth((current) => current ? {
+         ...current,
+         policy: { ...current.policy, enabled: result.enabled },
+         // Do not retain a pre-command future schedule when reconciliation fails.
+         querySchedule: result.enabled
+           ? { enabled: null, cadenceMinutes: null, nextRunAt: null, lastUpdatedAt: null, freshness: "unavailable" }
+           : { ...current.querySchedule, enabled: false, nextRunAt: null, freshness: "unavailable" },
+         latestQueryRun: result.enabled || current.latestQueryRun.state !== "retrying"
+           ? current.latestQueryRun
+           : { ...current.latestQueryRun, nextRunAt: null },
+       } : current);
       setStatus(result.enabled ? "Discovery đã bật." : "Discovery đã tắt.");
       if (await load(true)) setRetryCommand(null);
     } catch { setStatus("Không thể cập nhật Discovery. Trạng thái đã xác nhận được giữ nguyên, hãy thử lại."); }
