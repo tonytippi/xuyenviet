@@ -2,9 +2,10 @@
 title: XuyenViet AI Travel Information MVP Architecture Spine
 status: final
 created: 2026-07-04
-updated: 2026-08-11
+updated: 2026-08-12
 altitude: project MVP
 source_prd: ../../prds/prd-xuyenviet-2026-07-04/prd.md
+source_addendum: ../../prds/prd-xuyenviet-2026-07-04/addendum.md
 source_ux: ../../ux-designs/ux-xuyenviet-2026-07-05/EXPERIENCE.md
 ---
 
@@ -14,17 +15,23 @@ source_ux: ../../ux-designs/ux-xuyenviet-2026-07-05/EXPERIENCE.md
 
 Modular monolith, DB-owned retrieval, provenance-first AI orchestration.
 
-The MVP ships one coherent web application and one owned data plane. Product modules stay separated by server-side boundaries, but not by deployable services. AI answer generation is a controlled orchestration pipeline, not free-form model use.
+The MVP ships one coherent modular-monolith workspace and one owned data plane through four existing process units: traveler presentation, admin presentation, NestJS API, and Worker. Product modules stay separated by server-side boundaries, not independently owned domain services. AI answer generation is a controlled orchestration pipeline, not free-form model use.
+
+## Authority And Reading Order
+
+This Spine is the authoritative architecture contract. Stable `AD-*` decisions bind all lower-level design and implementation. [README.md](README.md) defines the progressive-disclosure reading order; [retrieval-trip-aware-solution-design.md](retrieval-trip-aware-solution-design.md) and its companions project the v6.2 decisions into developer-facing flows, contracts, fixtures, and release gates. Companion documents may add detail but may not weaken or override an AD.
 
 ## System Shape
 
 ```mermaid
 flowchart LR
-  Traveler[Traveler] --> Web[Next.js Web App]
-  Operator[Operator/Admin] --> Web
-  Web --> Auth[Auth + Roles]
-  Web --> Chat[AI Ask]
-  Web --> Admin[Knowledge Admin]
+  Traveler[Traveler] --> TravelerWeb[Next.js Traveler App]
+  Operator[Operator/Admin] --> AdminWeb[Next.js Admin App]
+  TravelerWeb --> API[NestJS API]
+  AdminWeb --> API
+  API --> Auth[Auth + Roles]
+  API --> Chat[AI Ask]
+  API --> Admin[Knowledge Admin]
   Chat --> Orchestrator[AI Orchestrator]
   Admin --> Knowledge[Knowledge Workflow]
   Orchestrator --> ChatContext[Chat + Trip Context]
@@ -42,6 +49,8 @@ flowchart LR
   IngestionJob --> IngestionWorker[Knowledge Ingestion Worker]
   IngestionWorker --> Knowledge
   Knowledge --> IndexingWorker[Knowledge Indexing Worker]
+  Worker[Worker Runtime] --> IngestionWorker
+  Worker --> IndexingWorker
   CaptureVersion --> DB
   Auth --> DB
   Chat --> DB
@@ -57,6 +66,8 @@ Binds: traveler/admin presentation, NestJS domain API, Worker runtime, and share
 Prevents: independent chat/admin/retrieval implementations choosing incompatible service contracts or release paths.
 
 Rule: Build feature modules with server-side interfaces; do not split into services for MVP.
+
+Rule: `apps/web`, `apps/admin`, `apps/api`, and `apps/worker` are separate process/deployment units inside the same modular-monolith workspace and PostgreSQL ownership model. Separate deployment does not grant a presentation app, API controller, or Worker loop an independent domain aggregate or contract.
 
 Rule: `apps/web` is the traveler presentation application. It must not own domain route handlers, server-action writers, database access, Auth.js sessions, or BFF transport after the direct API cutover.
 
@@ -187,6 +198,10 @@ Prevents: treating Trip and chat as competing memory authorities, loading Trip c
 
 Rule: The AI orchestrator assembles a source bundle before model generation and passes explicit provenance metadata into the answer prompt.
 
+Rule: AI Orchestration selects exactly one replayable planning mode after owner and canonical URL-scope validation: `current_plan | explore_change | validate_proposal | unscoped_answer`. Chat/Trips supplies an immutable, exact Trip snapshot when scope is valid. Current-turn intent is bounded and ephemeral; proposal context references one current pending proposal and its version fences. Retrieval consumes this pinned decision and must not reinterpret transcript text as committed Trip authority.
+
+Rule: Current-plan answers pin the exact Trip aggregate, item, constraint, canonical-path, and route-registry versions used. Explore-change answers preserve that snapshot as the committed baseline and label transient differences. Proposal validation pins the proposal and affected-item versions. Unscoped/private answers load no Trip snapshot or constraints.
+
 ```mermaid
 sequenceDiagram
   participant User
@@ -220,6 +235,8 @@ Binds: web fallback to a search adapter contract: query, title, URL, snippet/con
 Prevents: provider lock-in, source-less answer facts, unresolved geography becoming a factual premise, and technical trust labels leaking into traveler copy.
 
 Rule: Search-derived information retains external provenance and never becomes reusable XuyenViet knowledge until it is ingested into a card that satisfies publication policy. Route- or place-specific web information may become a factual premise only when its applicable geography and time resolve consistently with the planning need; unresolved or mismatched results remain verification leads. Traveler UI uses practical verification guidance rather than internal labels such as `unverified`. Official/provider pages are preferred by query construction, include/exclude domains, country bias, and post-filtering.
+
+Rule: Search captures immutable provider results. Retrieval creates immutable fact-scoped web geography projections keyed by the capture payload hash, route-registry snapshot, and resolver version, then records a query-specific scope decision for each requirement and leg. A result with unresolved or mismatched geography cannot become a factual premise, satisfy a required need, or authorize a different fact from the same result.
 
 Seed: Tavily Search API for MVP fallback because it returns title, URL, content, score, Vietnam country bias, domain filters, and freshness controls. [ASSUMPTION]
 
@@ -285,6 +302,10 @@ Rule: Deletion may retain minimal non-content audit metadata for operational int
 
 Rule: New tables that store chat/project-derived retrievable content must define what happens when the owning chat or trip project is deleted.
 
+Rule: Deleting an ordinary chat invalidates its reconstructable execution payloads, current-turn intent, retrieval runs, web-scope decisions, prompt manifests, derived context, and embeddings, but it cannot mutate an unrelated Trip plan. Deleting a primary conversation requires an owner-scoped replacement or deletion of the owning Trip Project. Deleting a Trip invalidates its snapshots, canonical-path references, retrieval runs, projections, and derived context; retained audit metadata must not reconstruct traveler content.
+
+Rule: Chat/Trips `deleteOwnedConversation(...)` and `deleteOwnedTrip(...)` are the deletion coordinators. In one PostgreSQL transaction they fence the owner aggregate and invoke exported invalidators for Chat/Trips, Retrieval, Search, AI Orchestration, Feedback/Eval, and Usage reconstructable rows. The command reports success only after every invalidation commits. Production-derived evaluation membership is removed while aggregate non-content metrics may remain; message-owned web captures cannot survive as reusable traveler knowledge.
+
 ### AD-14: Environments And Secrets Stay Separate
 
 Binds: dev, staging, and production to separate databases, secrets, OAuth config, and search/AI API keys.
@@ -293,17 +314,19 @@ Prevents: test data, public users, admin rights, and provider credentials from m
 
 Rule: Public sign-in must not require an allowlist; AI Ask and authenticated personalization require Google OAuth; admin/operator access requires Google OAuth plus role check. Local/dev bypasses must not be deployable defaults.
 
-### AD-15: Deployment Seed Is Serverless-Friendly, Provider Not Yet Final
+### AD-15: Deployment Uses Four Railway-Oriented Process Units And One Data Plane
 
-Binds: implementation to a hosted serverless-friendly Next.js runtime and hosted PostgreSQL with pgvector.
+Binds: traveler presentation, admin presentation, NestJS API, Worker, migration execution, and hosted PostgreSQL to the repository's current container/process topology.
 
-Prevents: relying on unmanaged local infrastructure for public MVP traffic.
+Prevents: assuming one web process owns every surface, coupling domain ownership to a deployment unit, or relying on unmanaged local infrastructure for public MVP traffic.
 
-Rule: Provider-specific features must stay behind config/adapters until deployment and database provider are confirmed.
+Rule: The repository's separate traveler, admin, API, and Worker Docker targets are the current Railway-oriented deployment convention. Each process consumes only its approved presentation, transport, or Worker boundary; PostgreSQL remains the shared owned data plane. Actual production service/database evidence is verified at the operational gate and must not be inferred from a Docker target alone.
+
+Rule: Provider-specific features remain behind config/adapters. A future hosting-provider change does not alter module ownership, direct-API authority, or Worker-only continuous execution without an architecture update.
 
 Rule: Production deployment includes separately supervised Node runtimes for canonical knowledge ingestion and knowledge-search indexing. Worker processes use PostgreSQL job/index state, expose operational logs and health/restart supervision, and are not run inside request-serving serverless executions. Legacy extraction is not a routine production worker.
 
-Seed: Vercel-compatible Next.js request deployment plus hosted Postgres and a compatible worker process host. Final providers remain deferred. [ASSUMPTION]
+Seed: the current Docker targets run the two Next.js apps, NestJS API, and Worker as separate Railway-oriented services with hosted PostgreSQL. The exact production PostgreSQL provider and its extension capabilities remain deployment evidence, not an assumed architecture feature.
 
 ### AD-16: Streaming Starts After Context Assembly
 
@@ -319,21 +342,23 @@ Rule: If streaming fails before finalization, the app shows a recoverable failur
 
 Seed latency target: first visible answer within 5 seconds without web search and within 10 seconds with web search. [ASSUMPTION]
 
-### AD-17: Traveler Retrieval Uses Indexed Lexical Candidates And Fail-Closed Eligibility
+### AD-17: Traveler Retrieval Is Scope-First, Field-Aware, And Fail-Closed
 
-Binds: active-card candidate search, current eligibility checks, source-bundle inputs, indexing work, and later hybrid retrieval upgrades.
+Binds: active-card eligibility, geographic/facet allowlisting, field-aware lexical search, source-bundle inputs, indexing work, and later evidence-gated retrieval upgrades.
 
 Prevents: stale or unsafe knowledge entering traveler source bundles, or an index/ranking implementation bypassing current owner-row eligibility and provenance.
 
-Rule: The MVP retrieval path searches active `knowledge_card_search_documents` lexically, then loads and validates current active cards, state-aware retrieval policy, and traveler-safe linked sources before a candidate can enter a source bundle. The indexing worker owns active, stale, and disabled search-document transitions.
+Rule: The v6.2 production path validates current owner-row eligibility, resolves canonical query scope and required facets, builds a deterministic allowlist, then runs a versioned field-aware lexical implementation inside that allowlist. PostgreSQL full-text search with the exact deployed version/provider and Vietnamese `simple + unaccent` configuration is the intended baseline only after a G0 deployability/quality spike and critical recall/false-exclusion gates pass. Otherwise `v6_active` retains a deterministic indexed field-aware lexical implementation and FTS remains inactive. The indexing worker owns active, stale, and disabled search-document transitions.
 
 Rule: Traveler retrieval is fail-closed. A card is retrievable only when its current `lifecycle_state` is `active`, its domain classification permits the requested use, `verification_requirement = none`, linked source metadata is traveler-safe, current active evidence exists, and all required retrieval metadata is present. Unknown, missing, stale, disabled, non-active, failed-verification, or operator-only state excludes the item.
 
 Rule: Retrieval eligibility must support current publication/knowledge/review/verification states, current active evidence, source-safe linkage, card type, route segment/location, conditions, tags, freshness-sensitive flag, traveler-safe wording policy, and source type. Lexical score may rank eligible candidates but must not override owner-row eligibility.
 
+Rule: Canonical IDs and reviewed/versioned route assertions grant geographic authority; free text, source metadata, embeddings, model output, and lexical similarity do not. A scope assertion authorizes only its exact atomic fact/facet contribution and requirement/leg. Unknown scope is not nationwide scope, and one fact on a card cannot authorize another.
+
 Rule: Retrieval projects one machine-readable use policy per selected card: `contextual_use` or `exclude`. `active + community_observation/community_pattern/conditional + verification_requirement = none` is `contextual_use` only within stated conditions and with state-appropriate community wording; `conflicted`, a non-active lifecycle, failed verification, or missing active evidence is `exclude`. The answer prompt must enforce this policy.
 
-Rule: Hybrid retrieval is introduced later behind the Retrieval module only after indexed lexical retrieval, source-bundle snapshots, provenance persistence, and fail-closed tests are stable. Full-text/vector scores may add ranking signals later, but they must not bypass current owner-row eligibility filters.
+Rule: FTS activation and any `pg_trgm`, embeddings, RRF, reranking, or AI grey-band stage are separately versioned behind Retrieval. Each may ship only after its prerequisite spike/evaluation identifies the failure class it improves and proves quality uplift without safety, latency, cost, provenance, or deletion regression. They never bypass allowlists or become a source of truth.
 
 Rule: Indexing/backfill work for later search or embeddings must define activation, stale/disabled transitions, and rebuild behavior before those rows influence traveler answers.
 
@@ -503,9 +528,11 @@ Rule: Chat/Trips owns one single-owner Trip Project aggregate. Its structured pl
 
 Rule: The aggregate distinguishes stable plan state from conversational context. Anchors, dated legs, activities, owner-confirmed accommodations, alternatives, item state, and owner-confirmed trip constraints are structured Trip Planning records. The primary conversation is the exclusive plan-authoring surface: chat requests may cause AI Orchestration to draft a proposal, but `chat_context` and transcript text never become an alternative itinerary writer or source of truth.
 
+Rule: A transport leg may own nullable canonical origin, canonical destination, selected route-path, and route-registry snapshot references. These references become durable authority only through an owner-confirmed, aggregate/item-version-fenced Trip proposal operation. Existing free-text labels migrate with null canonical references and never gain inferred route authority. Retrieval owns and validates referenced registry identities; it never writes the Trip aggregate.
+
 Rule: A plan item has exactly one kind: `anchor | leg | activity`. An anchor has exactly one `anchor_role`: `origin | destination | region | required_stop | accommodation`; `type` is null for anchors. A leg or activity has exactly one type: `transport | visit | food | rest | accommodation`; `anchor_role` is null for them. Every item has exactly one state: `idea | planned | confirmed | backup`; an `idea` item is valid open planning state, not an error. `confirmed` records owner confirmation or a supplied real constraint only; it is not a booking, provider, live route, weather, or availability assertion. A `backup` item references exactly one structured plan item in the same Trip Project that it substitutes for; it is never an unscoped global alternative.
 
-Rule: A mutable plan item carries a monotonic version. Parent references must remain within the same Trip Project; only activities may parent to a leg; cycles are forbidden. An ordering scope is exactly `(trip_project_id, parent_item_id)`, including a null parent for root anchors and legs; ordinals are unique within that scope and commands atomically renumber it. Commands that create, reorder, update, remove, or change a plan item state lock the owning Trip Project and validate the aggregate/item versions and ordering scope they depend on before commit. The first tranche stores no dynamic weather, route, availability, provider, booking, exact-location, budget tracking or actual expenses, checklist, vault, or collaboration state in this aggregate; owner-maintained budget range remains a trip constraint.
+Rule: A mutable plan item carries a monotonic version. Parent references must remain within the same Trip Project; only activities may parent to a leg; cycles are forbidden. An ordering scope is exactly `(trip_project_id, parent_item_id)`, including a null parent for root anchors and legs; ordinals are unique within that scope and commands atomically renumber it. Commands that create, reorder, update, remove, or change a plan item state lock the owning Trip Project and validate the aggregate/item versions and ordering scope they depend on before commit. Beyond the AD-29 canonical path reference, the first tranche stores no dynamic weather, live route/ETA, availability, provider, booking, exact-location, budget tracking or actual expenses, checklist, vault, or collaboration state in this aggregate; owner-maintained budget range remains a trip constraint.
 
 Rule: `trip_project_constraints` is one owner-scoped, versioned structured record per Trip Project. It holds only travel-relevant travelers/children, vehicle or EV needs, driving tolerance, budget range, preferences, and avoid-list values. A chat request may cause AI Orchestration to propose a constraint update, but only an owner-confirmed Chat/Trips proposal command writes it; a constraint correction participates in the Trip Project aggregate version and deletion lifecycle. No separate manual constraint editor is introduced in this tranche.
 
@@ -527,6 +554,8 @@ Rule: `expireTripChangeProposal(...)` is an idempotent Chat/Trips command. Pendi
 
 Rule: AI Orchestration may read the Trip Planning aggregate and emit a schema-validated proposal draft, but it may not call direct table writes or bypass the Chat/Trips proposal command. Provider output, answer annotations, and detail-panel actions remain untrusted inputs until the owner-confirmed command validates them.
 
+Rule: The typed proposal operation set includes setting or clearing a transport leg's exact canonical origin, destination, selected path, and registry snapshot as one validated route-choice change. Apply revalidates that the referenced path connects the canonical endpoints in the pinned active registry snapshot. A stale, retired, mismatched, unresolved, or unauthorized reference applies nothing and returns review/refresh guidance.
+
 ### AD-30A: Chat-First Trip Recommendations Are Chat/Trips-Owned Decisions
 
 Binds: unscoped conversation recommendation, Trip Project creation recommendation, dismissal fencing, existing-project matching, primary-conversation selection, and traveler recommendation actions.
@@ -539,7 +568,7 @@ Rule: Existing-project candidates are queried owner-scoped before matching. Init
 
 Rule: Declining a creation recommendation persists a decision fence for its conversation and context revision. The service may re-offer only after material context change or an explicit user request to save. Client state, rendered assistant prose, and local storage are not authority for dismissal or re-offer eligibility.
 
-Rule: `acceptTripCreationRecommendation(...)` is an explicit, idempotent Chat/Trips command. It revalidates owner, decision binding, and current context before atomically creating the Trip Project and its primary conversation under existing aggregate rules. It never turns unconfirmed extracted facts into confirmed plan state without the existing proposal path.
+Rule: `acceptTripCreationRecommendation(...)` is an explicit, idempotent Chat/Trips command. It revalidates owner, decision binding, and current context before atomically creating the Trip Project and its primary conversation under existing aggregate rules. For an AD-40 profiled conversion it also creates the initial pending proposal from the current eligible manifest in that same transaction. It never turns unconfirmed extracted facts into confirmed plan state without the existing proposal path.
 
 Rule: `continueInTrip(...)` requires an explicit owner selection and changes URL-selected scope to the selected project's existing primary conversation. It does not copy, merge, link, or replay an ordinary conversation into the Trip Project. A private-answer choice neither loads nor persists that Trip Project's constraints for the turn.
 
@@ -603,6 +632,116 @@ Rule: Browser mutations require NestJS CSRF admission. Browser origins are expli
 
 Rule: A capability is direct-API complete only when its presentation client calls NestJS, it has one command writer, and its matching Next route/server action/BFF adapter/direct database owner is removed in the same cutover. Read-only parity comparison may run only outside production and never changes the selected response or writes state.
 
+### AD-34: Required Planning Needs And Coverage Are Versioned Retrieval Contracts
+
+Binds: query planning, candidate contributions, evidence selection, prompt packing, gap handling, telemetry, and release evaluation to one requirement vocabulary and coverage model.
+
+Prevents: card count being mistaken for answer sufficiency, two stages inventing incompatible facet names, one leg satisfying another leg's need, unrelated evidence filling a gap, or packing silently dropping a required need.
+
+Rule: Retrieval owns one versioned travel-facet vocabulary and intent-to-requirement profile. Every execution materializes bounded requirement keys before candidate generation, with exact facet, importance, scope/leg, constraint identity, and freshness need. Independently built stages consume these keys rather than derive competing vocabularies.
+
+Rule: Coverage is computed only from exact contributions present in the final render manifest. Each requirement outcome is `satisfied | missing | requires_verification | requires_clarification`. Selection-time coverage lost to version revocation, packing, or source-handle capacity is recomputed as a gap before model generation. Card count, similarity, source prestige, or a contribution for another scope never marks a requirement satisfied.
+
+Rule: Under candidate, token, or source-handle pressure, consequential required needs precede useful and optional needs. Every uncovered required need is surfaced as a concise limitation, fresh-verification action, or bounded clarification while any safe useful partial guidance remains available.
+
+### AD-35: Route Resolution And Supported Coverage Are Explicit Product Boundaries
+
+Binds: Trip canonical-path authority, the Retrieval route registry, origin/destination coverage assertions, per-leg applicability, traveler limitation projection, and route fixtures.
+
+Prevents: free-text routes granting hard authority, a partial registry hard-excluding valid alternatives, ambiguous routes silently selecting a popular path, path facts leaking across legs, or XuyenViet implying nationwide/live-routing coverage.
+
+Rule: Retrieval owns immutable versioned route-registry releases and active, effective origin/destination coverage assertions. It resolves each query leg against an exact registry snapshot to `authoritative_selected | authoritative_complete | known_partial | ambiguous_paths | no_path | stale_selected_path`, with pinned path IDs, assertion revision when applicable, and typed reason codes.
+
+Rule: Only `authoritative_selected` and `authoritative_complete` grant hard positive/negative path authority. `known_partial` and `ambiguous_paths` provide bounded soft applicability and preserve uncertainty; `no_path` disables route-wide claims while allowing exact place and explicitly general evidence. Partial, ambiguous, no-path, and outside-coverage states project safe useful guidance, a clear limitation, and a next action without claiming live navigation, traffic, closure, or guaranteed safety.
+
+Rule: A Trip path whose referenced immutable registry release is retired or incompatible preserves its stored meaning for review/history but loses hard retrieval authority and resolves as `stale_selected_path`. Current active registry/coverage rules govern new execution. Only an owner-confirmed `set-leg-path` proposal may refresh the stored choice; automatic path replacement is forbidden.
+
+Rule: Retrieval `publishRouteRegistryRelease(...)` is the sole registry writer, invoked through an authorized bounded operations path in the existing Worker runtime. It drafts and validates a code-reviewed manifest, builds required projections, and compare-and-swap activates one immutable release plus its coverage assertion set per read policy in one transaction. Partial validation/build/activation failure leaves the previous release active and grants no new route authority; no admin UI or continuous Worker loop is required.
+
+### AD-36: Retrieval And Web Decisions Are Replayable, Bounded Manifests
+
+Binds: planning mode, Trip snapshot, query plan, registry/config versions, candidate decisions, requirement contributions, web facts, selection, prompt rendering, and persisted provenance into one reproducible execution chain.
+
+Prevents: historical runs changing meaning with mutable projections, `usedInPrompt` being inferred from candidates, web geography being re-resolved differently after an answer, or full private traces being retained without bound.
+
+Rule: Each run pins its read mode, planning mode, Trip/proposal references, normalized-question digest, requirement profile, registry and coverage assertions, eligibility/ranking/selector/runtime policy versions, selection manifest, and prompt-render manifest. `usedInPrompt` derives only from the exact render manifest; `citedInAnswer` remains a separate same-turn validated fact.
+
+Rule: Normal production stores bounded selected/rendered decisions, exact requirement outcomes, bounded top rejection reasons, and aggregate excluded counts. Full candidate traces are limited to versioned evaluation runs or time-bounded diagnostic sampling. Traveler-derived payloads inherit chat/Trip deletion and retention rules.
+
+Rule: Retrieval is the sole writer for retrieval runs, deterministic requirement keys and contributions, requirement outcomes, selection manifests, web query/scope decisions, and read-policy records. AI Orchestration owns `finalizeAiAnswer(...)` workflow coordination, prompt-render manifests, and answer provenance without taking ownership of other aggregates. In one shared PostgreSQL transaction it invokes transaction-aware owner ports: Chat/Trips inserts the assistant message, Retrieval seals the run, Usage appends the usage event, and AI Orchestration writes the prompt manifest/provenance. The coordinator cannot import or directly write another owner's tables. A provider failure seals a failed run and appends failure usage without a completed assistant message; one run/idempotency fence prevents a second terminal result.
+
+Rule: Requirement-key identity is a deterministic digest of the exact intent-profile version and canonical facet, importance, scope/leg, constraint, and freshness fields. The profile owns expansion cardinality, per-leg duplication, and duplicate coalescing. Retrieval creates immutable `knowledge | web` requirement contributions with exact fact identity, owner/capture revisions, eligibility/scope/freshness decisions, and permitted render variants. A changed field or generation rule creates a new profile/contribution identity; selector, renderer, provenance, and Eval only consume them.
+
+Rule: Replayable web execution includes an immutable minimized-query manifest binding requirement keys, allowed scope terms, excluded private-context classes, query-builder/provider-policy versions, and request digest. Every derived web fact pins its text digest and segmentation/extraction version. Persisted authorization follows one referential chain: capture -> fact assertion/projection -> requirement/leg scope decision -> requirement contribution -> render manifest -> provenance.
+
+### AD-37: Evaluation Profiles And Release Gates Have Explicit Owners
+
+Binds: retrieval datasets, planning-mode/route fixtures, numeric thresholds, evidence windows, shadow comparison, production cutover, rollback, and optional experiments.
+
+Prevents: vague "approved threshold" gates, safety cases being averaged into statistical cohorts, model/index experiments shipping without demonstrated value, or release ownership being split across Product, Retrieval, and Eval.
+
+Rule: Feedback/Eval owns immutable corpus and Trip fixtures, cohort membership, evaluation runs/results, and versioned numeric `RetrievalGateProfile` records. Critical-authoritative cohorts enforce zero known hard-off-route contribution, unrelated-need satisfaction, hypothetical-as-committed behavior, private Trip leakage, and silent required-gap omission. Standard cohorts use approved numeric recall, precision, coverage, usefulness, latency, cost, and call-rate guardrails.
+
+Rule: Every gate result pins the corpus, fixtures, read mode, Trip/registry/runtime configurations, and gate-profile version. Retrieval and owning modules execute shadow/cutover/rollback safely; the Product Owner approves production cutover from the recorded report. Rollback changes the versioned read mode and does not require destructive schema or data rollback.
+
+Rule: Retrieval owns one PostgreSQL-backed active read-policy record. `activateRetrievalReadPolicy(...)` is one compare-and-swap writer with discriminated transition reasons. `shadow | cutover | cleanup` validates the expected current policy, exact passing qualification report, Product Owner approval, and runnable rollback policy. `rollback` validates the expected current policy, a failing rollback report or incident, an authorized actor, and a target previously recorded as runnable and qualified/approved; it requires no new passing report. The transition records target qualification, trigger report/incident, previous/next policy, and audit. Deployment config may seed/cache but cannot write or override this authority; every run pins the committed record at start.
+
+Rule: A release evidence window contains one exact comparable tuple of code revision, read policy, corpus/fixtures, registry/coverage, requirement/facet profile, eligibility, ranking, selector, runtime, parser, and resolver versions. Changing any member restarts the window. The closed gate profile fixes maximum hard-off-route, unrelated-need satisfaction, source-metadata leakage, web-scope premise misuse, recent-warning-as-live-authority, provider-failure unsafe recovery, hypothetical/pending-as-committed, private Trip leakage, silent required-gap omission, and critical hard-filter/cap false exclusion to literal zero; material provenance correctness is literal one. It also includes denominator-definition versions and explicit quality/operational limits. A missing or weaker profile cannot activate.
+
+### AD-38: The Broad-Query Card-Count Trigger Is Temporary Compatibility Only
+
+Binds: the legacy fewer-than-three behavior, v6 shadow comparison, required-need cutover, telemetry, retirement evidence, and rollback.
+
+Prevents: Story 4.5's historical card-count rule surviving as permanent product behavior or being removed before required-need coverage proves non-regression.
+
+Rule: In `v6_shadow`, legacy remains the sole traveler-authoritative path. The v6 shadow performs no provider call, traveler mutation, response selection, prompt usage, or answer provenance write; it may store bounded evaluation telemetry only. The fewer-than-three trigger may affect only the legacy traveler path or legacy comparison telemetry. It remains subordinate to AD-34 coverage and never authorizes unrelated evidence. `v6_active` triggers web work from uncovered/freshness-sensitive requirements, conflict, or explicit current verification.
+
+Rule: Each shadow request has one immutable paired execution ID linking exactly one `authoritative` legacy run and at most one `shadow` v6 run. Only the authoritative role may select/persist the traveler answer, provider usage, prompt usage, or provenance. Shadow persists only a `would-render` evaluation manifest. Comparison evidence pins both run IDs, policies, code/config tuples, and the authoritative selected result; retries preserve the pair, and chat/Trip deletion invalidates both roles together.
+
+Rule: Retirement requires the approved requirement vocabulary and Architecture contract, versioned broad-query-compatibility and missing-need cohorts, a passing shadow evidence window from an exact gate profile, a recorded evaluation report, and Product Owner cutover approval. The cutover record names the retired policy version and rollback read mode.
+
+Rule: Behavioral disablement and physical compatibility cleanup are separate gates. Until cleanup, rollback may target the retained runnable legacy policy. The versioned gate profile owns the minimum legacy rollback window; Feedback/Eval owns the cleanup report and Product approves it. Physical cleanup requires that window, `COMP-06`, a passing cleanup report, and a retained known-safe `v6_active` rollback policy before Retrieval removes target-count code/schema/config. A removed legacy policy may never remain named as an executable rollback target.
+
+### AD-39: Material Planning Context Is Collected Through A Scoped Multi-Turn Gate
+
+Binds: intent-specific context requirements, natural-language extraction, clarification-session state, journey/day/leg/stop preference scope, readiness evaluation, and entry to retrieval and answer synthesis.
+
+Prevents: a detailed itinerary silently assuming one-way travel, one partial reply being treated as complete, a destination preference leaking to transit stops, accommodation/food/activity questions using one global preference set, or an autonomous model loop manufacturing context without a new traveler message.
+
+Rule: Retrieval owns reusable immutable `PlanningContextProfile` and `ClarificationPlanPolicy` records, scope/decomposition validation and comparator rules, and a pure completeness evaluator. The plan policy owns numeric caps for deliverable instances, scope nodes, graph depth/parents, values per field, and reference/text lengths and rejects cycles, duplicates, orphan parents, and over-limit output. A profile declares requested deliverable classes, typed context keys, materiality, conditional applicability, allowed scopes, validation rules, and safe-assumption policy. Context sufficiency is evaluated for the exact requested deliverable and scope; there is no globally “complete traveler profile.”
+
+Rule: Chat/Trips owns the persisted conversation-bound `PlanningClarificationSession`, its immutable traveler-instantiated scope-graph revisions, typed deliverable instances, scoped values, revision, and legal transitions under the AD-6 context boundary. For a new intent/session revision, AI Orchestration may coordinate one versioned bounded `clarification_plan` call to propose deliverable instances and scope nodes such as journey, destination stay, transit-stay group, meal, or activity slots; it creates no itinerary recommendation, evidence claim, route authority, provider search, or Trip mutation. Retrieval returns a typed `ValidatedClarificationPlan` under the pinned profiles, scope rules, and structural policy. Chat/Trips `initializeClarificationSession(...)` or `evolveClarificationPlan(...)` atomically persists the validated graph/instances with the expected conversation/session revision, is idempotent by plan attempt, and rejects stale, terminal, deleted, partial, or unvalidated input. AI Orchestration then coordinates `clarification_extract` against each new traveler message and calls Retrieval's pure evaluator before invoking the Chat/Trips reducer; it owns no clarification repository. Model output is untrusted proposal data and cannot declare readiness or invent an undeclared context key.
+
+Rule: One session contains typed deliverable instances, each with its exact class, task/scope identity, profile/completeness versions, field states, assumptions, readiness, and answer-claim state. A material unresolved field blocks only the instances that depend on it; independently ready instances may enter Retrieval under an exact immutable claim while blocked siblings are excluded. The server returns an acknowledgement or safe invariant guidance plus a concise clarification covering unresolved material fields; after a partial natural-language reply it preserves valid resolved fields and asks only for what remains. Retrieval and main answer synthesis for a blocked instance begin only at `ready`, or in an explicitly permitted bounded-assumption mode whose assumptions and disclosure handles are persisted and traveler-visible. Each cycle requires a new traveler message; preflight prompts never call themselves autonomously.
+
+Rule: Every context value has authority `message_evidence | applied_trip_snapshot | bounded_assumption`, exact source identity, and temporal/spatial/task scope. Retrieval's versioned pure relation/comparator evaluates each pinned Chat/Trips-owned graph as `equal | ancestor | descendant | overlap | sibling | unrelated`. Scope nodes may include profile-declared semantic groups such as destination stays or transit stays; later concrete instances bind through `evolveClarificationPlan(...)` as descendants rather than copying a group value globally. A narrow override requires strict ancestry or an explicit profile precedence edge; incomparable overlap becomes `ambiguous`, never latest-write-wins. A narrower explicit value overrides a compatible broader default only within that scope; it never becomes a journey-wide value or leaks to siblings. Thus a higher-quality destination stay and simple sleep-only transit stays remain simultaneously valid requirements. Message evidence may guide the current deliverable but never masquerades as or rewrites applied Trip authority.
+
+Rule: `reduceClarificationMessage(...)` is the sole Chat/Trips session-mutation owner port. It validates owner, source-message order, expected session/content revisions, profile/scope/Trip/proposal fences, exact UTF-16 evidence spans, and extraction idempotency; it applies validated deltas, recomputes instance readiness, and rejects stale, duplicate-semantic, terminal, or deleted work. For a blocked turn it runs inside the clarification-finalization transaction; for ready instances it persists their exact authoritative answer claim before provider work. Chat/Trips owns a monotonic conversation content revision incremented with every relevant message insert/delete; timestamps or message counts are not fences. Legal session/instance transitions and one active-session uniqueness are closed contracts. Intent change supersedes rather than mutates the old session.
+
+Rule: A blocked turn terminates through `finalizeClarificationTurn(...)`, not the main-answer path. One shared PostgreSQL transaction revalidates command/session/message/profile/Trip fences, invokes the Chat/Trips reducer owner port, inserts its bounded assistant clarification message, appends extraction Usage through its owner port, and completes the existing AI Ask command with a replayable success projection. It creates no Retrieval run, web call, selection/prompt-render manifest, answer provenance, or main-answer usage. For profiled clarification turns, synchronous preflight in the existing API path replaces and suppresses `ai_ask.context_extraction.v1`; the background extractor never changes readiness or the same scoped values. Other unprofiled turns retain the existing asynchronous enrichment.
+
+Rule: A ready instance is claimed by exactly one authoritative answer run under the shared prepare/finalize fence. Finalization revalidates session/content revision, plan policy, profile/scope graph, exact ready instance IDs, Trip/proposal fences, and assumption records immediately before commit; changed, superseded, abandoned, completed, or deleted state discards or safely refreshes the stale answer. It completes only the claimed instances and recomputes the parent in the same transaction: the session remains `active` while any instance is `collecting | ready | claimed`, becomes `completed` only when every instance is `completed | abandoned`, or becomes `superseded` on intent replacement. Completed/abandoned instances are terminal and a later request creates a new instance/session. Every permitted assumption pins typed value, scope, policy/profile version, trigger, and mandatory disclosure handle; omission from the final render manifest fails closed. Clarification values remain current-planning inputs and cannot update durable Trip routes, constraints, stays, meals, or activities without the existing owner-confirmed proposal boundary.
+
+Rule: Preflight uses the existing synchronous AI Gateway adapter and existing `extraction` model purpose with distinct versioned `clarification_plan` and `clarification_extract` prompt stages; it adds no service, queue, Worker loop, cache, model-catalog purpose, or environment flag. At most one attempt of each required stage exists per AI Ask command, source message, expected session revision, and prompt version; the server never recursively asks a model to continue. Missing model, timeout, invalid schema, or failure before terminalization preserves the user message/session, records failure Usage, persists a safe retry clarification when possible, and never falls through to Retrieval, web, the streaming answer model, or an unrecorded assumption. Reusable profiles/policies contain no traveler data; instantiated graphs, validated plan results, plan/extract attempts, target/task digests, and their payloads are reconstructable owner-derived content and are invalidated with the owning conversation or Trip, leaving only non-content aggregate metrics.
+
+### AD-40: Chat-To-Trip Conversion Uses A Persistent Current-Revision Opportunity
+
+Binds: persistent chat conversion CTA, eligibility lifecycle, context refresh, conversion command, initial Trip proposal, idempotency, and deletion.
+
+Prevents: treating a hidden or unclicked CTA as a decline, converting a stale context snapshot, copying a raw transcript into a Trip, silently applying extracted preferences, or creating duplicate Trips on retry.
+
+Rule: After an unscoped profiled turn has committed a useful answer and at least one durable planning deliverable is ready, Chat/Trips may expose one owner-bound `TripConversionOpportunity` for that ordinary conversation. Its traveler projection is a stable `Chuyển thành chuyến đi` CTA while status is `eligible`. Merely not clicking never changes status or creates a decline fence. An explicit dismiss action alone records the AD-30A decline fence for the exact material context. A temporarily insufficient/ambiguous projection or reopened dependent deliverable suspends the same opportunity; a later eligible projection restores that ID with a new manifest. Only owner/conversation deletion, ownership loss, conversion of the ordinary conversation into an incompatible scope, or unrecoverable withdrawal of the pinned policy/schema invalidates it.
+
+Rule: Chat/Trips owns the opportunity, canonical conversion-context projection, and immutable bounded manifest revisions by extending the existing recommendation decision/context aggregate, not by adding another service or authority. A versioned deterministic `TripConversionProjectionPolicy` selects all eligible non-superseded completed claims through the current conversation content revision, orders them by content revision then stable claim ID, and reduces values using the pinned AD-39 scope comparator: compatible different-scope values accumulate, a later explicit equal-scope value replaces the earlier value only under the field's declared replacement rule, and unresolved contradiction suspends conversion. It maps supported explicit scoped fields to existing Trip proposal operations and bounded Trip-title seed data; AI/model output cannot select the claim set or invent this mapping. Each manifest references one canonical projection revision and contains a schema-validated canonical typed conversion payload plus its serialization digest; it pins policy, proposal-schema and serialization versions, content revision, exact claims/value identities, eligible instances, and source-message watermark. It contains no raw transcript, prompt, model reasoning, provider payload, unresolved/ambiguous value, or proposal operation derived only from a bounded assumption. At least one supported operation is required for eligibility. A material persisted context change supersedes the prior manifest and refreshes the current one; presentation keeps the same opportunity identity unless explicitly dismissed.
+
+Rule: The existing `acceptTripCreationRecommendation(...)` owner port is the sole explicit conversion command; AD-40 extends its decision/result contract rather than adding a parallel endpoint. Under the same conversation/opportunity lock and versioned state machine used by refresh/dismiss/delete, it resolves the opportunity's latest eligible manifest, revalidates the ordinary conversation, content/projection revisions, terminal AI Ask watermark, clarification claims/instances, profiles, scopes, projection policy/proposal schema/serialization, canonical payload digest, and deletion fences, and rejects or safely refreshes stale/ambiguous input. It never trusts a client-provided context snapshot. The server projects the CTA as visible but disabled while any newer traveler turn is unterminalized, and command admission independently rejects that state across clients; concurrent material context change cannot yield a conversion from the older manifest.
+
+Rule: A successful conversion atomically creates exactly one Trip Project, its separate primary conversation, and one initial `pending` Trip Change Proposal whose bounded typed operations are derived from the revalidated manifest. The ordinary conversation remains separate and is not copied, merged, linked, or replayed. No extracted value becomes a confirmed constraint, anchor, leg, stay, meal, activity, or route choice until the owner reviews and applies that proposal through AD-30; unsupported or unresolved context stays out of the proposal and remains visible as a planning gap.
+
+Rule: Opportunity version/state transitions are closed: `eligible -> suspended | dismissed | consumed | invalidated`, `suspended -> eligible | invalidated`; `dismissed`, `consumed`, and `invalidated` are terminal. Transition reasons are closed: `context_insufficient | context_ambiguous | deliverable_reopened` produce `suspended`; `context_eligible` restores `suspended -> eligible` with a new manifest; `owner_deleted | conversation_deleted | ownership_lost | scope_incompatible | policy_withdrawn | proposal_schema_withdrawn` produce `invalidated`; `traveler_dismissed` produces `dismissed`; `conversion_committed` produces `consumed`. Pending-turn disablement is projection-only and changes no opportunity state. Refresh, suspend, dismiss, accept, and delete compare-and-swap the expected opportunity version/current manifest under the same owner/conversation lock. Material change may refresh the same nonterminal opportunity. A later eligible revision after `dismissed` or recoverable `policy_withdrawn | proposal_schema_withdrawn` may create a new opportunity ID only after a currently supported policy/schema reprojects it; owner/conversation deletion, ownership loss, or incompatible scope cannot re-offer on that owner/conversation. Accept idempotency derives its request digest from command version, owner, opportunity, and resolved manifest digest. Only a committed success reserves the key and replays the same destination/proposal while they exist; validation/refresh/transient failure does not consume it, changed digest returns `key_reused`, source deletion after success preserves a non-content replay ledger, and destination deletion tombstones that ledger to `destination_deleted`. Conversation deletion invalidates open opportunities/manifests; Trip deletion follows AD-13 for the created Trip, primary conversation, proposal, and terminal destination references. `continueInTrip(...)` remains a scope switch to an existing Trip and never transfers ordinary-chat context; any future existing-Trip import requires a separate explicit pending-proposal command.
+
+Rule: Profiled opportunity refresh is part of the existing synchronous API terminalization path: after `finalizeClarificationTurn(...)` or `finalizeAiAnswer(...)` commits the current Chat/Trips clarification reduction/answer claim, that flow invokes `refreshTripConversionOpportunity(...)` through its transaction-aware owner port before returning the final recommendation projection. Profiled eligibility, pending-turn projection, accept, and dismiss read only the canonical clarification claims/conversion projection and never wait for or consult `ai_ask.context_extraction.v1` or legacy flat `chat_context`; AD-39 suppresses that outbox effect for these turns. Unprofiled legacy recommendations may retain the old extractor path only as explicit migration compatibility. This adds no Worker or asynchronous readiness authority.
+
 ## Shared Data Contracts
 
 Frontend shell state contract:
@@ -647,11 +786,14 @@ Core persisted entities:
 
 - `users`, `accounts`, `sessions`, `roles`
 - `referral_codes`, `referral_attributions`
-- `trip_projects`, `conversations`, `messages`, `chat_context`, `assistant_response_provenance`
+- `trip_projects`, `conversations` with a monotonic content revision, `messages`, `chat_context`, `planning_clarification_sessions`, `trip_recommendation_decisions` with current conversion-manifest revisions, `assistant_response_provenance`
 - `trip_project_constraints`, `trip_plan_items`, `trip_change_proposals`, `trip_plan_change_history`
 - `context_embeddings`
 - `sources`, `raw_source_material`, `source_capture_versions`, `knowledge_ingestion_jobs`, `knowledge_ingestion_candidates`, `knowledge_cards`, `knowledge_card_evidence`, `knowledge_card_relations`, `knowledge_recommendations`, `knowledge_sampling_obligations`, `knowledge_card_search_documents`
-- `ai_gateway_models`, `web_search_results`, `ai_usage_events`, `feedback`, `eval_runs`, `audit_events`
+- `route_registry_releases`, `route_locations`, `route_segments`, `route_paths`, `route_path_memberships`, `route_coverage_assertions`
+- `retrieval_executions`, `retrieval_runs`, `retrieval_shadow_comparisons`, `retrieval_requirement_keys`, `retrieval_requirement_contributions`, `retrieval_requirement_outcomes`, `retrieval_selection_manifests`, `retrieval_would_render_manifests`, `prompt_render_manifests`
+- `web_query_plan_manifests`, `web_search_results`, `web_evidence_scope_projections`, `web_evidence_scope_decisions`
+- `retrieval_read_policies`, `retrieval_cutover_records`, `ai_gateway_models`, `ai_usage_events`, `feedback`, `eval_runs`, `retrieval_gate_profiles`, `audit_events`
 
 AI usage event minimum fields: nullable real initiating-user ID, required execution actor, conversation ID when applicable, trip project ID when applicable, message ID when applicable, purpose, provider, model, prompt version when applicable, request timestamp, latency, success/failure status, provider usage metadata when available, and estimated cost fields when configured. User-facing/admin roster metrics aggregate the initiating-user field only; system execution metrics use the actor catalog.
 
@@ -691,7 +833,7 @@ Trip Planning minimum persisted contract:
 
 - `trip_projects`: owner ID, current aggregate version, nullable migration-only `primary_conversation_id` constrained to a same-owner linked conversation, and existing project metadata.
 - `trip_project_constraints`: Trip Project ID, owner ID, one structured constraint record with travelers/children, vehicle or EV needs, driving tolerance, budget range, preferences, avoid-list values, monotonic version, and created/updated timestamps. It contains no actual expenses, payment data, or provider-derived state.
-- `trip_plan_items`: Trip Project ID, owner ID, kind, discriminated anchor role or leg/activity type, same-project parent only for an activity under a leg, required same-project alternative target for `backup` and null alternative target otherwise, `idea | planned | confirmed | backup` state, ordinal unique within `(trip_project_id, parent_item_id)`, bounded user-confirmed label/notes, optional planned date/time, monotonic version, and created/updated timestamps. It contains no provider snapshot, booking credential/reference, exact GPS history, or dynamic weather/route result.
+- `trip_plan_items`: Trip Project ID, owner ID, kind, discriminated anchor role or leg/activity type, same-project parent only for an activity under a leg, required same-project alternative target for `backup` and null alternative target otherwise, `idea | planned | confirmed | backup` state, ordinal unique within `(trip_project_id, parent_item_id)`, bounded user-confirmed label/notes, optional planned date/time, monotonic version, and created/updated timestamps. A transport leg may also hold nullable canonical origin, canonical destination, selected path, and registry-snapshot references changed only by AD-30 proposal commands. It contains no provider snapshot, booking credential/reference, exact GPS history, or dynamic weather/route result.
 - `trip_change_proposals`: Trip Project ID, owner ID, creator class, `pending | applied | dismissed | expired` status, bounded rationale, typed operation list, expected aggregate and affected-item version fences, ordering/parent preconditions when applicable, optional expiry, and terminal timestamp. Proposal operations identify only the target item and permitted structured-field changes; they do not embed executable SQL, arbitrary routes, or provider/model payloads.
 - `trip_plan_change_history`: Trip Project ID, owner ID, proposal ID when applicable, AuditActor persistence shape, operation class, affected item references, safe before/after summary, and timestamp. It is audit/history, not a second mutable plan projection.
 
@@ -699,30 +841,15 @@ Trip Planning deletion rule: deleting an owned Trip Project cascades or transact
 
 ## Retrieval Contract
 
-Retrieval returns a normalized source bundle:
+Retrieval implements AD-17 and AD-34 through AD-39 as the scope-first faceted cascade defined in [retrieval-trip-aware-solution-design.md](retrieval-trip-aware-solution-design.md). The normalized source bundle contains the exact clarification claim and scoped context/assumptions when applicable, pinned planning context, selected active knowledge contributions, eligible external web contributions, explicit uncovered requirement outcomes, and a general-reasoning marker. Traveler prompts contain only traveler-safe bounded snapshots; they exclude raw source material, copied post bodies, image-analysis notes, operator-only evidence, provider payloads, and admin-only metadata.
 
-- `chat_trip_context`: selected trip project context and current chat session context used
-- `knowledge`: active cards with IDs, titles, summaries, conditions, current domain classification and verification requirement, confidence, safe current evidence/source metadata, freshness flags, and scores
-- `web`: external results with URL, title, snippet/content, checkedAt, provider score, and `unverified` confidence
-- `general`: explicit marker when model reasoning fills gaps without source grounding
-
-Traveler AI Ask source bundles contain traveler-safe snapshots only. They may include selected trip context, current chat context, active knowledge-card summaries, state-aware use instructions, bounded traveler-visible evidence/source metadata, web snippets, and the general-reasoning marker. They must not include `raw_source_material.raw_text`, copied post bodies, image OCR/vision notes, operator-only evidence, or admin-only metadata.
-
-MVP retrieval searches active knowledge-card search documents lexically, then validates `lifecycle_state = active`, domain classification, `verification_requirement = none`, active traveler-safe evidence, and linked sources before selecting source-bundle items. Candidate selection filters current card rows by lifecycle-aware eligibility, card type, route/location, conditions, tags, freshness-sensitive flag, confidence/verification labels, and source type. Broad semantic ranking, Postgres full-text ranking, and pgvector ranking are later hybrid-search enhancements, not MVP requirements.
-
-If retrieval eligibility cannot be proven for a candidate, retrieval excludes it and records the exclusion as an implementation-visible reason where practical. Tests for Story 5.1 must prove draft, archived, rejected, stale, disabled, source-missing, and operator-only/raw-source-backed records do not enter traveler source bundles.
-
-Web search triggers when no relevant active cards are retrieved, fewer than three relevant active cards are retrieved for a broad planning question, the user asks about freshness-sensitive facts, or relevant cards are pending operator work or conflicted.
-
-If web search fails or returns low-confidence results, the orchestrator must state that updated information could not be verified and recommend user confirmation; it must not replace missing verification with unsupported guidance.
-
-Every assistant answer stores a `retrieval_decision`: knowledge candidate count, selected knowledge count, relevance threshold, freshness-required flag, conflict-detected flag, web-search-triggered flag, web-search reason, and general-reasoning-used flag. If web results are used because cards conflict or are stale, provenance includes both relevant card IDs and web result IDs.
+The executable contract shapes and ownership boundaries are in [retrieval-trip-aware/contracts.md](retrieval-trip-aware/contracts.md). Canonical mode, path, coverage, missing-need, replay, deletion, and compatibility cases are in [retrieval-trip-aware/fixtures.md](retrieval-trip-aware/fixtures.md). If a companion conflicts with this Spine, the Spine wins and the companion must be corrected before story readiness.
 
 ## Evaluation Contract
 
 Feedback/Eval owns beta quality measurement. It stores versioned beta prompt sets, rubric dimensions, evaluator prompt/model version, run outputs, linked assistant responses/provenance, usefulness scores, hallucinated unsupported-claim flags, missing-uncertainty flags, and generic-ChatGPT comparison flags.
 
-The five PRD beta prompts are the initial required prompt set: magic-moment family trip, sparse-data question, freshness-sensitive question, service/activity question, and route logistics question.
+The five PRD beta prompts remain the initial product-quality set. V6.2 adds versioned critical-authoritative and standard cohorts for required-need coverage, route applicability, planning-mode isolation, canonical Trip path behavior, replayable web scope, provider failure, capacity pressure, deletion, and compatibility retirement. [retrieval-trip-aware/evaluation-and-release-gates.md](retrieval-trip-aware/evaluation-and-release-gates.md) owns the gate profile lifecycle and evidence checklist under AD-37.
 
 ## Operational Envelope
 
@@ -733,6 +860,7 @@ Production must have:
 - Server-side auth and role enforcement for protected personalization/admin capabilities.
 - Audit trail for operator/admin mutations.
 - Logging for model provider, search provider, latency, failures, and answer provenance IDs.
+- PostgreSQL-authoritative retrieval read policy, registry/config identity, gate profile, and cutover/rollback records. The existing Worker exposes only a bounded registry-publish operation; v6.2 introduces no new service, queue, continuous Worker loop, or environment flag.
 - User-owned deletion path for chat sessions and trip projects.
 - Backup/restore path for PostgreSQL before public user onboarding.
 - Facebook capture, if enabled, must run from an operator-controlled operations environment with a separate local browser profile and no stored Facebook credentials in application secrets or the database.
@@ -740,7 +868,7 @@ Production must have:
 
 ## Deferred
 
-- Final deployment provider and hosted PostgreSQL provider.
+- Final production service/database evidence and hosted PostgreSQL extension capabilities; the current repository convention is Railway-oriented Docker deployment.
 - A separately approved Facebook rights and display policy before any traveler-visible direct quote or broad group discovery; public-MVP traveler surfaces remain limited to XuyenViet-authored paraphrase, practical verification guidance, and canonical links that pass the PRD's public-access, URL-safety, and removal conditions.
 - Dedicated self-service privacy dashboard beyond chat/trip deletion.
 - Google Maps integration.
@@ -750,4 +878,4 @@ Production must have:
 - Public submissions, credit wallets, payment deposits, reward balances, referral reward calculations, ranking multipliers, reward-to-credit conversion, booking transactions, affiliate automation, and partner transaction flows.
 - Mobile app channel.
 - Service decomposition.
-- Postgres full-text ranking and pgvector/hybrid retrieval for AI Ask, until indexed lexical retrieval and provenance behavior are stable enough to upgrade behind the Retrieval module.
+- `pg_trgm`, pgvector/hybrid ranking, RRF, rerankers, and AI grey-band adjudication until an AD-37 experiment gate proves a concrete v6.2 failure-class improvement.

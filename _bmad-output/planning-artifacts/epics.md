@@ -28,9 +28,20 @@ stepsCompleted:
   - step-02-youtube-discovery-epic-design
   - step-03-youtube-discovery-story-generation
   - step-04-youtube-discovery-final-validation
+  - step-01-retrieval-trip-aware-v6.2-requirements-extraction
+  - step-02-retrieval-trip-aware-v6.2-epic-design
+  - step-03-retrieval-trip-aware-v6.2-story-generation
+  - step-04-retrieval-trip-aware-v6.2-final-validation
 inputDocuments:
   - _bmad-output/planning-artifacts/prds/prd-xuyenviet-2026-07-04/prd.md
+  - _bmad-output/planning-artifacts/prds/prd-xuyenviet-2026-07-04/addendum.md
+  - docs/roadmaps/retrieval-va-tri-nho-traveler-v6.2.md
   - _bmad-output/planning-artifacts/architecture/architecture-xuyenviet-2026-07-04/ARCHITECTURE-SPINE.md
+  - _bmad-output/planning-artifacts/architecture/architecture-xuyenviet-2026-07-04/README.md
+  - _bmad-output/planning-artifacts/architecture/architecture-xuyenviet-2026-07-04/retrieval-trip-aware-solution-design.md
+  - _bmad-output/planning-artifacts/architecture/architecture-xuyenviet-2026-07-04/retrieval-trip-aware/contracts.md
+  - _bmad-output/planning-artifacts/architecture/architecture-xuyenviet-2026-07-04/retrieval-trip-aware/fixtures.md
+  - _bmad-output/planning-artifacts/architecture/architecture-xuyenviet-2026-07-04/retrieval-trip-aware/evaluation-and-release-gates.md
   - _bmad-output/planning-artifacts/ux-designs/ux-xuyenviet-2026-07-05/DESIGN.md
   - _bmad-output/planning-artifacts/ux-designs/ux-xuyenviet-2026-07-05/EXPERIENCE.md
   - _bmad-output/project-context.md
@@ -62,6 +73,7 @@ FR-6: Support iterative conversation refinement.
 FR-6A: Stream AI Ask responses only after context, source bundle, and provenance inputs are assembled.
 FR-6B: Accept supported image inputs from authenticated users when the selected Gateway model supports them.
 FR-6C: Validate image type, size, ownership, and safety before a provider call; invalid input creates no provider call.
+FR-6D: Keep admitted AI Ask generation running while the API remains alive when a browser reloads, switches chat, or disconnects; the persisted terminal answer is authoritative on return.
 FR-7: Structure travel answers as a calm Vietnamese conversation with plan/options, rationale, tips, concise verification guidance when relevant, and next steps; technical source/provenance, reasoning, audit, processing, and provider information are not part of the default traveler reading path.
 FR-8: Require Google Login before AI Ask use.
 FR-9: Associate chat sessions and trip projects with the authenticated user.
@@ -84,10 +96,17 @@ FR-16I: Preserve an owner-visible history for applied, dismissed, and expired Tr
 FR-16J: Start from natural-language chat and only recommend explicit Trip Project creation after durable context; remember a decline until context materially changes or the traveler asks to save.
 FR-16K: Make any owned-trip recommendation a server-owned explicit choice; never auto-attach context and keep private answers free of project constraints.
 FR-16L: Show active trip context in traveler language and let the traveler explicitly ask outside it or switch projects without merging conversations.
+FR-16M: Distinguish current-plan, hypothetical-change, pending-proposal review, and outside-Trip modes for every Trip-scoped answer; ask one concise clarification only when ambiguity materially changes the answer while preserving invariant useful guidance.
+FR-16N: Treat only applied Trip state as current-plan authority; never present hypothetical, pending, dismissed, expired, stale, or foreign proposal effects as committed state.
+FR-16O: Preserve an owner-selected canonical route or path per relevant Trip leg with explicit item state; free text becomes durable route authority only through an applied owner-confirmed proposal.
+FR-16P: Preserve the confirmed plan as baseline while exploring an alternate route, stop, or constraint; only successful owner Apply changes later current-plan context.
+FR-16Q: Fail safely and require owner review or refresh when a stored route reference no longer preserves its material meaning; never silently select another path.
 FR-17: Support operator-created knowledge cards.
 FR-18: Store title, type, location/route, summary, source, collected date, confidence, tags, and freshness-sensitive status on cards.
 FR-18A: Preserve short validated evidence quote/span, source link, capture/observed date, and conditions before an AI-extracted community claim is active.
 FR-18B: Never retain or expose PII/sensitive content in traveler-visible facts or evidence quotes.
+FR-18C: Preserve validated bounded practical details; route notes may retain ordered stops, including intentional repeats.
+FR-18D: Publish a content-removal channel; hide affected traveler links during credible-request validation and invoke source removal plus dependent-knowledge re-evaluation when validated.
 FR-19: Support the defined knowledge-card taxonomy.
 FR-20: Let operators create, edit, approve, and archive cards.
 FR-21: Retrieve cards in active publication state; qualifying AI-extracted community claims do not require operator approval.
@@ -106,6 +125,7 @@ FR-24B: Use an independent AI judge, separate from extraction, to assign `apply`
 FR-24C: Discover and process every independently useful atomic claim from a submitted immutable source version without an accepted-fact quota.
 FR-24D: Give each discovered candidate an independent, immutable completed AI disposition/reason or a failed outcome with no business disposition; complete source ingestion only after discovery is terminal and every candidate is completed or failed, while retaining idempotent observability counters only.
 FR-24E: Prevent work for an earlier superseded capture version from mutating active knowledge while preserving intelligible historical ingestion behavior.
+FR-24F: Preserve itinerary stop order, including intentional repeats, and extract independently useful named-place or route observations as sibling candidates; bare stop labels are not knowledge candidates.
 FR-25: Make claims searchable without human approval only when evidence, specificity, actionability, privacy, commercial-risk, and conflict policy pass.
 FR-25A: Create risk-prioritized review recommendations, not mandatory approval gates, for risky, weak, conflicting, duplicate, or context-missing claims.
 FR-25B: Support quality sampling of active claims without delaying normal ingestion, keep sampling separate from actionable operator work, and contain only the affected cohort after a high-severity failure.
@@ -117,9 +137,16 @@ FR-29: Retrieve relevant active cards under publication and knowledge-state guar
 FR-30: Prioritize context: selected trip, current chat, active XuyenViet knowledge, web fallback, then general reasoning.
 FR-31: Use web fallback for missing, sparse, freshness-sensitive, uncertain, or conflicted knowledge.
 FR-32: Persist and audit whether answer information came from chat/trip, knowledge cards, web, or general reasoning without making those categories default traveler-facing copy.
+FR-32A: Distinguish evidence made available to answer generation from evidence materially attributed to the completed answer; attribution must resolve to same-answer available evidence.
+FR-32B: Do not let missing or malformed attribution invalidate an otherwise safe answer, but never create unvalidated attribution or traveler source detail.
 FR-33: Warn travelers to verify changing details before action or booking.
 FR-34: Never present unverified collected information as guaranteed fact.
 FR-35: Retain external provenance and practical verification guidance for web information; use a route- or place-specific fact as a factual premise only when its geography and time match the planning need.
+FR-61: Evaluate applicable evidence against explicit required planning needs; duplicate coverage of one need and unrelated evidence cannot conceal or satisfy another required need.
+FR-62: Under evidence or response-capacity pressure, prioritize consequential route, safety, and traveler constraints; provide safe useful partial guidance, surface uncovered needs, and offer permitted clarification or verification.
+FR-63: Communicate supported route-planning coverage in traveler language; outside it, provide only clearly scoped endpoint, place, general, or external-reference guidance without end-to-end route authority.
+FR-64: For no-path, partial, or ambiguous routes, provide bounded useful behavior without manufacturing route authority from incomplete coverage, nationwide advice, source prestige, or text similarity.
+FR-65: Present recent warnings with source, applicable place/time, and verification action, but never as live closure, traffic, navigation, or guaranteed safety without an approved live-data capability.
 FR-36: Prefer official/provider pages in web fallback.
 FR-37: Do not treat Facebook-derived information as official except from identifiable official/provider pages.
 FR-37A: Use state-appropriate uncertainty wording for community observation, pattern, and conditional claims.
@@ -150,9 +177,24 @@ FR-54: Authorize every protected API read and command with a domain-neutral requ
 FR-55: Provide a stable API error contract with machine-readable code, safe message, request/correlation ID, and applicable safe field violations without sensitive internals.
 FR-56: Document versioned health/version and protected-capability API contracts, including validation, authorization, ownership, pagination/stable ordering, and streaming semantics where applicable.
 FR-57: Run continuous background work in a dedicated worker runtime and bounded sweeps as scheduled one-shot commands using existing PostgreSQL job, claim, lease, fencing, and idempotency protocols.
+FR-57A: Post-answer enrichment may add derived context, annotations, or confirmable proposal actions but cannot change completed answer text, terminal outcome, initial provenance, or successful-answer usage.
 FR-58: Preserve one writer per aggregate command during migration; route each request to exactly one transport owner and never dual-write product state.
 FR-59: Move AI Ask streaming to the versioned API while preserving `preparing`, `delta`, `done`, and `error` NDJSON events, abort behavior, and atomic terminal persistence.
+FR-59A: Accept provider-specific completion variations only when the response is well formed, useful, and free of provider-declared or parsing failure; ambiguous or malformed completion fails safely.
 FR-60: Retire Auth.js, BFF transport, legacy Next.js domain route handlers, server-action writers, and the legacy `/admin` operational surface before public launch.
+FR-66: Generate and refresh governed YouTube Discovery query proposals from coverage gaps, freshness risk, conflicts, and safe aggregate demand, while supporting operator-created queries.
+FR-67: Let authorized operators inspect and manage query origin, reason, priority, text, schedule context, and enabled/paused state.
+FR-68: Let an authorized operator globally disable new Discovery planning, search, enrichment, triage, provider calls, and writes without changing Knowledge or manual capture work.
+FR-69: Run bounded scheduled Discovery through documented YouTube Data API capabilities and deduplicate eligible public individual videos into canonical URL candidates without media download/storage.
+FR-70: Retain only bounded safe video/channel metadata and closed derived comment signals; comments never become evidence, capture material, knowledge, retrieval input, or traveler content.
+FR-71: Validate bounded AI metadata triage and combine it with deterministic eligibility/ranking into `skip | defer | consider`; model output or popularity never establishes correctness or publication eligibility.
+FR-72: Provide authorized operators a ranked one-at-a-time candidate review experience using safe metadata and bounded decision factors.
+FR-73: Let authorized operators Accept, Defer, or Skip through protected audited commands; failed or unknown outcomes remain recoverable and never claim Knowledge/capture exists.
+FR-74: Accept submits only the canonical URL to Knowledge intake and records success only after submitted/duplicate; Discovery never owns Knowledge records or invokes manual capture/video analysis.
+FR-75: Make Action Required the control-tower default, with Knowledge Mission and Automation Health views over safe operational data.
+FR-76: Route high-impact verification/conflict work to the existing Knowledge surface without Discovery changing Knowledge claims.
+FR-77: Retain only safe candidate/audit/dedupe metadata under policy, initially 180 days, with shorter policy retention for derived comment signals.
+FR-78: Use only documented YouTube APIs and bounded metadata processing; prohibit scraping, transcript extraction, media persistence, raw comment retention, and automatic video analysis.
 
 ### NonFunctional Requirements
 
@@ -191,6 +233,29 @@ NFR-18: Before public launch, approve Railway ownership, domains/DNS/CSP/OAuth c
 - Use Tavily behind a provider adapter provisionally; prefer official/provider sources and fail closed with a verification recommendation when search fails or is low confidence.
 - Supervise separate Node workers for knowledge ingestion/indexing; keep logs, health/restart supervision, backup/restore, and public launch privacy checks operationally ready.
 - Preserve no-credit/no-payment/no-reward MVP boundaries and defer maps, mobile, service decomposition, vector/hybrid ranking, and broad Facebook discovery pending explicit decisions.
+
+### Retrieval And Trip-Aware Architecture Requirements (v6.2)
+
+- RTA-1: Retrieval owns one versioned required-need vocabulary and deterministic requirement-key identity; selection, rendering, provenance, and evaluation consume the same immutable contribution contract.
+- RTA-2: Coverage is recomputed from the final render manifest and returns `satisfied | missing | requires_verification | requires_clarification`; card count alone never establishes sufficiency.
+- RTA-3: Planning mode is explicit and pinned as current plan, explore change, validate proposal, or unscoped answer; only applied Trip state grants current-plan authority.
+- RTA-4: Canonical leg-path choices use immutable registry references and owner-confirmed proposal operations; stale references fail safely without automatic replacement.
+- RTA-5: Route resolution and coverage projection distinguish authoritative, partial, ambiguous, unsupported, and stale-path states and expose bounded traveler guidance without false live-routing authority.
+- RTA-6: Web use is replayable at atomic-fact level from minimized query plan through capture, fact assertion, scope decision, requirement contribution, render manifest, and answer provenance.
+- RTA-7: Conversation and Trip deletion synchronously invalidate reconstructable retrieval runs, web decisions, snapshots, manifests, projections, and production-evaluation membership across owning modules.
+- RTA-8: Feedback/Eval owns versioned fixtures, cohorts, numeric gate profiles, evidence windows, and release reports; critical safety limits are literal zero and material provenance correctness is literal one.
+- RTA-9: `v6_shadow` retains the legacy path as traveler-authoritative and runs a paired side-effect-free v6 comparison; cutover and rollback use one Retrieval-owned compare-and-swap read policy.
+- RTA-10: The historical fewer-than-three trigger is compatibility-only; `v6_active` triggers web work from uncovered or freshness-sensitive requirements, conflict, or explicit current verification, and G3 separates behavioral retirement from physical cleanup.
+- RTA-11: Profiled planning intents use server-owned multi-turn clarification: bounded `clarification_plan` and `clarification_extract` prompt stages propose structure and extract natural-language values, while deterministic profiles and Chat/Trips CAS state alone decide per-deliverable readiness before main synthesis.
+- RTA-12: Context and preferences are scoped through a versioned graph to journey, day range, leg, place, stay/group, meal, activity, or deliverable instance; explicit narrow values never leak to sibling scopes, and permitted assumptions are persisted and disclosed.
+- RTA-13: After an unscoped profiled request reaches a completed useful answer with durable ready planning context, Chat/Trips exposes one persistent owner-bound `Chuyển thành chuyến đi` opportunity. Not clicking is neutral; material completed context changes refresh or suspend its server-owned manifest, explicit dismissal alone creates a decline fence, and click revalidates the latest eligible bounded context rather than the originally displayed revision. Successful idempotent conversion atomically creates one Trip, its separate primary conversation, and an initial pending proposal without copying/replaying raw chat; only proposal Apply makes transferred values authoritative. `continueInTrip(...)` remains an existing-Trip scope switch with no context import.
+
+### v6.2 Outcome And Journey Requirements
+
+- PCR-01..PCR-10: All ten roadmap product change requests are approved and must retain their PRD mappings and Architecture/Evaluation follow-up ownership from `addendum.md`.
+- SC-8..SC-12: Release evaluation must prove zero hard-off-route/unrelated-need use, correct Trip/proposal isolation, explicit safe required-gap handling, safe verification failure, and owner-confirmed durable correction.
+- AC-28..AC-33: Acceptance coverage must prove planning-mode isolation, canonical path persistence/refresh, bounded unsupported-route behavior, capacity-safe required-need coverage, non-live warning wording, and deletion invalidation.
+- PJ-01..PJ-06: Epic coverage and canonical fixtures must preserve private-to-Trip transition, current-plan authority, hypothetical detours, partial/ambiguous/unsupported routes, missing/capacity-limited evidence, and changing real-world warning journeys.
 
 ### Knowledge Lifecycle Normalization Requirements (2026-08-04)
 
@@ -433,6 +498,51 @@ FR-48: Epic 1 - Silent referral attribution.
 FR-49: Epic 4 - Managed AI Gateway model records.
 FR-49A: Epic 14 Story 14.4 - Direct exact-admin AI Gateway model-catalog management.
 FR-50: Epic 4 - Internal cost estimation.
+FR-6D: Epic 10 Stories 10.4-10.5 - API-owned generation survives disconnect and reconciles to persisted terminal state.
+FR-16J: Epic 21 Story 21.9 - Persistent explicit chat-to-Trip opportunity; Epic 16 Story 16.1 is the completed decision-bound baseline.
+FR-16K: Epic 21 Story 21.9 - Owner-bound explicit conversion or existing-Trip selection without automatic context attachment.
+FR-16L: Epic 21 Story 21.9 and Epic 16 Story 16.2 - Existing-Trip scope switching without copying or importing ordinary chat.
+FR-16M: Epic 21 Story 21.4 - Explicit current, hypothetical, proposal-review, and unscoped planning modes.
+FR-16N: Epic 21 Story 21.4 - Applied Trip state is the only current-plan authority.
+FR-16O: Epic 21 Story 21.5 - Owner-confirmed canonical leg-path persistence.
+FR-16P: Epic 21 Story 21.4 - Applied plan remains baseline until proposal Apply.
+FR-16Q: Epic 21 Story 21.5 - Stale path references fail safely and require owner review.
+FR-18C: Epic 15 Story 15.2 - Preserve validated bounded practical detail and ordered route observations in target candidate processing.
+FR-18D: Epic 15 Story 15.4 - Immediate content-removal safety and dependent-knowledge re-evaluation.
+FR-22D: Epic 15 Story 15.4 - Active cards require eligible evidence and fail-closed retrieval projection.
+FR-24F: Epic 15 Story 15.2 - Preserve ordered route observations and independent useful candidate outcomes.
+FR-32A: Epic 11 Story 11.3 - Material answer attribution resolves only to same-answer available evidence.
+FR-32B: Epic 11 Story 11.3 and Epic 10 Story 10.4 - Invalid attribution is omitted without inventing provenance or rewriting a safe completed answer.
+FR-51: Epic 14 Stories 14.1-14.4 - Direct versioned domain APIs for traveler and operator clients.
+FR-52: Epic 14 Stories 14.1 and 14.4 - Direct browser API access through NestJS-managed secure sessions.
+FR-53: Epic 13 Stories 13.1-13.2 and Epic 14 Story 14.4 - Separately deployed operator application with protected API ownership.
+FR-54: Epic 14 Story 14.1 - Live opaque-session principal and current authorization checks.
+FR-55: Epic 14 Story 14.1 - Stable safe direct-API error contract.
+FR-56: Epic 14 Stories 14.1-14.4 - Documented health/version and protected capability contracts.
+FR-57: Epic 12 Stories 12.1-12.2 - Dedicated Worker runtime and bounded scheduled sweeps using existing PostgreSQL protocols.
+FR-57A: Epic 10 Stories 10.3-10.4 - Post-answer consumers cannot rewrite completed answer, provenance, outcome, or usage.
+FR-58: Epic 14 Stories 14.2-14.5 - One writer per aggregate during direct-API migration.
+FR-59: Epic 10 Story 10.5 and Epic 14 Story 14.2 - Versioned API streaming with preserved NDJSON and atomic terminal behavior.
+FR-59A: Epic 10 Stories 10.2 and 10.5 - Provider completion variations must validate or fail safely before terminal persistence.
+FR-60: Epic 14 Story 14.5 - Retire Auth.js, BFF runtime, legacy writers, and legacy admin surface.
+FR-61: Epic 21 - Required-need coverage cannot be hidden by duplicate or unrelated evidence.
+FR-62: Epic 21 - Capacity-safe prioritization, useful partial guidance, and explicit gaps.
+FR-63: Epic 21 - Traveler-language supported route coverage.
+FR-64: Epic 21 - Safe bounded behavior for partial, ambiguous, and unsupported routes.
+FR-65: Epic 21 - Recent warnings remain distinct from live route authority.
+FR-66: Epic 18 Stories 18.2-18.3 - Governed system/operator Discovery query proposals.
+FR-67: Epic 18 Story 18.3 - Authorized query inspection, management, and scheduling context.
+FR-68: Epic 18 Story 18.2 and Epic 20 Story 20.4 - Global Discovery disablement without changing Knowledge/manual capture.
+FR-69: Epic 18 Story 18.4 - Bounded documented YouTube API discovery and canonical URL deduplication.
+FR-70: Epic 18 Story 18.5 - Bounded safe metadata and non-evidence derived comment signals.
+FR-71: Epic 19 Stories 19.1-19.2 - Validated AI metadata triage plus deterministic eligibility/ranking.
+FR-72: Epic 19 Story 19.3 - Ranked explainable one-at-a-time candidate review.
+FR-73: Epic 19 Story 19.5 - Protected audited Accept/Defer/Skip and recoverable unknown outcomes.
+FR-74: Epic 19 Story 19.4 - Canonical URL handoff to Knowledge intake without capture ownership.
+FR-75: Epic 20 Stories 20.1-20.3 - Action Required, Knowledge Mission, and Automation Health control tower.
+FR-76: Epic 20 Story 20.2 - Route verification/conflict work to existing Knowledge ownership.
+FR-77: Epic 18 Story 18.5 - Policy-controlled safe candidate and derived-signal retention.
+FR-78: Epic 18 Stories 18.4-18.5 - Documented APIs and bounded metadata only; no scraping, transcript, media, raw-comment, or automatic-video-analysis path.
 
 ### Architecture Delta Coverage Map (2026-07-28)
 
@@ -448,6 +558,20 @@ ADR-32-9: Epic 11 - Withdrawn provenance safety for historic traveler answers.
 ADR-32-10: Epic 11 - Validated, provenance-safe answer annotations.
 FR-16J, FR-16K, FR-16L: Follow-on chat-first UX epic - Server-owned trip recommendations, explicit confirmation, and scoped composer switching.
 UX-DR25: Follow-on chat-first UX epic - Plain-language traveler presentation with technical detail restricted to authorized admin surfaces.
+
+### Retrieval And Trip-Aware v6.2 Coverage Map (2026-08-12)
+
+PCR-01..PCR-10: Epic 21 - Complete v6.2 product-change package and release ownership.
+FR-5: Epic 21 - Multi-turn clarification asks only unresolved material context.
+FR-15: Epic 21 - Conversation/Trip deletion invalidates reconstructable v6.2 derived state.
+FR-16J..FR-16L: Epic 21 - Persistent latest-context chat-to-Trip conversion and explicit existing-Trip selection.
+FR-16M..FR-16Q: Epic 21 - Planning-mode authority, canonical paths, proposal-only mutation, and stale-path recovery.
+FR-30, FR-31, FR-35: Epic 21 - Mode-aware context priority, required-need web triggering, and replayable external verification.
+FR-61..FR-65: Epic 21 - Required-need coverage, capacity handling, supported-route projection, and warning freshness.
+SC-8..SC-12: Epic 21 - Critical zero-tolerance safety cohorts.
+AC-28..AC-33: Epic 21 - Canonical planning-mode, route, capacity, freshness, and deletion acceptance coverage.
+PJ-01..PJ-06: Epic 21 - All six production journeys and their canonical fixture chains.
+RTA-1..RTA-13: Epic 21 - Architecture contracts, clarification gate, persistent conversion, evaluation, cutover, and retirement.
 
 ### Knowledge Lifecycle Normalization Coverage Map (2026-08-04)
 
@@ -583,6 +707,16 @@ Travelers begin with one natural-language question, receive calm practical guida
 **FRs covered:** FR-7, FR-16J, FR-16K, FR-16L, FR-32, FR-33, FR-46, FR-46A. **UX requirements covered:** UX-DR14, UX-DR18, UX-DR25. **Architecture decisions covered:** AD-11, AD-30A, AD-30B.
 
 **Implementation notes:** Implement in vertical slices: simplify answer/provenance/feedback presentation; add typed, owner-scoped creation and existing-trip recommendations with persisted decline fencing; make scope switching explicit and URL-owned; then revise sidebar, composer, Trip Workspace, and proposal decision language. Chat/Trips alone calculates context revision/fingerprint, re-offer eligibility, and typed owner-scoped recommendation decisions; the browser does not infer them. Rendered AI prose never creates an action, a Trip Project, a context attachment, or a scope change: only a persisted typed server decision can render recommendation controls. A recommendation appears only after useful guidance and durable context. Accepting it is idempotent and revalidates owner, conversation, and context revision; stale decisions cannot create or attach a project. When a question uses a Trip Project, the header and composer visibly identify it in traveler language, for example `Đang lên kế hoạch cho: Hè miền Trung`. The existing `Hỏi XuyenViet` new-chat action is the primary explicit way to ask outside that Trip Project, and the existing trip-project sidebar list is the primary way to switch projects; do not add persistent scope-action buttons to the composer. Default unscoped chat has no technical scope label. A private-answer choice in a typed recommendation neither loads, uses, nor persists a selected Trip Project's constraints, leaves URL scope unchanged, and does not link conversations; it may confirm the current-turn effect briefly without creating a persistent "private" mode. UI may show only a pending selection state; URL-selected server shell state becomes canonical after owner and primary-conversation validation. Switching opens only the selected owned project's existing primary conversation; stale, deleted, or unauthorized resources reconcile to the safe server shell. Tests prove private-answer source bundles, persisted provenance, and context updates contain no selected Trip Project constraints, and ordinary conversations are never copied, merged, or linked into a Trip Project. Recommendations and trust disclosures must not steal composer focus; their keyboard, focus restoration, live-region, mobile-target, and reduced-motion behavior is independently verified. Persisted provenance, authorization, one-primary-conversation rules, explicit proposal application, and owner-scoping remain unchanged. The traveler web client never parses answer prose to infer a recommendation, provenance, risk, or mutation, and it never renders technical states, codes, categories, diagnostics, or provider/model information.
+
+**Completed-baseline boundary:** Epic 16 and Story 16.1 remain historical evidence for the shipped decision-bound save/continue flow. Epic 21 owns the deliberate AD-40 contract migration to a persistent opportunity, latest eligible manifest, and initial pending proposal; agents must not reinterpret Story 16.1 as the target conversion contract or create a second endpoint.
+
+### Epic 21: Context-Complete, Trip-Aware Planning And Conversion
+
+Travelers can refine complex itinerary, route, lodging, food, and activity requests until the relevant scope has enough context; receive bounded route-aware answers that expose required gaps and freshness limits; and explicitly convert the latest useful chat context into a reviewable Trip without copying the chat or silently changing Trip state.
+
+**Requirements covered:** PCR-01..PCR-10; FR-5, FR-15, FR-16J..FR-16Q, FR-30, FR-31, FR-35, FR-61..FR-65; SC-8..SC-12; AC-28..AC-33; PJ-01..PJ-06; RTA-1..RTA-13.
+
+**Implementation notes:** Deliver this as one user-value epic because clarification, required-need retrieval, route authority, and chat-to-Trip conversion share the same planning-context and proposal seams. Stories must remain vertical and independently verifiable: establish fixtures/contracts and context profiles; collect scoped context across natural-language turns; enforce planning mode and canonical route coverage; retrieve and verify by required need with deletion/replay safety; expose the persistent `Chuyển thành chuyến đi` opportunity; atomically create a Trip, separate primary conversation, and initial pending proposal from the latest eligible manifest; then prove shadow/cutover/rollback and retire the card-count trigger. Story 16.1 is a completed brownfield baseline, not the target contract. Reuse its accept/decline owner ports and recommendation aggregate; do not add a second conversion service or endpoint. Existing-Trip `continueInTrip(...)` remains a context-free scope switch.
 
 ## Epic 1: Trusted Entry And Planning Workspace Access
 
@@ -2753,6 +2887,8 @@ As a traveler,
 I want XuyenViet to offer a saved Trip Project only when it is useful and let me decide what to do,
 So that I can begin with a natural question without an automatic project or unwanted reuse of another trip's details.
 
+**Completed-baseline note:** This story records the shipped `decisionId` behavior. Epic 21 supersedes only the new-conversion semantics through AD-40/RTA-13: it upgrades the same accept/decline ports to a persistent opportunity and latest eligible manifest, and adds the initial pending proposal. Do not modify this completed story into the target or implement a parallel endpoint.
+
 **Acceptance Criteria:**
 
 **Given** an authenticated traveler asks in an unscoped conversation
@@ -2878,3 +3014,358 @@ So that convenience improvements cannot silently weaken traveler control, owner 
 **When** focused verification runs
 **Then** the applicable unit and serial integration tests, `pnpm lint`, `pnpm typecheck`, and `pnpm build` pass
 **And** any environmental blocker is recorded exactly in the implementation artifact.
+
+## Epic 21: Context-Complete, Trip-Aware Planning And Conversion
+
+Travelers can refine complex itinerary, route, lodging, food, and activity requests until the relevant scope has enough context; receive bounded route-aware answers that expose required gaps and freshness limits; and explicitly convert the latest useful chat context into a reviewable Trip without copying the chat or silently changing Trip state.
+
+### Story 21.1: Define Versioned Planning Context Profiles And Scope Rules
+
+As a traveler,
+I want XuyenViet to recognize which details materially affect each part of my request,
+So that it asks only relevant questions and does not apply one preference to the wrong day, stop, meal, or stay.
+
+**Acceptance Criteria:**
+
+**Given** a profiled request asks for an itinerary, route comparison, accommodation, food, activity, or mixed planning deliverables
+**When** Retrieval resolves the applicable planning-context profiles
+**Then** every deliverable instance receives an immutable profile with typed fields, materiality, conditional applicability, allowed scopes, value validation, precedence, completeness, and safe-assumption policy
+**And** readiness cannot be declared from prompt prose, model confidence, global traveler completeness, or an undeclared context key.
+
+**Given** a planning request contains journey, day-range, leg, place, destination-stay, transit-stay, meal, activity, group, or deliverable scope
+**When** its proposed scope graph is validated
+**Then** the graph uses the versioned relation comparator and deterministic `equal`, `ancestor`, `descendant`, `overlap`, `sibling`, or `unrelated` result
+**And** cycles, duplicate nodes, orphan parents, invalid references, and policy limits for nodes, instances, depth, parents, values, and text lengths are rejected without partial persistence.
+
+**Given** a traveler specifies a nicer Đà Nẵng destination stay and simple sleep-only transit stays
+**When** effective values are evaluated
+**Then** strict ancestry or an explicit profile precedence rule applies each value only to its compatible subtree
+**And** incomparable overlap becomes ambiguous rather than latest-write-wins or journey-wide leakage.
+
+**Given** the profile, plan policy, scope comparator, or value schema changes
+**When** a session, answer claim, fixture result, or evaluation result is created
+**Then** it pins the exact versions used
+**And** `CLAR-01`, `CLAR-07`, `CLAR-08`, `CLAR-13`, `CLAR-21`, `CLAR-22`, and `CLAR-23` remain executable canonical cases for FR-5, RTA-11, and RTA-12.
+
+### Story 21.2: Persist Scoped Multi-Turn Clarification State Safely
+
+As a traveler,
+I want my valid answers to accumulate across clarification turns,
+So that XuyenViet asks only for missing details without losing, mixing, or silently replacing what I already said.
+
+**Acceptance Criteria:**
+
+**Given** a new profiled intent has a validated clarification plan
+**When** Chat/Trips initializes or evolves its clarification session
+**Then** it atomically persists the owner-bound immutable graph revision, typed deliverable instances, current field states, exact conversation content revision, and pinned profile/policy identities
+**And** retries are idempotent by plan attempt while stale, terminal, deleted, cyclic, partial, or unvalidated plans change nothing.
+
+**Given** the server asks for trip direction, vehicle, and party composition
+**When** the traveler replies naturally with only vehicle and party information
+**Then** `reduceClarificationMessage(...)` preserves both validated values with exact UTF-16 message-evidence spans and recomputes only affected instances
+**And** the next state still identifies direction as missing without clearing prior values or inventing a default.
+
+**Given** later replies contradict an equal-scope value, refine a narrower scope, arrive out of order, or are delivered more than once
+**When** the reducer validates owner, message order, expected session/content revisions, extraction identity, and scope rules
+**Then** ambiguity is retained for clarification, valid narrow overrides remain local, and exactly one legal compare-and-swap reduction commits
+**And** stale or duplicate work cannot overwrite newer, ready, claimed, completed, abandoned, superseded, or deleted state.
+
+**Given** one mixed session contains lodging, food, and activity instances
+**When** only some instances become ready or complete
+**Then** readiness and answer claims remain per instance, independently ready work excludes blocked siblings, and the parent stays active until every instance is completed or abandoned
+**And** `CLAR-02`, `CLAR-03`, `CLAR-09`, `CLAR-11`, `CLAR-14`, `CLAR-24`, `CLAR-25`, and `CLAR-26` pass in unit and serial integration coverage for FR-5, RTA-11, and RTA-12.
+
+### Story 21.3: Run Bounded Preflight Clarification Before Main Answers
+
+As a traveler,
+I want XuyenViet to ask follow-up questions until the relevant request is ready,
+So that a detailed answer reflects my trip instead of making a convenient but usually wrong assumption.
+
+**Acceptance Criteria:**
+
+**Given** a traveler asks `Lịch trình 7 ngày Hà Nội - Đà Nẵng` without direction, party, or vehicle
+**When** the profiled AI Ask command runs
+**Then** AI Orchestration uses at most one versioned bounded `clarification_plan` attempt and one `clarification_extract` attempt under the existing synchronous extraction model purpose
+**And** Retrieval validates the proposals while Chat/Trips alone persists state and deterministically decides readiness.
+
+**Given** a dependent deliverable remains blocked after extraction
+**When** the turn finalizes
+**Then** one transaction persists the reduced clarification state, concise Vietnamese follow-up, extraction Usage, and replayable AI Ask success
+**And** it creates no Retrieval run, web call, selection manifest, prompt-render manifest, answer provenance, or main-answer model usage.
+
+**Given** every hard-required field for an instance is resolved or an explicitly permitted bounded assumption is accepted
+**When** main synthesis begins
+**Then** the authoritative answer claim pins the exact ready instance IDs, session/content revisions, profiles, scope graph, Trip/proposal fences, and disclosed assumptions
+**And** finalization rejects a stale or changed claim before any obsolete answer becomes visible.
+
+**Given** the extraction model is missing, times out, returns invalid schema, or a retry races a persisted result
+**When** preflight handles the failure
+**Then** it preserves the user message/session, records failure Usage, returns safe retry guidance where possible, and never falls through to Retrieval, web, a streaming answer, or an unrecorded assumption
+**And** profiled turns suppress `ai_ask.context_extraction.v1`, while unprofiled turns retain only its non-authoritative enrichment behavior.
+
+**Given** the interaction is rendered on desktop or mobile
+**When** clarification repeats across natural-language replies
+**Then** resolved information remains visible through calm conversational acknowledgement, only unresolved material questions are asked, focus returns predictably to the composer, and pending/error states use practical Vietnamese
+**And** `CLAR-01` through `CLAR-06`, `CLAR-15` through `CLAR-20`, and `CLAR-27` cover FR-5 and RTA-11 without exposing internal profile, model, command, or state names.
+
+### Story 21.4: Preserve Applied Trip Authority Across Planning Modes
+
+As a traveler,
+I want XuyenViet to distinguish my current plan from ideas and pending changes,
+So that exploratory advice cannot be mistaken for something already saved in my Trip.
+
+**Acceptance Criteria:**
+
+**Given** an authenticated AI Ask has a validated URL scope and current-turn intent
+**When** planning mode is resolved
+**Then** it is exactly `current_plan`, `explore_change`, `validate_proposal`, or `unscoped_answer`
+**And** the execution pins the relevant Trip aggregate, item, proposal, clarification-claim, and intent versions or explicitly records their absence.
+
+**Given** the traveler asks about the current selected Trip
+**When** context is assembled
+**Then** only applied Trip state and the exact current snapshot are planning authority
+**And** hypothetical, pending, dismissed, expired, stale, foreign, or chat-only values are not represented as the current plan.
+
+**Given** the traveler explores a detour or reviews one pending proposal
+**When** the answer is generated
+**Then** the applied Trip remains the comparison baseline and proposed effects stay visibly hypothetical or pending
+**And** only the existing owner-confirmed proposal Apply command may change subsequent current-plan authority.
+
+**Given** mode ambiguity would materially change the answer or a pinned Trip/proposal changes during execution
+**When** the final fence runs
+**Then** safe invariant guidance plus one concise clarification is returned, or stale output is discarded/refreshed
+**And** `PM-01` through `PM-06`, SC-9, SC-12, and AC-28 pass without private Trip-context leakage.
+
+### Story 21.5: Preserve Canonical Trip Paths And Supported Route Coverage
+
+As a traveler,
+I want route advice to reflect the exact path I selected or the product's real supported coverage,
+So that text similarity or a popular route cannot masquerade as authority for my journey.
+
+**Acceptance Criteria:**
+
+**Given** existing transport legs contain free-text endpoints
+**When** the forward migration runs
+**Then** canonical origin, destination, selected path, and registry-snapshot references remain null together unless explicitly owner-confirmed
+**And** no migration, label parser, or model infers a durable route choice from historical text.
+
+**Given** an owner reviews a typed route-choice proposal
+**When** `applyApprovedTripChange(...)` applies `set-leg-path` or `clear-leg-path`
+**Then** it validates owner, Trip/item versions, endpoint/path membership, active registry identity, and ordering preconditions before writing all route references atomically
+**And** stale, retired, mismatched, unresolved, or unauthorized references apply nothing and return safe review guidance.
+
+**Given** Retrieval publishes a route-registry release and coverage projections
+**When** the bounded existing Worker operation validates and activates it
+**Then** `publishRouteRegistryRelease(...)` is the sole writer, the release and dependencies are replayable, and partial failure leaves the previous release active
+**And** deployment configuration cannot create a second registry authority.
+
+**Given** a requested leg is selected, fully supported, partially supported, ambiguous, unsupported, or stale
+**When** route resolution runs
+**Then** it returns the corresponding `authoritative_selected`, `authoritative_complete`, `known_partial`, `ambiguous_paths`, `no_path`, or `stale_selected_path` state with bounded traveler guidance
+**And** `RP-01` through `RP-09`, FR-16O..Q, FR-63..64, AC-29, and AC-30 pass without claiming live navigation or nationwide coverage.
+
+### Story 21.6: Retrieve And Pack Evidence By Required Planning Need
+
+As a traveler,
+I want answers to cover the important needs of my exact trip rather than merely include several related cards,
+So that missing route, safety, family, vehicle, stop, or constraint guidance remains visible and actionable.
+
+**Acceptance Criteria:**
+
+**Given** a ready planning execution enters Retrieval
+**When** the intent profile expands its needs
+**Then** it creates deterministic versioned requirement keys with exact facet, importance, scope/leg, constraint, and freshness identity before candidate generation
+**And** candidate generation, selection, rendering, provenance, and evaluation consume the same immutable key/contribution vocabulary.
+
+**Given** candidate evidence contains mixed facts, different legs, duplicate coverage, or an off-scope high-prestige source
+**When** eligibility and contribution decisions run
+**Then** each contribution binds one exact eligible fact, owner/capture revision, scope/freshness decision, requirement key, and permitted render variant
+**And** one fact, leg, source reputation, similarity score, or card-level shortcut cannot authorize another need or scope.
+
+**Given** token, candidate, or source-handle capacity cannot retain every contribution
+**When** the selector and final prompt packer run
+**Then** consequential route, safety, and traveler constraints take priority and stable pre-cap telemetry records eligible exclusions
+**And** every dropped required need becomes an explicit `missing`, `requires_verification`, or `requires_clarification` outcome before model generation.
+
+**Given** one exact contribution covers the only required need or three cards leave a required need uncovered
+**When** final coverage is recomputed from the prompt-render manifest
+**Then** the first request is sufficient without count-only web fallback and the second keeps the gap despite its card count
+**And** `RN-01` through `RN-07`, FR-61..62, SC-8, SC-10, and AC-31 pass, including literal-zero hard-off-route and unrelated-need satisfaction.
+
+### Story 21.7: Verify Fresh External Facts Through Replayable Web Scope
+
+As a traveler,
+I want changing external information to be checked for the exact place, route, and time it concerns,
+So that an old or unrelated warning is not presented as live route authority.
+
+**Acceptance Criteria:**
+
+**Given** a required need is missing, freshness-sensitive, conflicted, or explicitly requests current verification
+**When** web fallback is permitted
+**Then** Retrieval persists an immutable minimized query-plan manifest with exact requirement keys, allowed canonical scope terms, excluded private-context classes, policy versions, and request digest before Search is called
+**And** private Trip notes, child details, budget, or preferences are not sent unless the exact requirement permits that value.
+
+**Given** Search returns a result containing multiple facts or geographic references
+**When** fact extraction and scope resolution run
+**Then** immutable fact-level assertions pin capture payload, text digest, parser/segmentation, registry, and resolver versions, and one query-specific decision binds the exact assertion to one requirement/leg
+**And** mismatched, ambiguous, or unknown scope cannot satisfy coverage or become a factual premise.
+
+**Given** a recent warning describes an earlier closure or the provider fails
+**When** the traveler answer is rendered
+**Then** the warning retains source, applicable place/time, unverified status, and practical verification action without being described as live closure, traffic, navigation, or guaranteed safety
+**And** provider failure preserves the gap and returns bounded useful recovery rather than fail-open certainty.
+
+**Given** the same capture is replayed or a query/parser/resolver dependency changes
+**When** projection identity is evaluated
+**Then** unchanged dependencies reproduce the same decision while changed dependencies create a new immutable projection
+**And** `WS-01` through `WS-07`, FR-35, FR-65, SC-11, and AC-32 pass with complete query-to-fact-to-render provenance.
+
+### Story 21.8: Finalize And Delete Planning Evidence Atomically
+
+As a traveler,
+I want completed answers to remain internally consistent and deleted planning data to stop influencing the system,
+So that retries, failures, or deletion cannot leave partial or reconstructable state behind.
+
+**Acceptance Criteria:**
+
+**Given** a required-need execution is ready for a provider call
+**When** `prepareAiAnswerRun(...)` persists its prepared state
+**Then** the run, selection, bounded prompt inputs, planning/clarification identities, and idempotency fence are committed before provider work
+**And** retries cannot create competing authoritative executions.
+
+**Given** provider work succeeds or fails
+**When** `finalizeAiAnswer(...)` terminalizes the command
+**Then** one PostgreSQL transaction coordinates Chat/Trips message writes, Retrieval run sealing, Usage append, and AI Orchestration prompt/provenance writes through owner ports
+**And** failure records no completed message, while duplicate retry cannot create a second terminal outcome.
+
+**Given** an ordinary conversation, primary conversation, or Trip is deleted
+**When** Chat/Trips coordinates deletion
+**Then** every owning module invalidates reconstructable clarification sessions/graphs/claims, Trip snapshots, route choices, retrieval executions/runs, web decisions, manifests, derived context, embeddings, and production-evaluation membership in the same transaction
+**And** an unrelated Trip remains unchanged and no user-visible success occurs before all invalidations commit.
+
+**Given** retained audit or aggregate evaluation remains after deletion
+**When** it is inspected
+**Then** it contains only non-content identity, actor/operation class, timestamp, or approved aggregate metrics and cannot reconstruct the question, answer, Trip state, route, source text, or context
+**And** `DEL-01` through `DEL-04`, FR-15, PCR-09, and AC-33 pass in serial integration tests.
+
+### Story 21.9: Keep A Current Chat-To-Trip Opportunity Available
+
+As a traveler,
+I want a persistent `Chuyển thành chuyến đi` action when my chat contains useful planning context,
+So that I can continue refining the plan and convert it when I am ready.
+
+**Acceptance Criteria:**
+
+**Given** an unscoped profiled turn commits a useful answer with at least one supported explicit planning operation
+**When** the same terminalization path refreshes Trip conversion state
+**Then** Chat/Trips exposes one owner-bound stable opportunity and persistent `Chuyển thành chuyến đi` CTA from canonical clarification claims without consulting the suppressed background extractor or legacy flat `chat_context`
+**And** not clicking, navigation, unmount, timeout, or hiding the control records no dismissal or decline fence.
+
+**Given** completed later turns replace or add compatible scoped values, reopen a deliverable, create ambiguity, or remain unterminated
+**When** the server projects the opportunity
+**Then** the canonical conversion projection deterministically reduces all eligible non-superseded claims, refreshes the manifest, suspends recoverable ambiguity/insufficiency, or returns a server-owned visible-disabled pending state
+**And** another tab cannot accept an older or unterminated context revision.
+
+**Given** the traveler explicitly dismisses or later resolves suspended context
+**When** the upgraded existing decline/refresh owner ports run
+**Then** only explicit dismissal records the exact material-context fence and terminalizes that opportunity, while resolved context restores the same suspended ID with a new manifest
+**And** later eligible context after dismissal creates a new opportunity rather than reactivating the dismissed ID.
+
+**Given** the opportunity UI is rendered on desktop, mobile, or another active tab
+**When** eligibility, pending-turn, suspension, dismissal, or refreshed-manifest state changes
+**Then** it uses the server projection, remains keyboard/touch accessible, refetches after terminal AI Ask events, and never infers eligibility solely from local streaming state
+**And** `TC-01` through `TC-05`, `TC-11`, `TC-12`, `TC-14` through `TC-16`, `TC-19`, and `TC-20` pass for FR-16J..L, PJ-01, and RTA-13.
+
+### Story 21.10: Convert The Latest Eligible Context Into A Reviewable Trip
+
+As a traveler,
+I want my current eligible chat context converted into a reviewable Trip proposal,
+So that nothing is copied or applied until I explicitly approve the structured changes.
+
+**Acceptance Criteria:**
+
+**Given** the traveler clicks the eligible CTA
+**When** the upgraded existing `acceptTripCreationRecommendation(...)` command executes with `opportunityId` and idempotency key
+**Then** it revalidates the latest canonical projection, terminal AI Ask watermark, claims, scopes, policy/schema/serialization, typed payload digest, owner, conversation, and deletion fences
+**And** one transaction creates exactly one Trip, a separate primary conversation, and one initial pending Trip Change Proposal, returning destination plus `proposalId`.
+
+**Given** conversion succeeds
+**When** the created Trip and original chat are inspected before proposal Apply
+**Then** no transcript, assistant prose, prompt, provider payload, model reasoning, ambiguous value, unresolved field, or assumption-only operation was copied or linked, and no transferred value is applied Trip state
+**And** only the existing owner-confirmed Apply command may change constraints, anchors, legs, stays, meals, activities, or route choices.
+
+**Given** conversion retries, races deletion, or the traveler chooses an existing Trip
+**When** idempotency/deletion/continue behavior is evaluated
+**Then** refresh and transient failure do not burn the key, successful replay returns the same live destination/proposal, deleted destination returns `destination_deleted`, and concurrent accept/dismiss/refresh/delete permits one legal CAS transition
+**And** `continueInTrip(...)` changes only URL scope to the existing primary conversation and imports no chat context or proposal.
+
+**Given** the in-place migration is implemented
+**When** database, domain, wire contract, controller/OpenAPI, direct client, and composer changes are reviewed
+**Then** the existing recommendation aggregate and accept/decline endpoints evolve from `decisionId` to `opportunityId`, share the existing proposal operation parser/validator/serializer, refetch after terminal AI Ask events, and add no parallel endpoint, Worker, service, cache, dependency, model purpose, or environment flag
+**And** `TC-06` through `TC-10`, `TC-13`, `TC-17`, and `TC-18` pass for FR-16J..L, PJ-01, and RTA-13.
+
+### Story 21.11: Prove V6 Retrieval In Shadow And Cut Over Safely
+
+As a product owner,
+I want comparable evidence before required-need retrieval becomes authoritative,
+So that improved planning coverage does not weaken route, context, provenance, privacy, or operational safety.
+
+**Acceptance Criteria:**
+
+**Given** Feedback/Eval defines the v6.2 qualification profile
+**When** G0 validation runs
+**Then** the closed versioned profile contains numeric cohort thresholds, literal-zero safety limits, literal-one provenance correctness, minimum run/duration windows, and every required context/conversion/route/retrieval/web/deletion metric
+**And** missing, unknown, null, prose-only, weakened, malformed, or structurally incompatible profiles/policies cannot start an evidence window.
+
+**Given** fixture and dependency manifests are prepared
+**When** an evaluation run begins
+**Then** it pins the exact code, read policy, corpus, fixtures, registry/coverage, requirement/context/clarification/conversion/proposal/serialization, retrieval, parser/resolver, prompt/model, and evaluator versions
+**And** any changed comparable member restarts the evidence window rather than averaging incompatible results.
+
+**Given** Retrieval runs in `v6_shadow`
+**When** an authoritative legacy request is paired with the v6 candidate
+**Then** exactly one immutable execution contains one authoritative legacy run and at most one shadow run, and only the authoritative role may select/persist a traveler answer or write provider, prompt, provenance, or usage effects
+**And** shadow stores only bounded `would-render` evaluation data and performs no web/model call or traveler mutation.
+
+**Given** G0 and G1 prerequisites plus the complete G2 evidence window pass
+**When** the Product Owner approves the exact recorded report and `activateRetrievalReadPolicy(...)` performs a compare-and-swap cutover
+**Then** `v6_active` becomes authoritative with a qualified runnable rollback target and every production run pins the committed PostgreSQL policy
+**And** failed safety, quality, deletion, latency, call-rate, cost, or stale-projection gates block cutover without deployment configuration overriding the row.
+
+**Given** a critical regression occurs after cutover
+**When** authorized rollback runs
+**Then** the CAS uses the failing report/incident and a previously qualified runnable target without waiting for a new passing report
+**And** `GATE-01` through `GATE-05`, `COMP-03` through `COMP-05`, SC-8..12, AC-28..33, and PJ-01..06 remain reproducible.
+
+### Story 21.12: Retire The Legacy Card-Count Trigger Without Losing Rollback
+
+As a traveler,
+I want web verification to respond to missing or changing planning needs rather than an arbitrary number of cards,
+So that one exact answer is not over-searched and several irrelevant cards cannot hide an important gap.
+
+**Acceptance Criteria:**
+
+**Given** legacy or shadow behavior still contains the historical fewer-than-three rule
+**When** a broad query has one sufficient exact contribution or at least three irrelevant contributions
+**Then** count behavior affects only the legacy authoritative path or comparison telemetry, while `v6_active` uses uncovered/freshness-sensitive requirements, conflict, or explicit current verification
+**And** count alone neither triggers web work nor suppresses a required gap in the v6 path.
+
+**Given** Story 4.5 compatibility behavior is implemented or referenced
+**When** the target contract is applied
+**Then** its fewer-than-three trigger is explicitly subordinate compatibility behavior with RTA-10/AD-38 ownership
+**And** no active epic, runtime policy, test, config, schema default, or operator procedure treats it as permanent v6 product behavior.
+
+**Given** the exact shadow evidence window and broad-query/missing-need cohorts pass
+**When** Product approves behavioral retirement
+**Then** the cutover record names the retired policy and current rollback mode while required-need coverage becomes the sole v6 authority
+**And** `COMP-01`, `COMP-02`, and non-regression evidence remain attached to the recorded decision.
+
+**Given** physical target-count cleanup is requested
+**When** G3 evaluates rollback safety
+**Then** cleanup waits for the profile-owned rollback window, `COMP-06`, a passing cleanup report, Product approval, and a retained known-safe `v6_active` rollback target
+**And** removed legacy code/schema/config is no longer named executable, while failure preserves the still-runnable compatibility path.
+
+**Given** Epic 21 is complete
+**When** focused unit tests, serial PostgreSQL integration tests, immutable fixture/evaluation checks, `pnpm lint`, `pnpm typecheck`, and `pnpm build` run
+**Then** every RTA-1..RTA-13, PCR-01..PCR-10, FR-61..65, SC-8..12, AC-28..33, and PJ-01..06 mapping has executable evidence
+**And** any environmental blocker is recorded exactly rather than weakening or skipping a gate.
