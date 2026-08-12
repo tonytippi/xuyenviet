@@ -9,7 +9,7 @@ const adminNavItems = [
   { href: "/knowledge/intake", label: "Nạp nguồn", eyebrow: "Intake" },
   { href: "/knowledge/facebook-captures", label: "Capture Facebook", eyebrow: "Queue" },
   { href: "/knowledge/youtube-captures", label: "Capture YouTube", eyebrow: "Queue" },
-  { href: "/knowledge/youtube-discovery", label: "Việc cần xử lý Discovery", eyebrow: "Discovery" },
+  { href: "/knowledge/youtube-discovery", label: "Youtube Discovery", eyebrow: "Discovery" },
   { href: "/knowledge/cards", label: "Thẻ tri thức", eyebrow: "Lifecycle" },
   { href: "/knowledge/recommendations", label: "Yêu cầu vận hành", eyebrow: "Ops queue" },
   { href: "/knowledge/progress", label: "Seed 100 mục", eyebrow: "Progress" },

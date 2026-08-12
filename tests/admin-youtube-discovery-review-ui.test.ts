@@ -92,9 +92,18 @@ describe("admin YouTube Discovery review UI boundary", () => {
     expect(source).toContain('Ứng viên trong liên kết không còn khả dụng.');
   });
 
-  test("includes the Discovery review route in the admin shell navigation", async () => {
-    const source = await readFile("apps/admin/app/admin-access-gate.tsx", "utf8");
-    expect(source).toContain('{ href: "/knowledge/youtube-discovery", label: "Việc cần xử lý Discovery", eyebrow: "Discovery" }');
+  test("uses the main Discovery route for URL review and exposes Health", async () => {
+    const [nav, page, review] = await Promise.all([
+      readFile("apps/admin/app/admin-access-gate.tsx", "utf8"),
+      readFile("apps/admin/app/knowledge/youtube-discovery/page.tsx", "utf8"),
+      readFile("apps/admin/app/knowledge/youtube-discovery-review/review.tsx", "utf8"),
+    ]);
+    expect(nav).toContain('{ href: "/knowledge/youtube-discovery", label: "Youtube Discovery", eyebrow: "Discovery" }');
+    expect(nav).not.toContain('Việc cần xử lý Discovery');
+    expect(page).toContain('import { YoutubeDiscoveryReview } from "../youtube-discovery-review/review";');
+    expect(review).toContain('>Youtube Discovery</h1>');
+    expect(review).toContain('href="/knowledge/youtube-discovery/health">Health Discovery</Link>');
+    expect(review).toContain('returnUrl: `${window.location.origin}/knowledge/youtube-discovery`');
   });
 
   test("validates opaque Mission and Health action IDs before rendering them", async () => {

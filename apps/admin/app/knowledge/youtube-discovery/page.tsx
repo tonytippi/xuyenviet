@@ -1,3 +1,3 @@
-import { YoutubeDiscoveryActionRequired } from "./queue";
+import { YoutubeDiscoveryReview } from "../youtube-discovery-review/review";
 
-export default function YoutubeDiscoveryPage() { return <YoutubeDiscoveryActionRequired />; }
+export default function YoutubeDiscoveryPage() { return <YoutubeDiscoveryReview />; }
