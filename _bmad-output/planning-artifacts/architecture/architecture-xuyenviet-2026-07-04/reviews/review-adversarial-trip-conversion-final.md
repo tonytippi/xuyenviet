@@ -1,6 +1,6 @@
 # Adversarial Trip-Conversion Review — Final Closure
 
-Date: 2026-08-12  
+Date: 2026-08-12
 Scope: latest AD-40 Spine and retrieval/Trip-aware companions
 
 ## Verdict

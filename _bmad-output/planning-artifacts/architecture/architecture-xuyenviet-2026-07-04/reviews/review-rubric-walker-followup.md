@@ -30,8 +30,8 @@ Mechanical lint passes with zero findings using the required `uv run .../lint_sp
 
 ### FU-01 — Closed profile shape still allows PRD safety thresholds weaker than the required absolute outcomes
 
-**Origin:** RW-04 residual  
-**Severity:** High  
+**Origin:** RW-04 residual
+**Severity:** High
 **Disposition:** Autofix profile validation and gate prose
 
 **Evidence**
@@ -62,8 +62,8 @@ Use literal zero/one fields or validator rules with executable invalid-profile f
 
 ### FU-02 — AD-36 creates conflicting owners for messages, Retrieval-run sealing, and Usage finalization
 
-**Origin:** Regression introduced by the staged terminal-transaction repair  
-**Severity:** High  
+**Origin:** Regression introduced by the staged terminal-transaction repair
+**Severity:** High
 **Disposition:** Discuss once, then tighten the command/transaction boundary
 
 **Evidence**
@@ -91,8 +91,8 @@ Alternatively, explicitly amend AD-6 if aggregate ownership is intentionally cha
 
 ### FU-03 — `v6_shadow` has no canonical execution shape linking the authoritative legacy result to shadow evidence
 
-**Origin:** Newly exposed by the read-policy/run-contract repair  
-**Severity:** High  
+**Origin:** Newly exposed by the read-policy/run-contract repair
+**Severity:** High
 **Disposition:** Add one paired-execution invariant and fixtures
 
 **Evidence**
@@ -124,8 +124,8 @@ Add fixtures for paired identity, retry/idempotency, deletion, and proof that a 
 
 ### FU-04 — Compatibility cleanup lifecycle is safer but not fully executable
 
-**Origin:** RW-05 residual  
-**Severity:** Medium  
+**Origin:** RW-05 residual
+**Severity:** Medium
 **Disposition:** Tighten G3 before its cleanup story is created
 
 The documents now require a bounded legacy rollback window, cleanup report, and a retained runnable `v6_active` rollback policy (`ARCHITECTURE-SPINE.md:697-701`; `evaluation-and-release-gates.md:134-146`). This closes the unsafe target problem, but:

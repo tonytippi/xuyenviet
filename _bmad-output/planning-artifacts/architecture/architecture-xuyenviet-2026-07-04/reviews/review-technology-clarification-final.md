@@ -1,8 +1,8 @@
 # AD-39 Technology And Brownfield Reality Review
 
-**Reviewed:** 2026-08-12  
-**Target:** AD-39 and its scoped-context clarification projection across the Spine, solution design, contracts, fixtures, and release gates  
-**Lens:** Feasibility in the existing modular-monolith/PostgreSQL/direct-API AI Ask flow; unnecessary runtime/config expansion; persistence, idempotency, and model-call alignment with current code  
+**Reviewed:** 2026-08-12
+**Target:** AD-39 and its scoped-context clarification projection across the Spine, solution design, contracts, fixtures, and release gates
+**Lens:** Feasibility in the existing modular-monolith/PostgreSQL/direct-API AI Ask flow; unnecessary runtime/config expansion; persistence, idempotency, and model-call alignment with current code
 **Verdict:** **CHANGES REQUIRED.** AD-39 is feasible inside the existing NestJS API, PostgreSQL data plane, AI Gateway adapter/model catalog, and shared contracts. It does not require a new service, queue, continuous Worker loop, or environment flag. However, two load-bearing integration semantics are still undefined against the current AI Ask command path: the existing asynchronous context-extraction outbox overlaps the new synchronous preflight, and a clarification-only turn has no authoritative terminal persistence/finalization contract. Two additional fencing/failure details should be tightened before readiness.
 
 The deterministic Spine lint passes with zero findings. Findings below are semantic brownfield-integration issues.

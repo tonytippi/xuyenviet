@@ -33,8 +33,8 @@ The rubric applied the BMad good-spine checklist: real divergence points, Rule e
 
 ### RW-01 — The cross-stage requirement contribution is referenced but has no shared contract
 
-**Severity:** High  
-**Disposition:** Discuss, then tighten AD-34 and the contracts companion before readiness  
+**Severity:** High
+**Disposition:** Discuss, then tighten AD-34 and the contracts companion before readiness
 **Rubric:** divergence points; enforceability; v6.2 coverage
 
 **Evidence**
@@ -62,8 +62,8 @@ The contract should state which module creates it, which stages may only consume
 
 ### RW-02 — Web search is not replayable from query planning through fact-scope resolution
 
-**Severity:** High  
-**Disposition:** Tighten AD-9/AD-36 and add a typed query-plan/request contract  
+**Severity:** High
+**Disposition:** Tighten AD-9/AD-36 and add a typed query-plan/request contract
 **Rubric:** divergence points; enforceability; v6.2 PCR-07 coverage
 
 **Evidence**
@@ -83,8 +83,8 @@ Add one immutable web query-plan/request manifest that binds each minimized quer
 
 ### RW-03 — Route-registry publication and projection activation have ownership but no enforceable mutation boundary
 
-**Severity:** High  
-**Disposition:** Add a route-registry lifecycle/activation invariant and operational command boundary  
+**Severity:** High
+**Disposition:** Add a route-registry lifecycle/activation invariant and operational command boundary
 **Rubric:** divergence points; brownfield ratification; operational envelope
 
 **Evidence**
@@ -114,8 +114,8 @@ This can remain inside the modular monolith and existing Worker; no new service 
 
 ### RW-04 — The typed gate profile cannot encode all safety criteria that AD-37 declares mandatory
 
-**Severity:** High  
-**Disposition:** Autofix the contract shape, then re-run fixture/gate reconciliation  
+**Severity:** High
+**Disposition:** Autofix the contract shape, then re-run fixture/gate reconciliation
 **Rubric:** enforceability; v6.2 coverage; release-gate ownership
 
 **Evidence**
@@ -136,8 +136,8 @@ Make every mandatory critical criterion a required typed threshold with its metr
 
 ### RW-05 — Physical compatibility retirement and post-retirement rollback are not reconciled
 
-**Severity:** Medium  
-**Disposition:** Discuss and make the lifecycle explicit in AD-38/G3  
+**Severity:** Medium
+**Disposition:** Discuss and make the lifecycle explicit in AD-38/G3
 **Rubric:** operational envelope; deferred holes
 
 **Evidence**
@@ -155,8 +155,8 @@ Separate behavioral cutover from physical cleanup. Define the allowed rollback t
 
 ### RW-06 — PJ-01 is traced to an unnamed external fixture rather than one stable executable fixture
 
-**Severity:** Medium  
-**Disposition:** Add/cite stable fixture IDs before readiness  
+**Severity:** Medium
+**Disposition:** Add/cite stable fixture IDs before readiness
 **Rubric:** v6.2 coverage
 
 **Evidence**

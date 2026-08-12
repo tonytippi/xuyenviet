@@ -1,6 +1,6 @@
 # Adversarial Seam Review — AD-40 Persistent Chat-To-Trip Conversion
 
-Date: 2026-08-12  
+Date: 2026-08-12
 Scope: current Spine, retrieval/Trip-aware companions, `TC-*` fixtures, evaluation gates, and RTA-13
 
 ## Verdict

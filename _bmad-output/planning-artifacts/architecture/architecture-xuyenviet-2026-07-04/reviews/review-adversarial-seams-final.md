@@ -1,6 +1,6 @@
 # Adversarial Architecture Seam Review — Final Closure
 
-Date: 2026-08-11  
+Date: 2026-08-11
 Scope: current `ARCHITECTURE-SPINE.md`, `retrieval-trip-aware/contracts.md`, `retrieval-trip-aware/evaluation-and-release-gates.md`, and `retrieval-trip-aware/fixtures.md`
 
 ## Result

@@ -64,6 +64,7 @@ Every executable fixture pins:
 | `PM-04` | Traveler asks privately while an owned Trip exists but is not selected | `unscoped_answer`; no Trip constraint, path, proposal, or private project metadata enters retrieval or persistence |
 | `PM-05` | Proposal is applied while an answer runs | Old execution is fenced/discarded or safely refreshed; it cannot persist as current-plan output |
 | `PM-06` | Pending proposal is dismissed or expires | Later current-plan retrieval uses unchanged applied Trip state |
+| `PM-07` | Traveler requests a Trip correction, the owner applies the exact typed proposal, then asks the next current-plan question | The next answer pins the resulting applied Trip version and current snapshot; earlier request or proposal text supplies no current-plan authority beyond values present in that applied state |
 
 ## Canonical Trip Path And Route Resolution
 
@@ -78,6 +79,7 @@ Every executable fixture pins:
 | `RP-07` | Applied Trip path points to a retired or incompatible registry snapshot | `stale_selected_path`; stored meaning remains reviewable but grants no hard authority; only an owner-confirmed proposal refreshes it |
 | `RP-08` | Card has an applicable place fact and off-path route fact | Place assertion cannot authorize the route fact; route contribution excluded |
 | `RP-09` | Multi-leg card is applicable to leg 1 and off-route for leg 2 | Decisions persist per requirement/leg; leg 1 cannot satisfy leg 2 |
+| `RP-10` | Owner applies `set-leg-path`, reopens the Trip, then applies `clear-leg-path` and reopens it again | Each owner-confirmed command atomically advances the leg/Trip version; reopen preserves the exact selected-path meaning after set and the explicit no-selection state after clear, without inferring a replacement from labels or stale registry data |
 
 ## Required-Need Coverage And Capacity
 

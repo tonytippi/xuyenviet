@@ -1,8 +1,8 @@
 # Technology And Brownfield Reality Follow-up
 
-**Reviewed:** 2026-08-11  
-**Target:** Updated `ARCHITECTURE-SPINE.md` and progressive v6.2 companions  
-**Prior review:** `review-technology-reality.md`  
+**Reviewed:** 2026-08-11
+**Target:** Updated `ARCHITECTURE-SPINE.md` and progressive v6.2 companions
+**Prior review:** `review-technology-reality.md`
 **Verdict:** **PASS for the technology/reality lens.** R-TECH-01 through R-TECH-04 are now resolved or explicitly bounded by enforceable pre-activation gates. There are no remaining critical or high findings from this lens.
 
 The deterministic Spine lint also passes with zero findings.
@@ -66,7 +66,7 @@ Because this is a small known code cleanup with an explicit blocking gate, it is
 
 ## Remaining Findings
 
-**Critical:** none.  
+**Critical:** none.
 **High:** none.
 
 The stale migration diagnostic is tracked implementation work, not an unresolved architecture decision. Its G0 condition must remain in force until the code is corrected.

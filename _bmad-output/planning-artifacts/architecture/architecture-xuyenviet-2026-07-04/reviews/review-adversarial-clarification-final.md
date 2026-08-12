@@ -1,7 +1,7 @@
 # Adversarial Seam Review — AD-39 Clarification And Scoped Context
 
-Date: 2026-08-12  
-Scope: current Spine, retrieval/Trip-aware solution design, contracts, fixtures, and release gates  
+Date: 2026-08-12
+Scope: current Spine, retrieval/Trip-aware solution design, contracts, fixtures, and release gates
 Lens: construct independently built AI Orchestration, Retrieval, and Chat/Trips units that obey the written contracts yet can still disagree on shared state, reducer results, scope authority, answer admission, or deletion.
 
 ## Verdict

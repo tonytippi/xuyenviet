@@ -1,7 +1,7 @@
 # Adversarial Architecture Seam Review — Follow-up
 
-Date: 2026-08-11  
-Target: updated `ARCHITECTURE-SPINE.md` and retrieval/Trip-aware companions  
+Date: 2026-08-11
+Target: updated `ARCHITECTURE-SPINE.md` and retrieval/Trip-aware companions
 Prior review: `review-adversarial-seams.md`
 
 ## Verdict

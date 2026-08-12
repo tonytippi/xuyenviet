@@ -24,7 +24,7 @@ Mechanical Spine lint passes with zero findings. This review is limited to the c
 
 ### CL-RW-01 — Clarification-session ownership contradicts AD-6's existing chat-context ownership
 
-**Severity:** High  
+**Severity:** High
 **Rubric:** ownership; brownfield consistency; enforceability
 
 **Evidence**
@@ -49,7 +49,7 @@ In both cases, Chat/Trips must remain owner of messages and durable Trip state, 
 
 ### CL-RW-02 — The contract cannot represent the per-deliverable readiness behavior that AD-39 and CLAR-08 require
 
-**Severity:** High  
+**Severity:** High
 **Rubric:** completeness/readiness ownership; per-deliverable scoping; compatibility
 
 **Evidence**
@@ -77,7 +77,7 @@ Alternatively define one session per deliverable instance plus an immutable pare
 
 ### CL-RW-03 — Scoped override semantics are prose-only because scopes have no canonical hierarchy or ancestry contract
 
-**Severity:** High  
+**Severity:** High
 **Rubric:** per-deliverable scoping; divergence points; enforceability
 
 **Evidence**
@@ -96,7 +96,7 @@ Define one versioned scope graph/projection and pure comparator owned by Retriev
 
 ### CL-RW-04 — Bounded-assumption mode is required by the Spine but cannot be persisted, replayed, or rendered from the contract
 
-**Severity:** High  
+**Severity:** High
 **Rubric:** persistence/replay; traveler-visible safety; compatibility
 
 **Evidence**
@@ -116,7 +116,7 @@ Add immutable validated assumption records containing requirement instance, scop
 
 ### CL-RW-05 — Clarification release gates name metrics that the closed gate profile cannot encode
 
-**Severity:** High  
+**Severity:** High
 **Rubric:** completeness/readiness ownership; evaluation/release enforceability
 
 **Evidence**
@@ -138,7 +138,7 @@ Extend the closed gate profile and validator with versioned clarification metric
 
 ### CL-RW-06 — Session CAS, evidence-span replay, and terminal lifecycle are not fully enforceable
 
-**Severity:** Medium  
+**Severity:** Medium
 **Rubric:** persistence/replay/deletion; concurrency
 
 AD-39 requires one version-fenced session and exact source-message evidence, but the contract does not yet define:

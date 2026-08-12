@@ -1,7 +1,7 @@
 # AD-39 Technology And Brownfield Reality Closure Review
 
-**Reviewed:** 2026-08-12  
-**Prior findings:** CLAR-TECH-01 through CLAR-TECH-04 in `review-technology-clarification-final.md`  
+**Reviewed:** 2026-08-12
+**Prior findings:** CLAR-TECH-01 through CLAR-TECH-04 in `review-technology-clarification-final.md`
 **Verdict:** **PASS.** All prior technology/brownfield findings are resolved in the Spine and progressive companions. The clarified design fits the existing modular-monolith, PostgreSQL, direct NestJS API, AI Gateway adapter/model catalog, AI Ask command, and NDJSON replay boundaries. It adds no new service, queue, continuous Worker loop, cache, model-catalog purpose, environment flag, or external state store.
 
 The deterministic Spine lint passes with zero findings.

@@ -1,6 +1,6 @@
 # AD-40 Technology And Brownfield Reality Review
 
-**Reviewed:** 2026-08-12  
+**Reviewed:** 2026-08-12
 **Verdict:** **CHANGES REQUIRED.** AD-40 is deployable within the current modular monolith, NestJS API, PostgreSQL data plane, direct traveler API, and web composer. Reusing the recommendation owner ports, current advisory-lock/idempotency pattern, primary-conversation helper, and pending Trip Change Proposal boundary is the minimal fit; no service, queue, Worker loop, cache, model purpose, or environment flag is justified. The latest clarification closes stale-manifest, assumption-only, projection-policy, lifecycle/CAS, payload-integrity, and cross-client pending-turn seams. Two brownfield integration/migration ownership gaps remain before implementation readiness.
 
 The deterministic Spine lint passes with zero findings.

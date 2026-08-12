@@ -1,8 +1,8 @@
 # Technology And Brownfield Reality Review
 
-**Reviewed:** 2026-08-11  
-**Target:** `ARCHITECTURE-SPINE.md` plus the progressive v6.2 companions  
-**Lens:** Verify that committed architecture is grounded in current official technology behavior or repository reality, and that target-state design is not presented as already implemented.  
+**Reviewed:** 2026-08-11
+**Target:** `ARCHITECTURE-SPINE.md` plus the progressive v6.2 companions
+**Lens:** Verify that committed architecture is grounded in current official technology behavior or repository reality, and that target-state design is not presented as already implemented.
 **Verdict:** **CHANGES REQUIRED before the cross-artifact readiness gate.** The v6.2 ownership model and progressive-disclosure split are strong, and the solution design honestly records the main brownfield delta. However, two load-bearing parts of the Spine still do not ratify the repository/deployment reality, and the committed PostgreSQL FTS baseline is not yet validated for Vietnamese or the actual hosted PostgreSQL target.
 
 The deterministic Spine lint passed with zero findings. The findings below are semantic/reality issues rather than formatting defects.

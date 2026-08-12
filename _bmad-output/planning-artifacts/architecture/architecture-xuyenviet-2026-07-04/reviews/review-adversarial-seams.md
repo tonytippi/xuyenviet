@@ -1,7 +1,7 @@
 # Adversarial Architecture Seam Review
 
-Date: 2026-08-11  
-Target: `ARCHITECTURE-SPINE.md`  
+Date: 2026-08-11
+Target: `ARCHITECTURE-SPINE.md`
 Lens: Construct independently built units one level below the Spine that each obey every applicable AD literally, then test whether the units can still disagree on shared data, mutation authority, state transitions, deletion, or release behavior.
 
 ## Verdict

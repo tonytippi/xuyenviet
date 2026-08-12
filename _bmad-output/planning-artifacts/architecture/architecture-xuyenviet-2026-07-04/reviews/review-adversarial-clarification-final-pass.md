@@ -1,6 +1,6 @@
 # Adversarial Clarification Seam Review — Final Pass
 
-Date: 2026-08-12  
+Date: 2026-08-12
 Scope: current AD-39, solution design, contracts, fixtures, and evaluation gates
 
 ## Verdict

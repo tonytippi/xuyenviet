@@ -35,7 +35,7 @@ Mechanical Spine lint passes with zero findings.
 
 ### CL-CLOSE-01 — `clarification_plan` is called bounded, but its enforceable bounds are not owned or pinned
 
-**Severity:** Medium  
+**Severity:** Medium
 **Rubric:** enforceability; completeness; operational cost
 
 **Evidence**
@@ -55,7 +55,7 @@ Assign structural bounds to one versioned instance-discovery/clarification-plan 
 
 ### CL-CLOSE-02 — Companion wording still appears to transfer Usage ownership to AI Orchestration
 
-**Severity:** Medium  
+**Severity:** Medium
 **Rubric:** ownership consistency; progressive-disclosure correctness
 
 **Evidence**

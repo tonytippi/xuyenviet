@@ -1,6 +1,6 @@
 # Adversarial Clarification Seam Review — Closure
 
-Date: 2026-08-12  
+Date: 2026-08-12
 Scope: repaired AD-39 plus current solution design, contracts, fixtures, and gates
 
 ## Verdict

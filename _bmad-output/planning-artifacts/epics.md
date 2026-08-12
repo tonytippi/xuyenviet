@@ -561,17 +561,45 @@ UX-DR25: Follow-on chat-first UX epic - Plain-language traveler presentation wit
 
 ### Retrieval And Trip-Aware v6.2 Coverage Map (2026-08-12)
 
-PCR-01..PCR-10: Epic 21 - Complete v6.2 product-change package and release ownership.
 FR-5: Epic 21 - Multi-turn clarification asks only unresolved material context.
 FR-15: Epic 21 - Conversation/Trip deletion invalidates reconstructable v6.2 derived state.
 FR-16J..FR-16L: Epic 21 - Persistent latest-context chat-to-Trip conversion and explicit existing-Trip selection.
 FR-16M..FR-16Q: Epic 21 - Planning-mode authority, canonical paths, proposal-only mutation, and stale-path recovery.
 FR-30, FR-31, FR-35: Epic 21 - Mode-aware context priority, required-need web triggering, and replayable external verification.
 FR-61..FR-65: Epic 21 - Required-need coverage, capacity handling, supported-route projection, and warning freshness.
-SC-8..SC-12: Epic 21 - Critical zero-tolerance safety cohorts.
-AC-28..AC-33: Epic 21 - Canonical planning-mode, route, capacity, freshness, and deletion acceptance coverage.
-PJ-01..PJ-06: Epic 21 - All six production journeys and their canonical fixture chains.
 RTA-1..RTA-13: Epic 21 - Architecture contracts, clarification gate, persistent conversion, evaluation, cutover, and retirement.
+
+The following per-item projection is authoritative for implementation ownership. Fixture IDs come from `retrieval-trip-aware/fixtures.md`; cohort and gate names come from `retrieval-trip-aware/evaluation-and-release-gates.md`.
+
+| Item | Responsible Story 21 ownership | Canonical fixture proof | Evaluation cohort / gate proof |
+|---|---|---|---|
+| PCR-01 | Stories 21.6 and 21.12 | `RN-01`, `RN-02`, `COMP-01`, `COMP-02` | Standard statistical: required-need coverage and broad-query compatibility cohorts; G2 and G3 |
+| PCR-02 | Stories 21.7 and 21.11 | `WS-01` through `WS-07` | Critical-authoritative: recent-warning/provider-failure safety and standard statistical recovery cohorts; G2 |
+| PCR-03 | Story 21.5 | `RP-03`, `RP-04`, `RP-05` | Critical-authoritative: route-boundary cohort; G2 |
+| PCR-04 | Story 21.6 | `RN-03`, `RN-04` | Critical-authoritative: must-include cap and standard statistical required-need coverage cohorts; G2 |
+| PCR-05 | Story 21.5 | `RP-01`, `RP-06`, `RP-07`, `RP-10` | Critical-authoritative: canonical-path mutation, reopen persistence, and stale-reference cohort; G0 and G2 |
+| PCR-06 | Story 21.5 | `RP-02` through `RP-05` | Critical-authoritative: supported-route-boundary cohort; G2 |
+| PCR-07 | Story 21.7 | `WS-01`, `WS-02`, `WS-03`, `WS-06`, `WS-07` | Critical-authoritative: web-scope-premise cohort; G2 |
+| PCR-08 | Story 21.4 | `PM-01` through `PM-07` | Critical-authoritative: planning-mode, post-Apply authority, and private-context cohort; G2 |
+| PCR-09 | Story 21.8 | `DEL-01` through `DEL-04`, `CLAR-10`, `CLAR-27` | Critical-authoritative: deletion and derived-context invalidation cohort; G2 |
+| PCR-10 | Stories 21.11 and 21.12 | `GATE-01` through `GATE-05`, `COMP-01` through `COMP-06` | Critical-authoritative and standard statistical: closed gate profile, exact evidence window, count boundaries, cutover, rollback, and cleanup; G0 through G3 |
+| PJ-01 | Stories 21.9 and 21.10, then Story 21.4 after owner Apply | `TC-01` through `TC-10`, then `PM-01` | Critical-authoritative conversion safety and standard statistical conversion cohorts; G2 |
+| PJ-02 | Stories 21.4, 21.5, and 21.6 | `PM-01`, `RP-01`, `RN-05` | Critical-authoritative: current-plan, canonical-path, and final-revocation cohort; G2 |
+| PJ-03 | Stories 21.4 and 21.5 | `PM-02`, `RP-04`, `PM-05` | Critical-authoritative: hypothetical/pending-as-committed cohort; G2 |
+| PJ-04 | Story 21.5 | `RP-03`, `RP-04`, `RP-05` | Critical-authoritative: partial/ambiguous/unsupported-route cohort; G2 |
+| PJ-05 | Story 21.6 | `RN-01`, `RN-03`, `RN-04` | Critical-authoritative: silent-gap and must-include-cap cohort; G2 |
+| PJ-06 | Story 21.7 | `WS-04`, `WS-05` | Critical-authoritative: provider-failure and recent-warning cohort; G2 |
+| SC-8 | Stories 21.6 and 21.11 | `RP-08`, `RP-09`, `RN-06`, `RN-07`, `GATE-01` | Critical-authoritative: literal-zero hard-off-route and unrelated-need metrics; G0 and G2 |
+| SC-9 | Stories 21.4 and 21.11 | `PM-01` through `PM-07`, `GATE-01` | Critical-authoritative: hypothetical/pending and private-Trip leakage metrics; G0 and G2 |
+| SC-10 | Stories 21.3, 21.6, and 21.11 | `CLAR-05`, `CLAR-16`, `RN-01`, `RN-03`, `RN-04`, `GATE-01` | Critical-authoritative: silent-gap and unrelated-need metrics; G0 and G2 |
+| SC-11 | Stories 21.7 and 21.11 | `WS-04`, `WS-05`, `GATE-01` | Critical-authoritative: provider-failure unsafe-recovery and recent-warning metrics; G0 and G2 |
+| SC-12 | Stories 21.4, 21.10, and 21.11 | `PM-02`, `PM-03`, `PM-05`, `PM-06`, `PM-07`, `TC-06`, `GATE-01` | Critical-authoritative: hypothetical/pending, post-Apply authority, and pre-Apply mutation metrics; G0 and G2 |
+| AC-28 | Stories 21.3 and 21.4 | `CLAR-12`, `CLAR-15`, `PM-01` through `PM-07` | Critical-authoritative: planning-mode and private-context cohort; G2 |
+| AC-29 | Story 21.5 | `RP-01`, `RP-06`, `RP-07`, `RP-10` | Critical-authoritative: canonical-path mutation, reopen persistence, and stale-reference cohort; G2 |
+| AC-30 | Story 21.5 | `RP-03`, `RP-04`, `RP-05` | Critical-authoritative: partial/ambiguous/unsupported-route cohort; G2 |
+| AC-31 | Story 21.6 | `RN-01` through `RN-04` | Critical-authoritative silent-gap/must-include-cap and standard statistical required-need coverage cohorts; G2 |
+| AC-32 | Story 21.7 | `WS-04`, `WS-05` | Critical-authoritative: recent-warning and provider-failure cohort; G2 |
+| AC-33 | Story 21.8 | `DEL-01` through `DEL-04`, `CLAR-10`, `CLAR-27` | Critical-authoritative: deletion and non-reconstructable-audit cohort; G2 |
 
 ### Knowledge Lifecycle Normalization Coverage Map (2026-08-04)
 
@@ -1088,12 +1116,23 @@ As a traveler,
 I want current external information when active knowledge is insufficient or risky,
 So that changing road-trip details are handled honestly.
 
+**Contract status:** This story is the historical compatibility baseline. AD-38 and Stories 21.6, 21.7, and 21.12 own the target v6 contract; the acceptance criteria below are explicitly read-mode scoped and do not authorize permanent count-based fallback.
+
 **Acceptance Criteria:**
 
-**Given** active knowledge is absent, fewer than three relevant items for a broad question, freshness-sensitive, uncertain, or conflicted
+**Given** the pinned read policy is `legacy`, or the request is the authoritative legacy role paired with `v6_shadow`
+**When** active knowledge is absent, fewer than three relevant items are found for a broad question, or the legacy decision is freshness-sensitive, uncertain, or conflicted
+**Then** the existing provider-adapted web fallback may be triggered with official/provider preference on that legacy authoritative path
+**And** card count, generic absence, and undifferentiated uncertainty remain compatibility inputs only; the v6 shadow performs no provider call, traveler mutation, prompt/provenance write, or response selection.
+
+**Given** the pinned read policy is `v6_active`
 **When** the retrieval decision is made
-**Then** the existing provider-adapted web fallback is triggered with official/provider preference
-**And** external results retain provenance and practical guidance about what the traveler should verify, without exposing an internal confidence label by default.
+**Then** web fallback is permitted only for an uncovered or freshness-sensitive required need, conflict, or explicit current-verification request, with official/provider preference
+**And** card count, generic active-knowledge absence, or undifferentiated uncertainty alone neither triggers web work nor suppresses a gap; the system must first resolve an exact required-need outcome, bounded clarification, or traveler-visible limitation.
+
+**Given** a read-mode-authorized web fallback returns external results
+**When** the answer is rendered
+**Then** the external results retain provenance and practical guidance about what the traveler should verify without exposing an internal confidence label by default.
 
 **Given** web search succeeds after a state-aware knowledge decision
 **When** the assistant response and provenance are persisted
@@ -3134,7 +3173,7 @@ So that exploratory advice cannot be mistaken for something already saved in my 
 **Given** mode ambiguity would materially change the answer or a pinned Trip/proposal changes during execution
 **When** the final fence runs
 **Then** safe invariant guidance plus one concise clarification is returned, or stale output is discarded/refreshed
-**And** `PM-01` through `PM-06`, SC-9, SC-12, and AC-28 pass without private Trip-context leakage.
+**And** `PM-01` through `PM-07`, SC-9, SC-12, and AC-28 pass without private Trip-context leakage.
 
 ### Story 21.5: Preserve Canonical Trip Paths And Supported Route Coverage
 
@@ -3162,7 +3201,7 @@ So that text similarity or a popular route cannot masquerade as authority for my
 **Given** a requested leg is selected, fully supported, partially supported, ambiguous, unsupported, or stale
 **When** route resolution runs
 **Then** it returns the corresponding `authoritative_selected`, `authoritative_complete`, `known_partial`, `ambiguous_paths`, `no_path`, or `stale_selected_path` state with bounded traveler guidance
-**And** `RP-01` through `RP-09`, FR-16O..Q, FR-63..64, AC-29, and AC-30 pass without claiming live navigation or nationwide coverage.
+**And** `RP-01` through `RP-10`, FR-16O..Q, FR-63..64, AC-29, and AC-30 pass without claiming live navigation or nationwide coverage.
 
 ### Story 21.6: Retrieve And Pack Evidence By Required Planning Need
 
