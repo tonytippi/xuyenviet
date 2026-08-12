@@ -15,7 +15,7 @@ const validCadence = (value: unknown) => Number.isSafeInteger(value) && (value a
 const handoffTimeoutMs = 5_000;
 type AdminYoutubeDiscoveryDatabase = Pick<ReturnType<typeof getDb>, "execute" | "insert" | "select" | "transaction" | "update" | "delete">;
 
-export function createPostgresAdminYoutubeDiscoveryPort(captureEligibility: YoutubeCaptureEligibilityPort = { async check() { return "unavailable"; } }, db: AdminYoutubeDiscoveryDatabase = getDb(), handoff: AdminYoutubeDiscoveryDependencies["knowledgeHandoff"] = { async submit() { return "reconciling"; }, async lookup() { return "reconciling"; } }, actionOwners: NonNullable<AdminYoutubeDiscoveryDependencies["actionOwners"]> = { async admitsActionCursor() { return false; }, async listMissionNeeds() { return []; }, async listKnowledgeRecommendations() { return []; } }, missionOwners: NonNullable<AdminYoutubeDiscoveryDependencies["missionOwners"]> = { async listMissionCoverage() { return { items: [], nextCursor: null }; }, async getMissionDetail() { return null; } }): AdminYoutubeDiscoveryPort {
+export function createPostgresAdminYoutubeDiscoveryPort(captureEligibility: YoutubeCaptureEligibilityPort = { async check() { return "unavailable"; } }, db: AdminYoutubeDiscoveryDatabase = getDb(), handoff: AdminYoutubeDiscoveryDependencies["knowledgeHandoff"] = { async submit() { return "reconciling"; }, async lookup() { return "reconciling"; } }, actionOwners: NonNullable<AdminYoutubeDiscoveryDependencies["actionOwners"]> = { async listKnowledgeRecommendations() { return { items: [], admitsCursor: false }; } }, missionActionFrontier: NonNullable<AdminYoutubeDiscoveryDependencies["missionActionFrontier"]> = { async listMissionNeeds() { return { items: [], admitsCursor: false }; } }, missionOwners: NonNullable<AdminYoutubeDiscoveryDependencies["missionOwners"]> = { async listMissionCoverage() { return { items: [], nextCursor: null }; }, async getMissionDetail() { return null; } }): AdminYoutubeDiscoveryPort {
   return {
     async list() {
       const rows = await db.select({ id: youtubeDiscoveryQueryProposals.id, origin: youtubeDiscoveryQueryProposals.origin, queryText: youtubeDiscoveryQueryProposals.queryText, reason: youtubeDiscoveryQueryProposals.reason, priority: youtubeDiscoveryQueryProposals.priority, enabled: youtubeDiscoveryQueryProposals.enabled, cadenceMinutes: youtubeDiscoveryQueryProposals.cadenceMinutes, nextDueAt: youtubeDiscoveryQueryProposals.nextDueAt, policyEnabled: youtubeDiscoveryPolicyVersions.enabled }).from(youtubeDiscoveryQueryProposals).leftJoin(youtubeDiscoveryPolicyVersions, eq(youtubeDiscoveryPolicyVersions.isCurrent, true)).orderBy(asc(youtubeDiscoveryQueryProposals.createdAt)).limit(200);
@@ -42,37 +42,17 @@ export function createPostgresAdminYoutubeDiscoveryPort(captureEligibility: Yout
     },
     async listActionRequired(principal, cursor) {
       if (cursor && !validActionCursor(cursor)) throw new YoutubeDiscoveryActionRequiredCursorValidationError("Invalid YouTube Discovery action-required cursor.");
-      const [policyRows, candidates, incidents] = await Promise.all([
+      const [policyRows] = await Promise.all([
         db.select({ enabled: youtubeDiscoveryPolicyVersions.enabled, highPriorityMaximum: youtubeDiscoveryPolicyVersions.actionQueueHighPriorityMaximum, missionStallHours: youtubeDiscoveryPolicyVersions.actionQueueMaximumMissionStallHours }).from(youtubeDiscoveryPolicyVersions).where(eq(youtubeDiscoveryPolicyVersions.isCurrent, true)).limit(1),
-        db.select({ recommendationId: youtubeDiscoveryRecommendations.id, priority: youtubeDiscoveryQueryProposals.priority, createdAt: youtubeDiscoveryRecommendations.createdAt, highPriorityMaximum: youtubeDiscoveryPolicyVersions.actionQueueHighPriorityMaximum, reviewAgeHours: youtubeDiscoveryPolicyVersions.actionQueueMaximumOperatorReviewAgeHours }).from(youtubeDiscoveryCandidateReviewStates).innerJoin(youtubeDiscoveryRecommendations, and(eq(youtubeDiscoveryRecommendations.id, youtubeDiscoveryCandidateReviewStates.recommendationId), eq(youtubeDiscoveryRecommendations.candidateId, youtubeDiscoveryCandidateReviewStates.candidateId))).innerJoin(youtubeDiscoveryRuns, and(eq(youtubeDiscoveryRuns.id, youtubeDiscoveryRecommendations.runId), eq(youtubeDiscoveryRuns.policyVersionId, youtubeDiscoveryRecommendations.policyVersionId))).innerJoin(youtubeDiscoveryQueryProposals, eq(youtubeDiscoveryQueryProposals.id, youtubeDiscoveryRuns.queryProposalId)).innerJoin(youtubeDiscoveryPolicyVersions, eq(youtubeDiscoveryPolicyVersions.id, youtubeDiscoveryRecommendations.policyVersionId)).where(and(eq(youtubeDiscoveryCandidateReviewStates.state, "pending"), eq(youtubeDiscoveryRecommendations.recommendation, "consider"), sql`${youtubeDiscoveryRuns.queryProposalId} is not null`)).orderBy(asc(youtubeDiscoveryQueryProposals.priority), asc(youtubeDiscoveryRecommendations.createdAt), asc(youtubeDiscoveryRecommendations.id)),
-        db.select({ runId: youtubeDiscoveryRuns.id, queryProposalId: youtubeDiscoveryRuns.queryProposalId, category: youtubeDiscoveryRuns.incidentCategory, terminalAt: youtubeDiscoveryRuns.terminalAt, retryAt: youtubeDiscoveryRuns.nextRunAt, priority: youtubeDiscoveryQueryProposals.priority, failures: youtubeDiscoveryPolicyVersions.actionQueuePersistentIncidentFailureCount, windowHours: youtubeDiscoveryPolicyVersions.actionQueuePersistentIncidentWindowHours, state: youtubeDiscoveryRuns.state }).from(youtubeDiscoveryRuns).innerJoin(youtubeDiscoveryQueryProposals, eq(youtubeDiscoveryQueryProposals.id, youtubeDiscoveryRuns.queryProposalId)).innerJoin(youtubeDiscoveryPolicyVersions, eq(youtubeDiscoveryPolicyVersions.id, youtubeDiscoveryRuns.policyVersionId)).where(and(sql`${youtubeDiscoveryRuns.queryProposalId} is not null`, or(sql`${youtubeDiscoveryRuns.state} in ('failed', 'completed') and ${youtubeDiscoveryRuns.terminalAt} is not null`, and(eq(youtubeDiscoveryRuns.state, "retrying"), eq(youtubeDiscoveryRuns.incidentCategory, "provider_rate_limited"))))).orderBy(asc(youtubeDiscoveryRuns.terminalAt), asc(youtubeDiscoveryRuns.nextRunAt), asc(youtubeDiscoveryRuns.id)),
       ]);
-      const now = Date.now();
-      const items: Array<AdminYoutubeDiscoveryActionRequiredItem & { urgency: number }> = candidates.map((candidate) => {
-        const aged = candidate.priority <= candidate.highPriorityMaximum && now - candidate.createdAt.getTime() >= candidate.reviewAgeHours * 3_600_000;
-        return { kind: "candidate_review", actionId: candidate.recommendationId, destination: "review", reason: aged ? "review_aged" : "review_pending", priority: candidate.priority, occurredAt: candidate.createdAt.toISOString(), urgency: aged ? 0 : 2 };
-      });
-      for (const incident of groupedIncidents(incidents, now)) items.push(incident);
       const policy = policyRows[0];
-      if (cursor && (cursor.kind === "candidate_review" || cursor.kind === "health_incident") && !items.some((item) => sameActionTuple(item, cursor))) throw new YoutubeDiscoveryActionRequiredCursorValidationError("Invalid YouTube Discovery action-required cursor.");
       if (!policy) throw new Error("YouTube Discovery action-required policy is unavailable.");
-      if (cursor && (cursor.kind === "mission_need" || cursor.kind === "knowledge_recommendation") && !await actionOwners.admitsActionCursor(cursor)) throw new YoutubeDiscoveryActionRequiredCursorValidationError("Invalid YouTube Discovery action-required cursor.");
-      const [missionNeeds, knowledgeRecommendations] = await Promise.all([actionOwners.listMissionNeeds(policy), actionOwners.listKnowledgeRecommendations(policy)]);
-      const missionIds = missionNeeds.map((need) => need.actionId);
-      const missionProgress = missionIds.length === 0 ? [] : await db.select({ actionId: youtubeDiscoveryQueryProposals.missionActionId, enabled: youtubeDiscoveryQueryProposals.enabled, createdAt: youtubeDiscoveryQueryProposals.createdAt, latestSuccessAt: sql<Date | null>`max(${youtubeDiscoveryRuns.terminalAt}) filter (where ${youtubeDiscoveryRuns.state} = 'completed')` }).from(youtubeDiscoveryQueryProposals).leftJoin(youtubeDiscoveryRuns, eq(youtubeDiscoveryRuns.queryProposalId, youtubeDiscoveryQueryProposals.id)).where(inArray(youtubeDiscoveryQueryProposals.missionActionId, missionIds)).groupBy(youtubeDiscoveryQueryProposals.missionActionId, youtubeDiscoveryQueryProposals.enabled, youtubeDiscoveryQueryProposals.createdAt);
-      const progressByMission = new Map(missionProgress.flatMap((row) => row.actionId ? [[row.actionId, row]] : []));
-      for (const need of missionNeeds) {
-        const progress = progressByMission.get(need.actionId);
-        const occurredAt = progress?.latestSuccessAt ?? progress?.createdAt ?? need.createdAt;
-        const stalledReason = !policy.enabled ? "mission_disabled" as const : !progress?.enabled ? "mission_no_enabled_query" as const : Date.now() - occurredAt.getTime() >= policy.missionStallHours * 3_600_000 ? "mission_no_progress" as const : null;
-        if (stalledReason) items.push({ kind: "mission_need", actionId: need.actionId, destination: "mission", reason: stalledReason, priority: need.priority, occurredAt: occurredAt.toISOString(), urgency: 1 });
-      }
-      for (const recommendation of knowledgeRecommendations) if (recommendation.priority <= policy.highPriorityMaximum) items.push({ kind: "knowledge_recommendation", actionId: recommendation.recommendationId, destination: "knowledge_recommendation", reason: recommendation.workType === "risk" ? "knowledge_risk" : "knowledge_relation", priority: recommendation.priority, occurredAt: recommendation.createdAt.toISOString(), urgency: 3 });
+      const [candidates, incidents, missionNeeds, knowledgeRecommendations] = await Promise.all([candidateActionFrontier(db, cursor), incidentActionFrontier(db, cursor), missionActionFrontier.listMissionNeeds(policy, cursor, adminYoutubeDiscoveryActionRequiredPageSize + 1), actionOwners.listKnowledgeRecommendations(policy, cursor, adminYoutubeDiscoveryActionRequiredPageSize + 1)]);
+      if (cursor && ((cursor.kind === "candidate_review" && !candidates.admitsCursor) || (cursor.kind === "health_incident" && !incidents.admitsCursor) || (cursor.kind === "mission_need" && !missionNeeds.admitsCursor) || (cursor.kind === "knowledge_recommendation" && !knowledgeRecommendations.admitsCursor))) throw new YoutubeDiscoveryActionRequiredCursorValidationError("Invalid YouTube Discovery action-required cursor.");
+      const items: Array<AdminYoutubeDiscoveryActionRequiredItem & { urgency: number }> = [...candidates.items, ...incidents.items];
+      for (const need of missionNeeds.items) items.push({ kind: "mission_need", actionId: need.actionId, destination: "mission", reason: need.reason, priority: need.priority, occurredAt: need.occurredAt.toISOString(), urgency: 1 });
+      for (const recommendation of knowledgeRecommendations.items) if (recommendation.priority <= policy.highPriorityMaximum) items.push({ kind: "knowledge_recommendation", actionId: recommendation.recommendationId, destination: "knowledge_recommendation", reason: recommendation.workType === "risk" ? "knowledge_risk" : "knowledge_relation", priority: recommendation.priority, occurredAt: recommendation.createdAt.toISOString(), urgency: 3 });
       const ordered = items.sort(compareActionItems);
-      if (cursor) {
-        const anchor = ordered.find((item) => sameActionTuple(item, cursor));
-        if (!anchor) throw new YoutubeDiscoveryActionRequiredCursorValidationError("Invalid YouTube Discovery action-required cursor.");
-      }
       const after = cursor ? ordered.filter((item) => compareActionTuple(item, cursor) > 0) : ordered;
       const page = after.slice(0, adminYoutubeDiscoveryActionRequiredPageSize);
       const last = page.at(-1);
@@ -400,5 +380,63 @@ function admittedIncidentRows(rows: IncidentRow[], now: number) {
 }
 function compareActionItems(left: AdminYoutubeDiscoveryActionRequiredItem & { urgency: number }, right: AdminYoutubeDiscoveryActionRequiredItem & { urgency: number }) { return compareActionTuple(left, right); }
 function compareActionTuple(left: Pick<AdminYoutubeDiscoveryActionRequiredItem & { urgency: number }, "urgency" | "priority" | "occurredAt" | "kind" | "actionId">, right: Pick<AdminYoutubeDiscoveryActionRequiredItem & { urgency: number }, "urgency" | "priority" | "occurredAt" | "kind" | "actionId">) { return left.urgency - right.urgency || left.priority - right.priority || left.occurredAt.localeCompare(right.occurredAt) || left.kind.localeCompare(right.kind) || left.actionId.localeCompare(right.actionId); }
-function sameActionTuple(item: AdminYoutubeDiscoveryActionRequiredItem & { urgency: number }, cursor: { urgency: number; priority: number; occurredAt: string; kind: string; actionId: string }) { return item.urgency === cursor.urgency && item.priority === cursor.priority && item.occurredAt === cursor.occurredAt && item.kind === cursor.kind && item.actionId === cursor.actionId; }
 function validActionCursor(value: unknown): value is { version: 1; urgency: number; priority: number; occurredAt: string; kind: AdminYoutubeDiscoveryActionRequiredItem["kind"]; actionId: string } { return typeof value === "object" && value !== null && Object.keys(value).length === 6 && (value as { version?: unknown }).version === 1 && Number.isSafeInteger((value as { urgency?: unknown }).urgency) && Number.isSafeInteger((value as { priority?: unknown }).priority) && typeof (value as { occurredAt?: unknown }).occurredAt === "string" && new Date((value as { occurredAt: string }).occurredAt).toISOString() === (value as { occurredAt: string }).occurredAt && ["candidate_review", "mission_need", "health_incident", "knowledge_recommendation"].includes((value as { kind?: string }).kind ?? "") && typeof (value as { actionId?: unknown }).actionId === "string" && (value as { actionId: string }).actionId.length > 0 && (value as { actionId: string }).actionId.length <= 128; }
+
+type ActionFrontierRow = AdminYoutubeDiscoveryActionRequiredItem & { urgency: number };
+type ActionFrontierResult = { items: ActionFrontierRow[]; admitsCursor: boolean };
+
+async function candidateActionFrontier(db: AdminYoutubeDiscoveryDatabase, cursor: Parameters<AdminYoutubeDiscoveryPort["listActionRequired"]>[1]): Promise<ActionFrontierResult> {
+  const rows = await db.execute(sql`
+    with items as (
+      select case when proposal.priority <= policy.action_queue_high_priority_maximum
+          and clock_timestamp() - recommendation.created_at >= policy.action_queue_maximum_operator_review_age_hours * interval '1 hour'
+        then 0 else 2 end as urgency,
+        proposal.priority, to_char(date_trunc('milliseconds', recommendation.created_at) at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') as occurred_at,
+        recommendation.id as action_id
+      from youtube_discovery_candidate_review_states review
+      join youtube_discovery_recommendations recommendation on recommendation.id = review.recommendation_id and recommendation.candidate_id = review.candidate_id
+      join youtube_discovery_runs run on run.id = recommendation.run_id and run.policy_version_id = recommendation.policy_version_id
+      join youtube_discovery_query_proposals proposal on proposal.id = run.query_proposal_id
+      join youtube_discovery_policy_versions policy on policy.id = recommendation.policy_version_id
+      where review.state = 'pending' and recommendation.recommendation = 'consider' and run.query_proposal_id is not null
+    ), admission as (select exists(select 1 from items where ${cursor ? sql`urgency = ${cursor.urgency} and priority = ${cursor.priority} and occurred_at = ${cursor.occurredAt} and 'candidate_review' = ${cursor.kind} and action_id = ${cursor.actionId}` : sql`true`}) as admitted), paged as (
+      select urgency, priority, occurred_at, action_id from items where ${actionAfter("candidate_review", cursor)} order by urgency asc, priority asc, occurred_at asc, action_id asc limit ${adminYoutubeDiscoveryActionRequiredPageSize + 1}
+    ) select urgency, priority, occurred_at as "occurredAt", action_id as "actionId", admission.admitted as "admitsCursor" from paged cross join admission
+      union all select null, null, null, null, admitted from admission where admitted and not exists(select 1 from paged)
+  `) as Array<{ urgency: number | null; priority: number | null; occurredAt: string | null; actionId: string | null; admitsCursor: boolean }>;
+  return { items: rows.flatMap((row) => row.actionId && row.priority !== null && row.occurredAt && row.urgency !== null ? [{ kind: "candidate_review" as const, actionId: row.actionId, destination: "review" as const, reason: row.urgency === 0 ? "review_aged" as const : "review_pending" as const, priority: row.priority, occurredAt: row.occurredAt, urgency: row.urgency }] : []), admitsCursor: !cursor || cursor.kind !== "candidate_review" || rows[0]?.admitsCursor === true };
+}
+
+async function incidentActionFrontier(db: AdminYoutubeDiscoveryDatabase, cursor: Parameters<AdminYoutubeDiscoveryPort["listActionRequired"]>[1]): Promise<ActionFrontierResult> {
+  const rows = await db.execute(sql`
+    with events as (
+      select run.id, run.query_proposal_id, run.incident_category, run.state, run.terminal_at, run.next_run_at, proposal.priority,
+        policy.action_queue_persistent_incident_failure_count as failures, policy.action_queue_persistent_incident_window_hours as window_hours,
+        coalesce(run.terminal_at, run.next_run_at) as at
+      from youtube_discovery_runs run
+      join youtube_discovery_query_proposals proposal on proposal.id = run.query_proposal_id
+      join youtube_discovery_policy_versions policy on policy.id = run.policy_version_id
+      where run.query_proposal_id is not null and run.incident_category is not null
+        and (run.terminal_at is not null or (run.state = 'retrying' and run.incident_category = 'provider_rate_limited'))
+    ), latest as (
+      select distinct on (query_proposal_id, incident_category) * from events
+      order by query_proposal_id, incident_category, at desc, id desc
+    ), items as (
+      select 0 as urgency, least(latest.priority, coalesce((select min(event.priority) from events event where event.query_proposal_id = latest.query_proposal_id and event.incident_category = latest.incident_category), latest.priority)) as priority,
+        to_char(date_trunc('milliseconds', case when latest.incident_category = 'provider_rate_limited' then (select min(event.at) from events event where event.query_proposal_id = latest.query_proposal_id and event.incident_category = latest.incident_category and event.at > coalesce((select max(success.terminal_at) from youtube_discovery_runs success where success.query_proposal_id = latest.query_proposal_id and success.state = 'completed'), '-infinity')) else (select min(event.terminal_at) from events event where event.query_proposal_id = latest.query_proposal_id and event.incident_category = latest.incident_category and event.state = 'failed' and event.failures = latest.failures and event.window_hours = latest.window_hours and event.terminal_at >= clock_timestamp() - latest.window_hours * interval '1 hour') end) at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') as occurred_at,
+        latest.query_proposal_id || ':' || latest.incident_category as action_id, latest.incident_category
+      from latest
+      where (latest.incident_category = 'provider_rate_limited' and not exists (select 1 from youtube_discovery_runs success where success.query_proposal_id = latest.query_proposal_id and success.state = 'completed' and success.terminal_at > latest.at))
+        or (latest.incident_category <> 'provider_rate_limited' and (select count(*) from events event where event.query_proposal_id = latest.query_proposal_id and event.incident_category = latest.incident_category and event.state = 'failed' and event.failures = latest.failures and event.window_hours = latest.window_hours and event.terminal_at >= clock_timestamp() - latest.window_hours * interval '1 hour') >= latest.failures)
+    ), admission as (select exists(select 1 from items where ${cursor ? sql`urgency = ${cursor.urgency} and priority = ${cursor.priority} and occurred_at = ${cursor.occurredAt} and 'health_incident' = ${cursor.kind} and action_id = ${cursor.actionId}` : sql`true`}) as admitted), paged as (
+      select urgency, priority, occurred_at, action_id, incident_category from items where ${actionAfter("health_incident", cursor)} order by urgency asc, priority asc, occurred_at asc, action_id asc limit ${adminYoutubeDiscoveryActionRequiredPageSize + 1}
+    ) select urgency, priority, occurred_at as "occurredAt", action_id as "actionId", incident_category as category, admission.admitted as "admitsCursor" from paged cross join admission
+      union all select null, null, null, null, null, admitted from admission where admitted and not exists(select 1 from paged)
+  `) as Array<{ urgency: number | null; priority: number | null; occurredAt: string | null; actionId: string | null; category: "provider_rate_limited" | "triage_schema_invalid" | "execution_terminal" | null; admitsCursor: boolean }>;
+  return { items: rows.flatMap((row) => row.actionId && row.priority !== null && row.occurredAt && row.category ? [{ kind: "health_incident" as const, actionId: row.actionId, destination: "health" as const, reason: row.category === "provider_rate_limited" ? "provider_rate_limited" as const : row.category === "triage_schema_invalid" ? "triage_schema_invalid" as const : "execution_persistent_failure" as const, priority: row.priority, occurredAt: row.occurredAt, urgency: 0 }] : []), admitsCursor: !cursor || cursor.kind !== "health_incident" || rows[0]?.admitsCursor === true };
+}
+
+function actionAfter(kind: AdminYoutubeDiscoveryActionRequiredItem["kind"], cursor: Parameters<AdminYoutubeDiscoveryPort["listActionRequired"]>[1]) {
+  if (!cursor) return sql`true`;
+  return sql`urgency > ${cursor.urgency} or (urgency = ${cursor.urgency} and (priority > ${cursor.priority} or (priority = ${cursor.priority} and (occurred_at > ${cursor.occurredAt} or (occurred_at = ${cursor.occurredAt} and (${kind} > ${cursor.kind} or (${kind} = ${cursor.kind} and action_id > ${cursor.actionId})))))))`;
+}

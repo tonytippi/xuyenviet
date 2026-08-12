@@ -7,7 +7,7 @@ import { loadEnvFile } from "node:process";
 import { NestFactory } from "@nestjs/core";
 
 import { getBrowserAuthConfig } from "@xuyenviet/config";
-import { createKnowledgeDiscoveryActionOwnerPorts, createKnowledgeDiscoveryMissionOwnerPorts, createPostgresAdminAiModelCatalogPort, createPostgresAdminFacebookCapturePort, createPostgresAdminKnowledgeCoveragePort, createPostgresAdminKnowledgeIntakePort, createPostgresAdminKnowledgeReviewPort, createPostgresAdminOverviewPort, createPostgresAdminQualityDashboardPort, createPostgresAdminYoutubeCapturePort, createPostgresAdminYoutubeDiscoveryPort, createPostgresAiAskStreamExecutionPort, createPostgresApiIdentityRepository, createPostgresConversationSummaryRepository, createPostgresPlanningReadRepository, createPostgresTravelerCommandPort, createPostgresTravelerShellRepository, createPostgresTripProjectSidebarReadRepository, createPostgresTripRecommendationReadRepository, createPostgresUserRoleGovernancePort, createYoutubeCaptureEligibilityPort } from "@xuyenviet/database";
+import { createKnowledgeDiscoveryActionOwnerPorts, createKnowledgeDiscoveryMissionOwnerPorts, createPostgresAdminAiModelCatalogPort, createPostgresAdminFacebookCapturePort, createPostgresAdminKnowledgeCoveragePort, createPostgresAdminKnowledgeIntakePort, createPostgresAdminKnowledgeReviewPort, createPostgresAdminOverviewPort, createPostgresAdminQualityDashboardPort, createPostgresAdminYoutubeCapturePort, createPostgresAdminYoutubeDiscoveryPort, createPostgresAiAskStreamExecutionPort, createPostgresApiIdentityRepository, createPostgresConversationSummaryRepository, createPostgresPlanningReadRepository, createPostgresTravelerCommandPort, createPostgresTravelerShellRepository, createPostgresTripProjectSidebarReadRepository, createPostgresTripRecommendationReadRepository, createPostgresUserRoleGovernancePort, createYoutubeCaptureEligibilityPort, createYoutubeDiscoveryMissionActionFrontier } from "@xuyenviet/database";
 import { createAiAskStreamExecution } from "@xuyenviet/domain";
 
 import { createApiModule } from "./app.module";
@@ -35,7 +35,7 @@ async function bootstrap() {
     adminKnowledgeCoverage: createPostgresAdminKnowledgeCoveragePort(),
     adminFacebookCaptures: createPostgresAdminFacebookCapturePort(),
     adminYoutubeCaptures: createPostgresAdminYoutubeCapturePort(),
-    adminYoutubeDiscovery: createPostgresAdminYoutubeDiscoveryPort(createYoutubeCaptureEligibilityPort(), undefined, createPostgresAdminKnowledgeIntakePort().handoff, createKnowledgeDiscoveryActionOwnerPorts(), createKnowledgeDiscoveryMissionOwnerPorts()),
+    adminYoutubeDiscovery: createPostgresAdminYoutubeDiscoveryPort(createYoutubeCaptureEligibilityPort(), undefined, createPostgresAdminKnowledgeIntakePort().handoff, createKnowledgeDiscoveryActionOwnerPorts(), createYoutubeDiscoveryMissionActionFrontier(), createKnowledgeDiscoveryMissionOwnerPorts()),
     aiAskExecution,
     browserAuth,
   }));

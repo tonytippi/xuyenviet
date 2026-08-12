@@ -21,8 +21,8 @@ describe.sequential("YouTube Discovery Mission projections", () => {
     await completeCandidate(policy.id, system.id, "missioncandidate");
     const later = await createYoutubeDiscoveryRun({ policyVersionId: policy.id, queryProposalId: system.id }, testDb);
     await testDb.transaction(async (transaction) => { await transaction.execute(sql`set local session_replication_role = replica`); await transaction.update(youtubeDiscoveryRuns).set({ createdAt: new Date("2030-08-10T00:00:00.000Z") }).where(eq(youtubeDiscoveryRuns.id, later.id)); });
-    const owners = { async admitsActionCursor() { return true; }, async listMissionNeeds() { return []; }, async listKnowledgeRecommendations() { return []; }, async listMissionCoverage() { return { items: [], nextCursor: null }; }, async getMissionDetail(id: string) { return id === actionId ? { actionId, priority: 10, createdAt: "2026-08-01T00:00:00.000Z", corridor: null, location: "Da Lat", routeSegment: null, taxonomy: "route", freshness: "fresh" as const, conflict: "none" as const, demand: "unavailable" as const, seasonalContext: "unavailable" as const } : null; } };
-    const port = createPostgresAdminYoutubeDiscoveryPort(undefined, testDb, undefined, undefined, owners);
+    const owners = { async listMissionCoverage() { return { items: [], nextCursor: null }; }, async getMissionDetail(id: string) { return id === actionId ? { actionId, priority: 10, createdAt: "2026-08-01T00:00:00.000Z", corridor: null, location: "Da Lat", routeSegment: null, taxonomy: "route", freshness: "fresh" as const, conflict: "none" as const, demand: "unavailable" as const, seasonalContext: "unavailable" as const } : null; } };
+    const port = createPostgresAdminYoutubeDiscoveryPort(undefined, testDb, undefined, undefined, undefined, owners);
 
     const detail = await readWithoutWrites(() => port.getMissionDetail(actionId, null));
     expect(detail).toMatchObject({ query: { id: system.id, origin: "system" }, latestRun: { createdAt: "2030-08-10T00:00:00.000Z", state: "queued" } });
@@ -47,8 +47,8 @@ describe.sequential("YouTube Discovery Mission projections", () => {
     const candidate = await completeCandidate(policy.id, firstQuery.id, "sharedcandidate");
     await completeCandidate(policy.id, secondQuery.id, "sharedcandidate");
     for (let index = 0; index < 20; index += 1) await completeCandidate(policy.id, firstQuery.id, `detailcandidate${index}`);
-    const owners = { async admitsActionCursor() { return true; }, async listMissionNeeds() { return []; }, async listKnowledgeRecommendations() { return []; }, async listMissionCoverage() { return { items: [], nextCursor: null }; }, async getMissionDetail(id: string) { return [actionId, secondActionId].includes(id) ? { actionId: id, priority: 10, createdAt: "2026-08-01T00:00:00.000Z", corridor: null, location: "Da Lat", routeSegment: null, taxonomy: "route", freshness: "fresh" as const, conflict: "none" as const, demand: "unavailable" as const, seasonalContext: "unavailable" as const } : null; } };
-    const port = createPostgresAdminYoutubeDiscoveryPort(undefined, testDb, undefined, undefined, owners);
+    const owners = { async listMissionCoverage() { return { items: [], nextCursor: null }; }, async getMissionDetail(id: string) { return [actionId, secondActionId].includes(id) ? { actionId: id, priority: 10, createdAt: "2026-08-01T00:00:00.000Z", corridor: null, location: "Da Lat", routeSegment: null, taxonomy: "route", freshness: "fresh" as const, conflict: "none" as const, demand: "unavailable" as const, seasonalContext: "unavailable" as const } : null; } };
+    const port = createPostgresAdminYoutubeDiscoveryPort(undefined, testDb, undefined, undefined, undefined, owners);
     const firstDetail = await port.getMissionDetail(actionId, null);
     expect(firstDetail?.candidates.items).toHaveLength(20);
     expect(firstDetail?.candidates.nextCursor).not.toBeNull();

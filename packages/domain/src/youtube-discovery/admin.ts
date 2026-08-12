@@ -7,12 +7,13 @@ export class YoutubeDiscoveryActionRequiredCursorValidationError extends Error {
 export class YoutubeDiscoveryMissionCursorValidationError extends Error {}
 export class YoutubeDiscoveryHealthCursorValidationError extends Error {}
 
-export type YoutubeDiscoveryMissionActionInput = Readonly<{ actionId: string; priority: number; createdAt: Date }>;
 export type YoutubeDiscoveryKnowledgeActionInput = Readonly<{ recommendationId: string; workType: "risk" | "relation"; priority: number; createdAt: Date }>;
+export type YoutubeDiscoveryActionFrontier<T> = Readonly<{ items: T[]; admitsCursor: boolean }>;
 export type YoutubeDiscoveryActionOwnerPorts = Readonly<{
-  admitsActionCursor(cursor: AdminYoutubeDiscoveryActionRequiredCursor): Promise<boolean>;
-  listMissionNeeds(policy: Readonly<{ highPriorityMaximum: number }>): Promise<YoutubeDiscoveryMissionActionInput[]>;
-  listKnowledgeRecommendations(policy: Readonly<{ highPriorityMaximum: number }>): Promise<YoutubeDiscoveryKnowledgeActionInput[]>;
+  listKnowledgeRecommendations(policy: Readonly<{ highPriorityMaximum: number }>, cursor: AdminYoutubeDiscoveryActionRequiredCursor | null, limit: number): Promise<YoutubeDiscoveryActionFrontier<YoutubeDiscoveryKnowledgeActionInput>>;
+}>;
+export type YoutubeDiscoveryMissionActionFrontierPort = Readonly<{
+  listMissionNeeds(policy: Readonly<{ enabled: boolean; highPriorityMaximum: number; missionStallHours: number }>, cursor: AdminYoutubeDiscoveryActionRequiredCursor | null, limit: number): Promise<YoutubeDiscoveryActionFrontier<Readonly<{ actionId: string; priority: number; occurredAt: Date; reason: "mission_disabled" | "mission_no_enabled_query" | "mission_no_progress" }>>>;
 }>;
 export type YoutubeDiscoveryMissionOwnerPorts = Readonly<{
   listMissionCoverage(cursor: AdminYoutubeDiscoveryMissionCoverageCursor | null): Promise<AdminYoutubeDiscoveryMissionCoveragePage>;
@@ -42,4 +43,4 @@ export type AdminYoutubeDiscoveryPort = {
   getHealthIncident(groupId: string, cursor: AdminYoutubeDiscoveryHealthIncidentCursor | null): Promise<AdminYoutubeDiscoveryHealthIncidentDetail | null>;
 };
 
-export type AdminYoutubeDiscoveryDependencies = { captureEligibility?: { check(videoId: string): Promise<"eligible" | "already_compatible" | "unavailable"> }; knowledgeHandoff?: KnowledgeOneUrlHandoff; actionOwners?: YoutubeDiscoveryActionOwnerPorts; missionOwners?: YoutubeDiscoveryMissionOwnerPorts };
+export type AdminYoutubeDiscoveryDependencies = { captureEligibility?: { check(videoId: string): Promise<"eligible" | "already_compatible" | "unavailable"> }; knowledgeHandoff?: KnowledgeOneUrlHandoff; actionOwners?: YoutubeDiscoveryActionOwnerPorts; missionActionFrontier?: YoutubeDiscoveryMissionActionFrontierPort; missionOwners?: YoutubeDiscoveryMissionOwnerPorts };

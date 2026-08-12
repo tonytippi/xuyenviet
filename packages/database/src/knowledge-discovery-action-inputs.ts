@@ -1,5 +1,5 @@
 import { and, asc, eq, gt, or, sql } from "drizzle-orm";
-import { adminYoutubeDiscoveryMissionPageSize, encodeAdminYoutubeDiscoveryMissionCoverageCursor, type AdminYoutubeDiscoveryMissionCoverageCursor } from "@xuyenviet/contracts";
+import { adminYoutubeDiscoveryMissionPageSize, encodeAdminYoutubeDiscoveryMissionCoverageCursor, type AdminYoutubeDiscoveryActionRequiredCursor, type AdminYoutubeDiscoveryMissionCoverageCursor } from "@xuyenviet/contracts";
 import { YoutubeDiscoveryMissionCursorValidationError, type YoutubeDiscoveryActionOwnerPorts, type YoutubeDiscoveryMissionOwnerPorts } from "@xuyenviet/domain";
 import { getDb } from "./client";
 import { knowledgeCards, knowledgeRecommendations } from "./schema";
@@ -7,17 +7,13 @@ import { knowledgeCards, knowledgeRecommendations } from "./schema";
 /** Knowledge owns these bounded queue inputs and never reads Discovery state. */
 export function createKnowledgeDiscoveryActionOwnerPorts(): YoutubeDiscoveryActionOwnerPorts {
   return {
-    async admitsActionCursor(cursor) {
-      const [row] = await getDb().select({ id: knowledgeRecommendations.id }).from(knowledgeRecommendations).where(cursor.kind === "mission_need" ? and(eq(knowledgeRecommendations.discoveryMissionActionId, cursor.actionId), eq(knowledgeRecommendations.status, "open"), eq(knowledgeRecommendations.workType, "missing_context")) : and(eq(knowledgeRecommendations.id, cursor.actionId), eq(knowledgeRecommendations.status, "open"), or(eq(knowledgeRecommendations.workType, "risk"), eq(knowledgeRecommendations.workType, "relation")))).limit(1);
-      return Boolean(row);
-    },
-    async listMissionNeeds(policy) {
-      const rows = await getDb().select({ actionId: knowledgeRecommendations.discoveryMissionActionId, priority: knowledgeRecommendations.priority, createdAt: knowledgeRecommendations.createdAt }).from(knowledgeRecommendations).where(and(eq(knowledgeRecommendations.status, "open"), eq(knowledgeRecommendations.workType, "missing_context"), sql`${knowledgeRecommendations.discoveryMissionActionId} is not null`, sql`${knowledgeRecommendations.priority} <= ${policy.highPriorityMaximum}`)).orderBy(asc(knowledgeRecommendations.priority), asc(knowledgeRecommendations.createdAt), asc(knowledgeRecommendations.id));
-       return rows.flatMap((row) => row.actionId ? [{ actionId: row.actionId, priority: row.priority, createdAt: row.createdAt }] : []);
-    },
-    async listKnowledgeRecommendations(policy) {
-      const rows = await getDb().select({ recommendationId: knowledgeRecommendations.id, workType: knowledgeRecommendations.workType, priority: knowledgeRecommendations.priority, createdAt: knowledgeRecommendations.createdAt }).from(knowledgeRecommendations).where(and(eq(knowledgeRecommendations.status, "open"), or(eq(knowledgeRecommendations.workType, "risk"), eq(knowledgeRecommendations.workType, "relation")), sql`${knowledgeRecommendations.priority} <= ${policy.highPriorityMaximum}`)).orderBy(asc(knowledgeRecommendations.priority), asc(knowledgeRecommendations.createdAt), asc(knowledgeRecommendations.id));
-       return rows.map((row) => ({ recommendationId: row.recommendationId, workType: row.workType as "risk" | "relation", priority: row.priority, createdAt: row.createdAt }));
+    async listKnowledgeRecommendations(policy, cursor: AdminYoutubeDiscoveryActionRequiredCursor | null, limit) {
+      // Action cursors expose millisecond UTC timestamps, so use that exact key throughout.
+      const createdAt = sql<string>`to_char(date_trunc('milliseconds', ${knowledgeRecommendations.createdAt}) at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')`;
+      const after = !cursor || cursor.urgency < 3 ? undefined : cursor.urgency > 3 ? sql`false` : or(gt(knowledgeRecommendations.priority, cursor.priority), and(eq(knowledgeRecommendations.priority, cursor.priority), gt(createdAt, cursor.occurredAt)), and(eq(knowledgeRecommendations.priority, cursor.priority), eq(createdAt, cursor.occurredAt), sql`'knowledge_recommendation' > ${cursor.kind}`), and(eq(knowledgeRecommendations.priority, cursor.priority), eq(createdAt, cursor.occurredAt), eq(sql`'knowledge_recommendation'`, cursor.kind), gt(knowledgeRecommendations.id, cursor.actionId)));
+      const rows = await getDb().select({ recommendationId: knowledgeRecommendations.id, workType: knowledgeRecommendations.workType, priority: knowledgeRecommendations.priority, createdAt: knowledgeRecommendations.createdAt }).from(knowledgeRecommendations).where(and(eq(knowledgeRecommendations.status, "open"), or(eq(knowledgeRecommendations.workType, "risk"), eq(knowledgeRecommendations.workType, "relation")), sql`${knowledgeRecommendations.priority} <= ${policy.highPriorityMaximum}`, after)).orderBy(asc(knowledgeRecommendations.priority), asc(createdAt), asc(knowledgeRecommendations.id)).limit(limit);
+      const admitsCursor = !cursor || cursor.kind !== "knowledge_recommendation" || cursor.urgency === 3 && Boolean(await getDb().select({ id: knowledgeRecommendations.id }).from(knowledgeRecommendations).where(and(eq(knowledgeRecommendations.id, cursor.actionId), eq(knowledgeRecommendations.priority, cursor.priority), eq(createdAt, cursor.occurredAt), eq(knowledgeRecommendations.status, "open"), or(eq(knowledgeRecommendations.workType, "risk"), eq(knowledgeRecommendations.workType, "relation")), sql`${knowledgeRecommendations.priority} <= ${policy.highPriorityMaximum}`)).limit(1).then((value) => value[0]));
+      return { items: rows.map((row) => ({ recommendationId: row.recommendationId, workType: row.workType as "risk" | "relation", priority: row.priority, createdAt: row.createdAt })), admitsCursor };
     },
   };
 }
