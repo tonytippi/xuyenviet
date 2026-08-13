@@ -1,5 +1,5 @@
 # generated: 2026-07-25
-# last_updated: 2026-08-13 (Epic 21 dev-auto preflight hardened; stories remain backlog for sequential execution.)
+# last_updated: 08-13-2026 17:27 (Epic 21 migrated to specs/spec-epic-21 folder+ID dispatch.)
 # project: xuyenviet
 # project_key: NOKEY
 # tracking_system: file-system
@@ -33,7 +33,7 @@
 #   - done: Completed
 
 generated: 2026-07-25
-last_updated: 2026-08-13 (Epic 21 dev-auto preflight hardened; stories remain backlog for sequential execution.)
+last_updated: 08-13-2026 17:27
 project: xuyenviet
 project_key: NOKEY
 tracking_system: file-system
@@ -421,8 +421,8 @@ development_status:
   # 2026-08-08: User-approved Story 18.3 command boundary: operator-origin proposals alone support text edit. System-origin proposal text and derived target identity remain immutable to operator edit, while system proposals remain reprioritizable, pausable, and resumable. Existing focused integration evidence proves the rejected system edit, identity preservation, and all three allowed system controls. No application code changed; status remains ready-for-dev pending final independent audit.
   # 2026-08-08: Final independent closure audit is clean after bounded repairs for policy-first lock ordering, planning cadence projection, paused-run lifecycle fencing, scheduler batching, distinct-traveler AI Ask demand, and version-fenced deterministic Knowledge signals. Blind Hunter and Edge Case Hunter found no actionable findings; Acceptance Auditor confirmed AC1-AC5 and scope pass. Focused verification: 51 integration tests, 29 unit tests, full typecheck, and diff check passed. Implementation remains uncommitted by user choice; status synchronized to done.
   18-3-manage-system-and-operator-query-proposals: done
-   # 2026-08-09: Final independent-review repairs roll back candidate graph writes on a post-write guard loss, derive durable compatibility from actual media resolution, bound eligibility reads with PostgreSQL statement timeout, reject malformed raw percent escapes, safely backfill identifiable v4 aggregate captures, and enforce ranking run/policy provenance. Follow-up repair unifies process/.env.local/.env capture and Worker eligibility resolution, and proposal-less claims cancel before provider work. This review repaired the remaining startup credential admission, provider result-bound, and raw seed URL canonicalization findings. Focused verification: 32 unit tests, 26 serial execution integration tests, typecheck, build, and diff check passed; lint has 0 errors and 43 pre-existing warnings. No commit requested. Apply migration 0049 and complete Worker credential/quota/failure-monitoring rollout validation before enabling Discovery.
-   18-4-discover-canonical-youtube-candidates-safely: done
+  # 2026-08-09: Final independent-review repairs roll back candidate graph writes on a post-write guard loss, derive durable compatibility from actual media resolution, bound eligibility reads with PostgreSQL statement timeout, reject malformed raw percent escapes, safely backfill identifiable v4 aggregate captures, and enforce ranking run/policy provenance. Follow-up repair unifies process/.env.local/.env capture and Worker eligibility resolution, and proposal-less claims cancel before provider work. This review repaired the remaining startup credential admission, provider result-bound, and raw seed URL canonicalization findings. Focused verification: 32 unit tests, 26 serial execution integration tests, typecheck, build, and diff check passed; lint has 0 errors and 43 pre-existing warnings. No commit requested. Apply migration 0049 and complete Worker credential/quota/failure-monitoring rollout validation before enabling Discovery.
+  18-4-discover-canonical-youtube-candidates-safely: done
   # 2026-08-09: Implemented migration 0050, native-fetch enrichment, fenced persistence, and finite advisory-lock retention. Focused unit tests (6), existing serial Discovery integration tests (37), typecheck, build, and diff check passed; lint has 0 errors and 43 existing warnings. Dedicated enrichment/retention fence and cutoff integration coverage remains outstanding.
   18-5-enrich-candidates-with-safe-derived-signals-and-retention: done
   epic-18-retrospective: optional
@@ -455,9 +455,10 @@ development_status:
   20-6-decouple-candidate-processing-from-discovery-search-runs: ready-for-dev
   epic-20-retrospective: optional
 
-  # 2026-08-13: Approved sprint-change-proposal-2026-08-13.md and closed
-  # implementation-readiness recheck. Epic 21 remains in backlog pending
-  # Story 21.1 just-in-time validation. Story 21.13 separates deletion,
+  # 2026-08-13: Canonical dispatch lives at _bmad-output/specs/spec-epic-21.
+  # stories.yaml defines dependency order but owns no status. The orchestrator
+  # syncs this tracker after each folder+ID build-auto run; all stories remain
+  # backlog until dispatched sequentially. Story 21.13 separates deletion,
   # 21.14 evidence, 21.15 cutover, and 21.16 G3 cleanup.
   epic-21: backlog
   21-1-define-versioned-planning-context-profiles-and-scope-rules: backlog

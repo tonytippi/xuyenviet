@@ -1,0 +1,112 @@
+- id: "21-1"
+  title: Define Versioned Planning Context Profiles And Scope Rules
+  description: >-
+    Deliver CAP-1 using the complete Story 21.1 contract in story-contracts.md.
+    This is the first executable slice and establishes the profile and scope foundation.
+  invoke_dev_with: >-
+    Treat the Story 21.1 section of story-contracts.md as the exact implementation handoff.
+- id: "21-2"
+  title: Persist Scoped Multi-Turn Clarification State Safely
+  description: >-
+    Deliver CAP-2 using the complete Story 21.2 contract in story-contracts.md.
+    Consume the completed CAP-1 contracts and preserve owner boundaries and monotonic fences.
+  invoke_dev_with: >-
+    Treat the Story 21.2 section of story-contracts.md as the exact implementation handoff; require Story 21.1 completion.
+- id: "21-3"
+  title: Run Bounded Preflight Clarification Before Main Answers
+  description: >-
+    Deliver CAP-3 using the complete Story 21.3 contract in story-contracts.md.
+    Compose bounded preflight over the durable state from Stories 21.1 and 21.2.
+  invoke_dev_with: >-
+    Treat the Story 21.3 section of story-contracts.md as the exact implementation handoff; require Stories 21.1 and 21.2 completion.
+- id: "21-4"
+  title: Preserve Applied Trip Authority Across Planning Modes
+  description: >-
+    Deliver CAP-4 using the complete Story 21.4 contract in story-contracts.md.
+    Resolve planning modes deterministically after bounded preflight exists.
+  invoke_dev_with: >-
+    Treat the Story 21.4 section of story-contracts.md as the exact implementation handoff; require Story 21.3 completion.
+- id: "21-5"
+  title: Preserve Canonical Trip Paths And Supported Route Coverage
+  description: >-
+    Deliver CAP-5 using the complete Story 21.5 contract in story-contracts.md.
+    Preserve applied-plan authority and fail safely for stale or unsupported routes.
+  invoke_dev_with: >-
+    Treat the Story 21.5 section of story-contracts.md as the exact implementation handoff; require Story 21.4 completion.
+- id: "21-6"
+  title: Retrieve And Pack Evidence By Required Planning Need
+  description: >-
+    Deliver CAP-6 using the complete Story 21.6 contract in story-contracts.md.
+    Build on profile, planning-mode, and canonical-route outputs without weakening the G0 decision.
+  invoke_dev_with: >-
+    Treat the Story 21.6 section of story-contracts.md as the exact implementation handoff; require Stories 21.1, 21.4, and 21.5 completion and honor its fail-closed G0 rule.
+- id: "21-7"
+  title: Verify Fresh External Facts Through Replayable Web Scope
+  description: >-
+    Deliver CAP-7 using the complete Story 21.7 contract in story-contracts.md.
+    Verify only eligible uncovered or freshness-sensitive needs from Stories 21.5 and 21.6.
+  invoke_dev_with: >-
+    Treat the Story 21.7 section of story-contracts.md as the exact implementation handoff; require Stories 21.5 and 21.6 completion.
+- id: "21-8"
+  title: Finalize Planning Evidence Atomically
+  description: >-
+    Deliver CAP-8 using the complete Story 21.8 contract in story-contracts.md.
+    Finalize the prepared outputs of Stories 21.1 through 21.7 through one fenced owner transaction.
+  invoke_dev_with: >-
+    Treat the Story 21.8 section of story-contracts.md as the exact implementation handoff; require Stories 21.1 through 21.7 completion.
+- id: "21-9"
+  title: Keep A Current Chat-To-Trip Opportunity Available
+  description: >-
+    Deliver CAP-9 using the complete Story 21.9 contract in story-contracts.md.
+    Extend the atomic terminalization path without taking ownership of full deletion invalidation.
+  invoke_dev_with: >-
+    Treat the Story 21.9 section of story-contracts.md as the exact implementation handoff; require Story 21.8 completion.
+- id: "21-10"
+  title: Convert The Latest Eligible Context Into A Reviewable Trip
+  description: >-
+    Deliver CAP-10 using the complete Story 21.10 contract in story-contracts.md.
+    Reuse the shared typed proposal contract and the persistent opportunity from Story 21.9.
+  invoke_dev_with: >-
+    Treat the Story 21.10 section of story-contracts.md as the exact implementation handoff; require Story 21.9 including TC-13 completion.
+- id: "21-13"
+  title: Invalidate Planning Evidence On Conversation And Trip Deletion
+  description: >-
+    Deliver CAP-11 using the complete Story 21.13 contract in story-contracts.md.
+    Own the complete deletion matrix after answer finalization and Trip conversion exist.
+  invoke_dev_with: >-
+    Treat the Story 21.13 section of story-contracts.md as the exact implementation handoff; require Stories 21.8 and 21.10 completion.
+- id: "21-11"
+  title: Establish V6 Retrieval Qualification Infrastructure
+  description: >-
+    Deliver CAP-12 using the complete Story 21.11 contract in story-contracts.md.
+    Establish qualification infrastructure after the invalidation owner seam exists, without collecting approval or activating reads.
+  invoke_dev_with: >-
+    Treat the Story 21.11 section of story-contracts.md as the exact implementation handoff; require Story 21.13 completion and honor its G0 and approval boundaries.
+- id: "21-14"
+  title: Collect And Approve V6 Shadow Qualification Evidence
+  description: >-
+    Deliver CAP-13 using the complete Story 21.14 contract in story-contracts.md.
+    Collect only a real comparable shadow window and remain non-authoritative.
+  invoke_dev_with: >-
+    Treat the Story 21.14 section of story-contracts.md as the exact implementation handoff; require Story 21.11 completion and halt if the evidence window or designated approvals are absent.
+- id: "21-15"
+  title: Cut Over V6 Retrieval Through Qualified Read Policy
+  description: >-
+    Deliver CAP-14 using the complete Story 21.15 contract in story-contracts.md.
+    Perform no target mutation without the exact approved report, named environment, and authorized actor.
+  invoke_dev_with: >-
+    Treat the Story 21.15 section of story-contracts.md as the exact implementation handoff; require Story 21.14 completion and explicit release authorization.
+- id: "21-12"
+  title: Retire The Legacy Card-Count Trigger Behaviorally
+  description: >-
+    Deliver CAP-15 using the complete Story 21.12 contract in story-contracts.md.
+    Retire behavior after qualified cutover while leaving physical compatibility for Story 21.16.
+  invoke_dev_with: >-
+    Treat the Story 21.12 section of story-contracts.md as the exact implementation handoff; require Story 21.15 completion, COMP-06, and Product retirement approval.
+- id: "21-16"
+  title: Physically Remove Expired Legacy Card-Count Compatibility
+  description: >-
+    Deliver CAP-16 using the complete Story 21.16 contract in story-contracts.md.
+    Remove compatibility only after every time, evidence, incident, approval, and rollback-target gate passes.
+  invoke_dev_with: >-
+    Treat the Story 21.16 section of story-contracts.md as the exact implementation handoff; require Story 21.12 completion and all G3 cleanup gates.

@@ -1,330 +1,262 @@
 ---
 name: chief-of-staff
-description: "Run one BMAD epic autonomously and sequentially through Herdr workers, including story preparation, development, independent review, bounded repairs, status commits, and epic review."
+description: "Run or resume one BMAD epic autonomously and sequentially through Herdr workers by dispatching each stories.yaml entry to bmad-build-auto, synchronizing sprint status, and completing the epic. Use when the user asks to orchestrate an epic or spec folder unattended with bmad-build-auto."
 ---
 
 # Chief of Staff
 
-Run one explicitly selected active epic from `{implementation_artifacts}/sprint-status.yaml`.
-Do not start a different epic in the same run. `SKILL.legacy.md` is historical
-reference only; this workflow is the authoritative coordinator.
+Run one explicitly selected epic from a canonical spec folder through
+`bmad-build-auto`. Keep this process as the coordinator; run every mutating stage
+in a fresh Herdr worker. Do not start a different epic in the same run.
+
+`bmad-build-auto` owns each story's planning, implementation, review, repair,
+verification, generated story spec, and reviewed commits. Chief of Staff owns
+story dispatch, sprint-status synchronization, cross-session reconciliation,
+and the epic terminal status. Do not recreate any stage that build-auto owns.
 
 ## Preconditions
 
-- Require an explicit epic number from the invoking user. Confirm that `epic-<N>`
-  is `backlog` or `in-progress`; refuse `done` epics.
-- Resolve `{implementation_artifacts}` with `_bmad/scripts/resolve_config.py`.
-  Use its absolute `sprint-status.yaml` path rather than assuming a location.
-- Before any mutation, require `HERDR_ENV=1`, `git status --porcelain=v1` to be
-  empty, and successful `herdr --help`, `herdr pane --help`, and `herdr agent
-  --help`. A clean tree includes untracked files.
-- Verify the installed syntax for `herdr pane split`, `herdr agent start`,
-  `herdr agent prompt`, `herdr agent wait`, `herdr agent get`, `herdr agent
-  explain`, `herdr pane read`, `herdr pane process-info`, and `herdr pane close`
-  before the first Herdr mutation.
-- Check `herdr integration status` before launching a worker. The OpenCode
-  integration is the preferred lifecycle authority; if it is absent or inactive,
-  record that screen-manifest detection is a degraded fallback and use the
-  pane-liveness checks below. Do not silently install a global integration.
-- Work strictly sequentially against this checkout. Never start a worker for the
-  next stage until the current worker's report and affected files are verified.
-- Keep the coordinator loop active without user intervention. While an epic is
-  runnable, the coordinator must autonomously poll, reconcile worker output,
-  verify artifacts, perform the bounded report/recovery actions, and launch the
-  next permitted stage. A quiet, idle, exited, malformed-report, or timed-out
-  worker is operational evidence to handle, never a reason to return control to
-  the user while a safe next action exists.
-- Use an explicit pane ID returned by `herdr pane split`, `--cwd "$PWD"`, and
-  `--no-focus`. Never target the caller's or a human's pane. Retain at most two
-  panes created by this run and close only pane IDs recorded by this run.
+- Require an explicit epic number or spec-folder path from the invoking user.
+- Resolve `{implementation_artifacts}` with
+  `_bmad/scripts/resolve_config.py`; use its absolute `sprint-status.yaml` path.
+- Resolve the spec folder. Prefer an explicit path; otherwise require exactly
+  one `_bmad-output/specs/spec-epic-<N>` directory.
+- Require readable `SPEC.md` and parseable `stories.yaml`. Require every story
+  entry to have a unique `id`, non-empty `title`, and non-empty `description`.
+  Require each filename prefix `<id>-` to be unambiguous; raw ids such as
+  `21-1` and `21-10` may share characters because their hyphen-terminated
+  prefixes remain distinct. Treat `invoke_dev_with` as optional orchestration
+  guidance.
+- Confirm that `epic-<N>` in `sprint-status.yaml` is `backlog` or `in-progress`.
+  Refuse a `done` epic unless its completion evidence is inconsistent and the
+  user explicitly asks to reconcile it.
+- Before the first mutation, require `HERDR_ENV=1`, a completely clean
+  `git status --porcelain=v1`, and successful `herdr --help`,
+  `herdr pane --help`, `herdr agent --help`, and `herdr integration status`
+  checks. A clean tree includes untracked files.
+- Accept the current branch only when the user explicitly selected it for this
+  run or its name clearly identifies the target epic/spec. Treat `main`,
+  `master`, a detached HEAD, and a branch naming another epic as mismatches.
+  Stop before mutation and request the intended branch; do not create or switch
+  branches implicitly.
+- Verify the installed syntax for every Herdr command used below before the
+  first Herdr mutation. Do not install or reconfigure integrations silently.
+- Work strictly sequentially. Retain at most two panes created by this run,
+  record their exact pane IDs, and close only those panes.
 
-## State Model
+If another session is still migrating or changing the epic artifacts, stop at
+the clean-tree precondition. Never absorb, commit, revert, or repair that
+session's changes.
 
-- Read the complete `development_status` map before every target selection.
-- Select the lowest numeric unfinished story in the selected epic. Numeric sort
-  is by epic number then story number, never lexicographic.
-- A story is complete only when its BMad story file says `done`, its exact sprint
-  entry says `done`, and the responsible worker's success report names the same
-  key and a verified commit SHA.
-- Treat `drafted` as `ready-for-dev` and `contexted` as `in-progress` only when
-  reading legacy sprint files. Write current canonical statuses only.
-- Advance `epic-<N>` to `done` only after every non-superseded story in that epic
-  is done and the final Epic Review is clean.
-- A `superseded-by-*` entry is not runnable and is excluded from the Epic done
-  check. Any other unknown status is a blocker.
+## Authoritative State
 
-## Herdr Procedure
+- Preserve the entry order in `stories.yaml`. It is the execution and dependency
+  order; never replace it with numeric or lexicographic sorting.
+- `stories.yaml` is dispatch inventory and owns no status.
+- For story id `<id>`, require at most one generated file matching
+  `{spec_folder}/stories/<id>-*.md`. Its frontmatter status is build-auto's
+  execution state: `draft`, `ready-for-dev`, `in-progress`, `in-review`,
+  `done`, or `blocked`.
+- Map `<id>` to exactly one sprint key beginning with `<id>-`. Parse YAML keys;
+  do not use a loose textual prefix that can confuse `21-1` with `21-10`.
+- The generated story spec and exact sprint entry must both say `done` before a
+  story is complete. The epic is complete only when every `stories.yaml` entry
+  satisfies that rule and `epic-<N>` says `done`.
+- Treat a missing generated spec as not started. Resume `draft`,
+  `ready-for-dev`, `in-progress`, or `in-review` by dispatching the same folder
+  and story id again; build-auto routes from its persisted status.
+- Treat `blocked` as a real build-auto terminal state. Inspect and report its
+  `## Auto Run Result`; do not delete the spec, change its status, or bypass its
+  gate automatically.
+- Treat any duplicate match, unknown status, missing sprint mapping, conflicting
+  done state, reordered or changed story inventory during a run, or unexpected
+  later-story progress as an authoritative-state conflict and stop.
 
-For each worker, create a new sibling pane, retain its returned pane ID as
-`worker_pane_id`, start a uniquely named OpenCode agent, and submit the stage
-prompt. The pane ID remains the diagnostic handle even after the agent exits;
-the agent name does not.
+Re-read `stories.yaml`, all generated story-spec statuses, the complete Epic
+sprint slice, and `git status` before every target selection. This makes a new
+Chief of Staff session resume from files and commits without relying on terminal
+history from an earlier session.
 
-Herdr observes the worker's foreground OpenCode process, not subagents that
-OpenCode starts internally. Every worker prompt that permits subagents must
-therefore require that they are synchronous/blocking: the worker must join and
-evaluate every child before returning its own result, and must never print the
-final Chief-of-Staff report while any child is running. The final report is the
-preferred machine-checkable completion transport, not a reason for the
-coordinator to wait indefinitely. Lifecycle states are solely signals to inspect
-the worker pane and decide the next action.
+## Herdr Worker Procedure
+
+For every stage, create a new sibling pane, retain the returned pane ID, start a
+uniquely named OpenCode agent, and submit the stage prompt. Always use an
+explicit pane ID, `--cwd "$PWD"`, and `--no-focus`.
 
 ```bash
 herdr pane split --current --direction right --cwd "$PWD" --no-focus
-herdr agent start <unique-name> --kind opencode --pane <returned-pane-id>
+herdr agent start <unique-name> --kind opencode --pane <worker-pane-id>
 herdr agent prompt <unique-name> "<stage-prompt>" --wait \
   --until idle --until done --until blocked --timeout 120000
-herdr pane read <returned-pane-id> --source recent-unwrapped --lines 300
-```
-
-Never issue one long `agent wait`: waits have no default timeout and a long
-timeout makes an orchestrator unable to distinguish a slow worker from a stale
-lifecycle signal. The initial `agent prompt --wait` must use a short bounded
-window (120 seconds). If it returns `agent_prompt_stalled`, `timeout`, or a
-server error, immediately inspect, in this order:
-
-```bash
-herdr agent get <unique-name>
-herdr agent explain <unique-name>
 herdr pane process-info --pane <worker-pane-id>
 herdr pane read <worker-pane-id> --source recent-unwrapped --lines 300
 ```
 
-If `agent get` reports a live working agent, wait again for at most 120 seconds:
+Herdr observes the foreground worker, not build-auto's internal subagents.
+Require the worker to launch all build-auto subagents synchronously, join them,
+and print its final coordinator report only after the skill returns.
 
-```bash
-herdr agent wait <unique-name> --until idle --until done --until blocked \
-  --timeout 120000
-```
+Treat `idle`, `unknown`, timeout, and `agent_not_running` as observations, not
+success or failure by themselves. After each observation, inspect process
+liveness and pane output. While the process is live and output shows explicit
+progress, poll in bounded windows of at most 120 seconds. Do not spin on an idle
+agent. A complete report plus independently verified artifacts can be accepted
+after the process exits. Otherwise allow one narrowly scoped recovery worker
+for an operational failure; never use recovery to bypass a build-auto `blocked`
+result or a product, approval, security, data-integrity, or external-evidence
+gate.
 
-Then repeat the inspection. Continue this bounded polling only while the process
-is live and the stage's overall deadline remains. If the agent command returns
-`agent_not_running`, the name can no longer be used: inspect the retained pane
-with `pane process-info` and `pane read`, then verify the required artifacts,
-report, git state, and sprint entry. Treat an exited worker with a complete,
-independently verified report as a completed stage; treat any other exit as a
-failed stage eligible for one recovery worker.
-
-`idle` and `unknown` are lifecycle observations, not completion evidence. On
-every lifecycle result or timeout, run this reconciliation loop before deciding
-to wait again:
-
-```bash
-herdr pane process-info --pane <worker-pane-id>
-herdr pane read <worker-pane-id> --source recent-unwrapped --lines 300
-```
-
-Classify the actual pane output together with process liveness:
-
-- If output explicitly says a subagent, review layer, command, or required task
-  is still running or pending, and the worker process is live, keep polling its
-  output on a bounded interval. Do not use `agent wait` after `idle`, because it
-  returns immediately for the already-idle state and would spin.
-- If output contains the complete report, parse it and perform the normal
-  independent verification.
-- If output gives a substantive final result but the report is absent or
-  malformed, first verify the stage's objective artifacts, git state, tests,
-  and sprint entry. If they show the stage is complete and no child is reported
-  as running, send one non-mutating report-transport prompt to the same live
-  worker: `Your prior stage result appears complete. Do not edit, test, commit,
-  synchronize, or start subagents. Print only a complete
-  --- CHIEF-OF-STAFF-REPORT --- block for that completed result.` Then wait at
-  most 120 seconds and re-read the pane once.
-- If output neither establishes progress nor a completed result, or the live
-  worker does not answer the one report-transport prompt within its bounded
-  window, treat the stage as failed and use the one recovery worker. Do not keep
-  waiting merely because the pane remains `idle`.
-- If the process has exited, apply the exited-worker rules above immediately;
-  do not wait for a report marker.
-
-For an in-progress live worker, retain the latest pane snapshot, pause for a
-short bounded interval, then re-read it:
-
-```bash
-sleep 15
-herdr pane process-info --pane <worker-pane-id>
-herdr pane read <worker-pane-id> --source recent-unwrapped --lines 300
-```
-
-Compare the new snapshot with the retained one. A changed snapshot or explicit
-in-progress output is evidence to continue; an unchanged idle pane is not. Stop
-the polling loop after 120 seconds without new or explicit in-progress evidence,
-then run the failed-stage recovery path rather than waiting indefinitely.
-Continue only while output shows in-progress work, the process is live, and the
-stage deadline remains. On `blocked`, read the pane and relevant artifacts before
-recovery. Use `agent explain` evidence to diagnose a fallback or misclassified
-OpenCode state; do not treat it as proof that the work succeeded.
-
-Every mutating worker must end with this complete report as its final substantive
-output:
+Every worker must finish with:
 
 ```text
 --- CHIEF-OF-STAFF-REPORT ---
 RESULT: SUCCESS or BLOCKED
-TARGET: <story key or epic number>
-STATUS: <story/epic status after this stage>
-STATUS SYNCHRONIZED: yes or no
-COMMIT: <full SHA or none>
-TESTS: <commands and outcomes>
-REVIEW: <not-run, clean, or finding summary>
+STAGE: dispatch, sprint-sync, or epic-finalize
+TARGET: <story id or epic number>
+SPEC: <absolute generated spec path or none>
+SPEC STATUS: <status or none>
+SPRINT STATUS: <exact key and status or unchanged>
+START HEAD: <full SHA>
+END HEAD: <full SHA>
+TESTS: <commands and outcomes or not-run>
 SUMMARY: <concise evidence>
-BLOCKER: <none or reason>
+BLOCKER: <none or exact reason>
 --- END-CHIEF-OF-STAFF-REPORT ---
 ```
 
-Accept a report only if every field is unambiguous. Independently confirm its
-target status in `sprint-status.yaml`; confirm named story/spec paths exist; and
-confirm a named commit resolves with `git rev-parse`. A success report without
-the expected synchronized status is a failed stage, not a completed stage.
+Accept a report only when every field is unambiguous and agrees with the files,
+Git revisions, and worktree state. A report is transport, never authority.
 
-## Story Lifecycle
+## Coordinator Loop
 
-### 1. Prepare a Backlog Story
+### 1. Select The Next Story
 
-If the selected story is `backlog`, run a fresh worker with:
+Walk `stories.yaml` in file order and select the first story not complete under
+the Authoritative State rules.
 
-```text
-Use bmad-create-story to create and validate only story <story-key>.
-Work non-interactively where the skill permits. Do not implement code.
-After validation passes, synchronize only this story to ready-for-dev in
-sprint-status.yaml. Commit only the target story file and sprint-status.yaml
-with a conventional documentation commit, leaving the worktree clean.
-End with the Chief-of-Staff report.
-```
+- If its generated spec is `done` but its sprint entry is not, skip dispatch
+  and run Post-build Sprint Sync.
+- If its generated spec is `blocked`, stop and escalate with the persisted
+  blocking evidence.
+- If its generated spec is missing or resumable, run Pre-dispatch Sprint Sync,
+  then Dispatch Build Auto.
+- If every story is complete, run Epic Finalization.
 
-Continue only when the target story file exists, both it and the sprint entry say
-`ready-for-dev`, the reported commit exists, and `git status --porcelain=v1` is
-empty. This mandatory commit boundary prevents `bmad-dev-auto` from halting on
-the create/validate artifacts.
+Never dispatch a later story while an earlier entry is incomplete, even when a
+later story's numeric id is smaller or its sprint status was changed manually.
 
-### 2. Develop With Dev Auto
+### 2. Pre-dispatch Sprint Sync
 
-For a `ready-for-dev` story, capture `baseline_sha=$(git rev-parse HEAD)`, then
-run one fresh worker with:
+If needed, run a fresh status worker that changes only `sprint-status.yaml`:
 
 ```text
-Run bmad-dev-auto for the supplied BMAD story.
-
-Authoritative requirements: <absolute story path>
-Sprint status: <absolute sprint-status.yaml path>
-Target story key: <story-key>
-Baseline commit before this story: <baseline_sha>
-
-Read the BMad story fully and treat it as authoritative requirements. Invoke
-bmad-dev-auto with the story path and complete its plan, implementation, review,
-repair, verification, and commit loop. Its runtime spec is supplementary and
-never replaces the BMad story. All subagents must be synchronous/blocking.
-Do not update the BMad story status or sprint status in this stage and do not
-start another story. Leave the worktree clean.
-
-End with the Chief-of-Staff report. STATUS must remain ready-for-dev and COMMIT
-must be bmad-dev-auto's implementation commit SHA.
-```
-
-Accept only `bmad-dev-auto: done`, a clean worktree, a resolved implementation
-commit, and a matching runtime spec with `status: done`. The coordinator retains
-`baseline_sha` and the implementation SHA for the independent review.
-
-### 3. Independent Story Review
-
-Run a new worker after every successful development stage:
-
-```text
-Review target: Story <story-key> at <absolute story path>
-Diff range: <baseline_sha>..<implementation_sha>
-Sprint status: <absolute sprint-status.yaml path>
-
-Perform an unattended independent code review. Construct exactly the supplied
-diff range and read the complete BMad story. Run these three review layers in
-parallel and synchronously: bmad-review-adversarial-general (Blind Hunter),
-bmad-review-edge-case-hunter, and an Acceptance Auditor that checks every story
-acceptance criterion and scope constraint. Wait for every layer or explicitly
-record its failure. Do not use bmad-code-review because it has human checkpoints.
-
-Do not apply code changes or start another story. Triage findings as patch,
-decision-needed, defer, or dismiss. Treat patch and decision-needed findings as
-actionable. A clean review has no actionable findings and no failed layer; then
-update the BMad story and exact sprint entry to done. Otherwise update both to
-in-progress and list every actionable finding in the final report. End with the
-Chief-of-Staff report.
-```
-
-If clean, verify both records are `done`, then commit only that story record and
-`sprint-status.yaml` in a separate conventional status commit. Require a clean
-tree before selecting the next story.
-
-If findings exist, run the bounded repair loop below. A failed review layer is
-not clean; record it as a blocker unless the worker explicitly records the layer
-failure and an independent recovery review succeeds.
-
-### 4. Bounded Story Repair
-
-For review findings, run one fresh repair worker with the exact finding list:
-
-```text
-Repair only the supplied independent-review findings for <story-key>.
-Authoritative story: <absolute story path>
-Findings: <verbatim accepted review findings>
-
-Do not start another story. Update the BMad story record, run relevant tests,
-commit only the repair and its intended story/spec artifacts, and leave the
-target sprint entry in ready-for-dev. Do not mark it done. End with the
-Chief-of-Staff report including the repair commit SHA.
-```
-
-After one repair, rerun Independent Story Review using the repair commit as the
-new range end. Permit at most two independent story reviews total. If the second
-review has findings, make one final repair, run required verification, update
-the BMad story and sprint entry to `done`, and commit the repair plus status
-transition. This administrative finalization is permitted only when the second
-review findings were all unambiguous patches; high, security, data-integrity,
-acceptance-criteria, or systemic findings block and escalate instead.
-
-## Epic Completion
-
-After all runnable stories in the selected epic are done, run one new worker:
-
-```text
-Perform an unattended independent review for completed Epic <epic-number>.
-Review all story acceptance criteria, the aggregate diff from
-<epic_baseline_sha> to HEAD, and cross-story integration.
+Prepare story <story-id> in Epic <N> for folder+ID build-auto dispatch.
 
 Sprint status: <absolute sprint-status.yaml path>
-Run Blind Hunter, Edge Case Hunter, and Acceptance Auditor in parallel and
-synchronously. Do not use bmad-code-review because it has human checkpoints.
-Do not edit code. A clean review must set epic-<epic-number> to done and preserve
-every story as done. If findings are actionable, preserve the epic as in-progress,
-identify affected story keys, and end with the Chief-of-Staff report.
+Generated story spec: <absolute path or none>
+
+Parse the YAML. Resolve exactly one story key beginning with `<story-id>-`.
+Require it to be backlog or in-progress; refuse done when the generated spec is
+not done. Set epic-<N> to in-progress and the exact story entry to in-progress.
+Do not change another entry. Commit only sprint-status.yaml with a conventional
+status commit if a change is needed. Leave the worktree clean. Do not invoke
+bmad-build-auto or edit a generated spec. End with the Chief-of-Staff report.
 ```
 
-For the first actionable Epic Review, repair each affected story in numeric
-order using the bounded Story Repair procedure, then rerun the Epic Review once.
-If the second Epic Review has any actionable finding, block and escalate with the
-complete reports and affected keys. Do not mark an Epic done after an unclean
-Epic Review.
+Verify the exact entries, commit when changed, and clean tree before dispatch.
 
-On a clean Epic Review, verify `epic-<N>: done`, every runnable story `done`, and
-a clean worktree. Commit the Epic status/review record if it is uncommitted,
-then report all implementation/status commits and Epic Review outcome.
+### 3. Dispatch Build Auto
 
-## Recovery And Escalation
+Capture `start_head=$(git rev-parse HEAD)`. Read only the selected
+`stories.yaml` entry and preserve its `invoke_dev_with` value verbatim when
+present. Start one fresh worker with:
 
-For a failed stage, inspect the worker output, git state, story artifact, and
-sprint entry. Make at most one narrowly scoped recovery worker that receives the
-exact failure evidence and may repair only the current stage. Re-verify the
-same completion conditions afterward. Never use recovery to start a different
-story, absorb unrelated changes, invent approval, bypass a required review, or
-force a status transition.
+```text
+Use bmad-build-auto exactly once for this folder+ID dispatch and wait for all of
+its synchronous subagents before returning.
 
-After every successful verification or recovery, immediately select and execute
-the next permitted stage for the same epic. Do not pause to summarize progress,
-request confirmation, or wait for the user merely because a worker completed,
-went idle, exited, or produced an incomplete report. Continue until the epic is
-done or one of the escalation conditions below is evidenced.
+Spec folder: <absolute spec-folder path>
+Story id: <story-id>
+Additional planning context from invoke_dev_with: <verbatim value or none>
+Sprint status: <absolute sprint-status.yaml path; read-only in this stage>
+Start HEAD: <start_head>
 
-Escalate only after the one recovery attempt fails, authoritative artifacts
-conflict, credentials or an external dependency are unavailable, a destructive
-operation is required, or a decision-needed/high-risk review finding cannot be
-resolved from the story. Report the evidence, safe options, and the exact
-decision needed. On success, close every pane recorded by this run one at a
-time.
+Let bmad-build-auto own planning, implementation, review, repairs, verification,
+generated story-spec state, and reviewed commits. Do not run bmad-create-story,
+bmad-dev-auto, bmad-code-review, or separate review skills. Do not edit
+sprint-status.yaml and do not start another story. Do not push. After
+bmad-build-auto reaches its terminal status, inspect the generated story spec
+and Git state, then end with the Chief-of-Staff report.
+```
+
+On `done`, require exactly one matching generated story spec with `status: done`,
+a resolvable `baseline_revision` when Git is available, a valid `END HEAD`, all
+named verification outcomes present in the spec, and a clean worktree. Confirm
+that `sprint-status.yaml` did not change during dispatch.
+
+If `followup_review_recommended: true`, dispatch the same folder and story id
+once more before sprint synchronization. A `done` spec makes build-auto perform
+a fresh review pass. Permit at most one coordinator-triggered follow-up pass per
+story; a remaining recommendation is residual evidence, not permission for an
+unbounded loop, and must be included in the final summary.
+
+On `blocked`, require the matching spec to record `status: blocked` and the
+blocking condition under `## Auto Run Result`. Preserve the worktree and stop;
+do not force it clean by committing or reverting blocked work.
+
+### 4. Post-build Sprint Sync
+
+After a verified `done` spec, run a fresh status worker:
+
+```text
+Synchronize completed build-auto story <story-id> for Epic <N>.
+
+Generated story spec: <absolute generated spec path>
+Sprint status: <absolute sprint-status.yaml path>
+
+Require the generated spec frontmatter to say done. Parse sprint YAML and
+resolve exactly one story key beginning with `<story-id>-`. Set only that entry
+to done and preserve epic-<N> as in-progress. Commit only sprint-status.yaml
+with a conventional status commit if a change is needed. Leave the worktree
+clean. Do not modify code or the generated spec. End with the Chief-of-Staff
+report.
+```
+
+Verify the generated spec remains `done`, the exact sprint entry is `done`, the
+commit exists when a change was needed, and the tree is clean. Immediately
+re-enter the coordinator loop; do not pause between stories.
+
+### 5. Epic Finalization
+
+Re-read every `stories.yaml` entry. Require exactly one matching generated spec
+with `status: done` and exactly one matching sprint entry with `done` for every
+entry. Require a clean worktree. Then run one fresh status worker:
+
+```text
+Finalize Epic <N> after all folder+ID build-auto stories completed.
+
+Spec folder: <absolute spec-folder path>
+Sprint status: <absolute sprint-status.yaml path>
+
+Parse stories.yaml in file order. Independently verify every entry has exactly
+one generated story spec with status done and exactly one sprint key beginning
+with `<story-id>-` whose status is done. If and only if all checks pass, set
+epic-<N> to done. Change no story status. Commit only sprint-status.yaml with a
+conventional status commit and leave the worktree clean. Do not run a
+retrospective, push, or start another epic. End with the Chief-of-Staff report.
+```
+
+Verify `epic-<N>: done`, all story evidence again, the finalization commit, and a
+clean tree. Close this run's recorded panes one at a time and report the ordered
+story ids, build commit ranges, sprint-status commits, any residual follow-up
+recommendations, and the final epic status.
+
+## Escalation
+
+Escalate only for a persisted build-auto `blocked` result, an authoritative-state
+conflict, unavailable credentials or external dependency, a required
+destructive action, a real approval or elapsed-time gate, or an exhausted
+single operational recovery. State the evidence, safe options, and exact user
+decision or external condition needed. Do not ask the user merely because a
+worker became quiet, idle, timed out, exited, or omitted its report while a safe
+bounded inspection or recovery remains.
