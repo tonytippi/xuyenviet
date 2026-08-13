@@ -332,7 +332,7 @@ describe.sequential("YouTube Discovery run execution", () => {
     setYoutubeDiscoveryExecutionTimeoutForTest(5);
     await expect(runYoutubeDiscoveryPoll("discovery-timeout")).resolves.toMatchObject({ resultCode: "retry", durableId: run.id });
     expect(aborted).toBe(true);
-    await expect(testDb.select().from(youtubeDiscoveryRuns).where(eq(youtubeDiscoveryRuns.id, run.id))).resolves.toMatchObject([{ state: "retrying", safeErrorCode: "stage_transient" }]);
+    await expect(testDb.select().from(youtubeDiscoveryRuns).where(eq(youtubeDiscoveryRuns.id, run.id))).resolves.toMatchObject([{ state: "retrying", safeErrorCode: "execution_timeout" }]);
   });
 
   test("does not start triage when the outer execution deadline cannot fit its bounded timeout", async () => {
@@ -350,7 +350,7 @@ describe.sequential("YouTube Discovery run execution", () => {
 
     await expect(runYoutubeDiscoveryPoll("discovery-triage-deadline")).resolves.toMatchObject({ resultCode: "retry", durableId: run.id });
     expect(triageCalls).toBe(0);
-    await expect(testDb.select({ state: youtubeDiscoveryRuns.state, safeErrorCode: youtubeDiscoveryRuns.safeErrorCode }).from(youtubeDiscoveryRuns).where(eq(youtubeDiscoveryRuns.id, run.id))).resolves.toEqual([{ state: "retrying", safeErrorCode: "stage_transient" }]);
+    await expect(testDb.select({ state: youtubeDiscoveryRuns.state, safeErrorCode: youtubeDiscoveryRuns.safeErrorCode }).from(youtubeDiscoveryRuns).where(eq(youtubeDiscoveryRuns.id, run.id))).resolves.toEqual([{ state: "retrying", safeErrorCode: "triage_timeout" }]);
   });
 
   test("persists a Gateway triage failure and retries the run", async () => {
@@ -365,7 +365,7 @@ describe.sequential("YouTube Discovery run execution", () => {
     setYoutubeDiscoveryTriageCompletionForTest(async () => ({ ok: false, provider: "ai_gateway", model: "test/triage", latencyMs: 1, errorCode: "gateway_network_error", requestMetadata: { providerRequestId: null } }));
 
     await expect(runYoutubeDiscoveryPoll("discovery-triage-retry")).resolves.toMatchObject({ resultCode: "retry", durableId: run.id });
-    await expect(testDb.select({ state: youtubeDiscoveryRuns.state, safeErrorCode: youtubeDiscoveryRuns.safeErrorCode }).from(youtubeDiscoveryRuns).where(eq(youtubeDiscoveryRuns.id, run.id))).resolves.toEqual([{ state: "retrying", safeErrorCode: "stage_transient" }]);
+    await expect(testDb.select({ state: youtubeDiscoveryRuns.state, safeErrorCode: youtubeDiscoveryRuns.safeErrorCode }).from(youtubeDiscoveryRuns).where(eq(youtubeDiscoveryRuns.id, run.id))).resolves.toEqual([{ state: "retrying", safeErrorCode: "triage_transient" }]);
     await expect(testDb.select({ status: youtubeDiscoveryTriages.status }).from(youtubeDiscoveryTriages)).resolves.toEqual([{ status: "gateway_failed" }]);
   });
 
@@ -398,7 +398,7 @@ describe.sequential("YouTube Discovery run execution", () => {
 
     await expect(runYoutubeDiscoveryPoll("discovery-enrichment-failure")).resolves.toMatchObject({ resultCode: "retry", durableId: run.id });
     await expect(testDb.select().from(youtubeDiscoveryCandidates)).resolves.toHaveLength(1);
-    await expect(testDb.select().from(youtubeDiscoveryRuns).where(eq(youtubeDiscoveryRuns.id, run.id))).resolves.toMatchObject([{ state: "retrying", safeErrorCode: "stage_transient" }]);
+    await expect(testDb.select().from(youtubeDiscoveryRuns).where(eq(youtubeDiscoveryRuns.id, run.id))).resolves.toMatchObject([{ state: "retrying", safeErrorCode: "enrichment_transient" }]);
   });
 
   test("does not call another eligibility check after policy revocation", async () => {

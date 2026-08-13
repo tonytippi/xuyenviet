@@ -1,5 +1,5 @@
 # generated: 2026-07-25
-# last_updated: 2026-08-13 (Epic 21 story guides 21.1-21.12 created; all are ready-for-dev.)
+# last_updated: 2026-08-13 (Epic 20 Story 20.6 candidate-job correction ready-for-dev; Epic 21 story guides 21.1-21.12 remain ready-for-dev.)
 # project: xuyenviet
 # project_key: NOKEY
 # tracking_system: file-system
@@ -33,7 +33,7 @@
 #   - done: Completed
 
 generated: 2026-07-25
-last_updated: 2026-08-13 (Epic 21 story guides 21.1-21.12 created; all are ready-for-dev.)
+last_updated: 2026-08-13 (Epic 20 Story 20.6 candidate-job correction ready-for-dev; Epic 21 story guides 21.1-21.12 remain ready-for-dev.)
 project: xuyenviet
 project_key: NOKEY
 tracking_system: file-system
@@ -442,14 +442,17 @@ development_status:
 
   # 2026-08-11: Story 20.1 guide created. Initial operational policy is versioned/audited: high priority 1..20; pending-review age 72h; Mission stall 48h; high-impact open Knowledge risk/relation at priority 1..20; two same query/category terminal failures in 24h; safely classified rate limits escalate immediately.
   # 2026-08-12: Documentation synchronization confirmed Stories 20.1-20.5 are done.
-  # No Discovery implementation remains; the retrospective is optional.
-  epic-20: done
+  # 2026-08-13: Approved course correction adds Story 20.6. It separates
+  # candidate-job retries from completed search runs to remove URL-level
+  # head-of-line blocking without altering Knowledge/manual-capture ownership.
+  epic-20: in-progress
   20-1-build-the-action-required-discovery-queue: done
   # 2026-08-11: All seven BMad review repairs are complete. Focused unit (8) and serial Mission integration/API (20) tests, typecheck, build, and diff check pass. Full integration remains blocked by 17 unrelated failures; no Story 20.2 test failed.
   20-2-deliver-knowledge-mission-drill-downs: done
   20-3-deliver-automation-health-and-safe-incident-detail: done
   20-4-control-discovery-enablement-safely: done
   20-5-verify-control-tower-accessibility-and-operational-boundaries: done
+  20-6-decouple-candidate-processing-from-discovery-search-runs: ready-for-dev
   epic-20-retrospective: optional
 
   # Epic 21 readiness passed 2026-08-13. Every story must cite the v6.2

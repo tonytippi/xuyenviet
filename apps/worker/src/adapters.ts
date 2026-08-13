@@ -1,5 +1,5 @@
 import { runWorkerAdapter } from "@xuyenviet/worker-domain/adapters";
-import { consoleOperationalTelemetrySink, type OperationalTelemetrySink } from "@xuyenviet/contracts";
+import { consoleOperationalTelemetrySink, type OperationalTelemetrySink, type WorkerPollObservation } from "@xuyenviet/contracts";
 import { closeDatabaseClient, createAiAskDiscoveryQuerySignalPort, createKnowledgeDiscoveryQuerySignalPort, createYoutubeCaptureEligibilityPort } from "@xuyenviet/database";
 import { bindYoutubeDiscoveryExecutionPorts, bindYoutubeDiscoveryPlanningPorts } from "@xuyenviet/worker-domain";
 import { closeSync, constants, openSync, writeSync } from "node:fs";
@@ -31,13 +31,26 @@ async function main() {
       createAiAskDiscoveryQuerySignalPort(),
     );
     bindYoutubeDiscoveryExecutionPorts(createYoutubeCaptureEligibilityPort(), undefined, youtubeDataApiKey);
-    await runWorkerAdapter(process.argv.slice(2), { telemetry: testTelemetryFileSink() ?? consoleOperationalTelemetrySink });
+    const observation = await runWorkerAdapter(process.argv.slice(2), { telemetry: testTelemetryFileSink() ?? actionableTelemetrySink });
+    writeDiscoveryDiagnostic(observation);
   } catch {
     console.error("Worker adapter failed");
     process.exitCode = 1;
   } finally {
     await closeDatabaseClient();
   }
+}
+
+const actionableTelemetrySink: OperationalTelemetrySink = {
+  emit(event) {
+    if (["retry", "failure", "contended"].includes(event.resultCode)) return consoleOperationalTelemetrySink.emit(event);
+  },
+};
+
+function writeDiscoveryDiagnostic(observation: WorkerPollObservation) {
+  if (observation.capability !== "youtube.discovery" || !observation.durableId || !observation.diagnosticCode || !observation.diagnosticStage) return;
+  const event = { capability: observation.capability, runId: observation.durableId, resultCode: observation.resultCode, safeErrorCode: observation.diagnosticCode, lastStage: observation.diagnosticStage, retryCount: observation.retryCount ?? 0, leaseRecovery: observation.leaseRecovery ?? "none" };
+  process.stderr.write(`youtube_discovery_diagnostic ${JSON.stringify(event)}\n`);
 }
 
 await main();

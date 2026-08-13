@@ -13,6 +13,7 @@ Give authorized operators one focused Discovery control tower for the small set 
 - Story 20.3: Deliver Automation Health and Safe Incident Detail
 - Story 20.4: Control Discovery Enablement Safely
 - Story 20.5: Verify Control Tower Accessibility and Operational Boundaries
+- Story 20.6: Decouple Candidate Processing From Discovery Search Runs
 
 ## Requirements & Constraints
 
@@ -30,9 +31,9 @@ Never persist or display raw comments, source material, evidence spans, traveler
 
 ## Technical Decisions
 
-Discovery is a PostgreSQL-backed, modular operational workflow. Discovery owns its policy, query, candidate, run, audit, and safe read-model records through Drizzle migrations; normal control-tower reads use projections. `apps/admin` is a typed presentation client, while role-protected admin API commands own mutations. The Worker, not request-serving API code, owns due-run execution, provider calls, retries, and run transitions.
+Discovery is a PostgreSQL-backed, modular operational workflow. Discovery owns its policy, query, candidate, query-run, candidate-job, audit, and safe read-model records through Drizzle migrations; normal control-tower reads use projections. `apps/admin` is a typed presentation client, while role-protected admin API commands own mutations. The Worker, not request-serving API code, owns due-run execution, candidate-job provider calls, retries, and execution transitions.
 
-Use the established Discovery policy as one versioned PostgreSQL record for global enablement, scoring, cadence, retention, and bounded concurrency/retry configuration. Runs snapshot the effective policy version. Worker work is protected by PostgreSQL leases and fencing; it rechecks current enablement and the captured policy at every provider-call and Discovery-write boundary. Run state remains the closed lifecycle `queued`, `running`, `retrying`, `completed`, `failed`, or `cancelled`; terminal states are never reopened. Automated execution uses the registered `system-youtube-discovery` executor and retains safe audit attribution.
+Use the established Discovery policy as one versioned PostgreSQL record for global enablement, scoring, cadence, retention, and bounded concurrency/retry configuration. Query runs and candidate jobs snapshot effective execution policy. A query run is limited to search, canonical persistence, immutable appearance persistence, and fenced idempotent candidate-job enqueue; it completes without waiting for downstream URL processing. A candidate job owns enrichment, triage, eligibility, recommendation, Usage, and ranking writes for one immutable appearance. Worker work is protected by PostgreSQL leases and fencing; it rechecks current enablement at every provider-call and Discovery-write boundary. Both execution records use the closed lifecycle `queued`, `running`, `retrying`, `completed`, `failed`, or `cancelled`; terminal states are never reopened. Policy-bounded candidate backlog backpressures new query admission without cancelling existing jobs. Automated execution uses the registered `system-youtube-discovery` executor and retains safe audit attribution.
 
 Preserve the separate closed meanings of triage recommendation (`skip`, `defer`, `consider`), mutable candidate operator state (`pending`, `accepted`, `deferred`, `skipped`), and run state. Candidate identity is the canonical YouTube video ID and safe canonical URL; query/run appearances and ranking history remain linked without duplicate review work. Query projections must preserve `system` versus `operator` origin, reason, priority, text, enabled/paused state, cadence, and next-run context.
 

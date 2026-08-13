@@ -95,6 +95,18 @@ describe.sequential("YouTube Discovery foundation persistence", () => {
     expect(audits[0]!.afterSummary).not.toContain("Da Lat");
   });
 
+  test("schedules a newly planned system proposal immediately, then advances its regular cadence", async () => {
+    await createYoutubeDiscoveryPolicyVersion({ version: 1, isCurrent: true, policy: { cadenceMinutes: 15 }, actor: createSystemAuditActor("system-youtube-discovery") }, testDb);
+    const claim = await claimYoutubeDiscoveryPlanning("discovery-a", testDb);
+
+    await expect(refreshYoutubeDiscoverySystemProposals(claim!, [{ status: "available", signals: [{ reason: "coverage_gap", geography: "Da Lat", taxonomy: "route", priority: 70 }] }], testDb)).resolves.toBe("completed");
+    await expect(scheduleYoutubeDiscoveryDueRuns(testDb)).resolves.toBe(1);
+
+    const [proposal] = await testDb.select({ scheduleAnchorAt: youtubeDiscoveryQueryProposals.scheduleAnchorAt, nextDueAt: youtubeDiscoveryQueryProposals.nextDueAt }).from(youtubeDiscoveryQueryProposals);
+    await expect(testDb.select({ queryProposalId: youtubeDiscoveryRuns.queryProposalId }).from(youtubeDiscoveryRuns)).resolves.toHaveLength(1);
+    expect(proposal!.nextDueAt!.getTime()).toBeGreaterThan(proposal!.scheduleAnchorAt!.getTime());
+  });
+
   test("turns an owner-published bounded Knowledge aggregate into one idempotent system proposal", async () => {
     await seedTestOperator();
     await createYoutubeDiscoveryPolicyVersion({ version: 1, isCurrent: true, policy: { cadenceMinutes: 15 }, actor: createSystemAuditActor("system-youtube-discovery") }, testDb);

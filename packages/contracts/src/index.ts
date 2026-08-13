@@ -452,6 +452,8 @@ export type WorkerPollObservation = {
   capability: "knowledge.extraction" | "knowledge.ingestion" | "knowledge.indexing" | "knowledge.sampling" | "ai_ask.outbox" | "youtube.discovery";
   resultCode: "success" | "no_work" | "retry" | "failure" | "contended";
   durableId?: string;
+  diagnosticCode?: string;
+  diagnosticStage?: string;
   jobLagMs?: number;
   retryCount?: number;
   leaseRecovery?: "none" | "recovered" | "contended";

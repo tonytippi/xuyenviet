@@ -1,4 +1,4 @@
-import { cancelYoutubeDiscoveryRunIfDisabled, claimNextYoutubeDiscoveryRun, claimYoutubeDiscoveryPlanning, completeYoutubeDiscoveryTriage, finishYoutubeDiscoveryRun, getYoutubeDiscoveryRecommendationBundle, getYoutubeDiscoveryRunQuery, getYoutubeDiscoveryTriageBundle, parseYoutubeDiscoveryTriageAssessment, persistYoutubeDiscoveryCandidates, persistYoutubeDiscoveryEnrichment, persistYoutubeDiscoveryRecommendation, persistYoutubeDiscoveryTriage, refreshYoutubeDiscoverySystemProposals, retainYoutubeDiscoveryRecords, retryYoutubeDiscoveryRun, scheduleYoutubeDiscoveryDueRuns, selectYoutubeDiscoveryTriageModel } from "@xuyenviet/database";
+import { cancelYoutubeDiscoveryRunIfDisabled, claimNextYoutubeDiscoveryRun, claimYoutubeDiscoveryPlanning, completeYoutubeDiscoveryTriage, finishYoutubeDiscoveryRun, getYoutubeDiscoveryRecommendationBundle, getYoutubeDiscoveryRunQuery, getYoutubeDiscoveryTriageBundle, parseYoutubeDiscoveryTriageAssessment, persistYoutubeDiscoveryCandidates, persistYoutubeDiscoveryEnrichment, persistYoutubeDiscoveryRecommendation, persistYoutubeDiscoveryTriage, refreshYoutubeDiscoverySystemProposals, retainYoutubeDiscoveryRecords, retryYoutubeDiscoveryRun, scheduleYoutubeDiscoveryDueRuns, selectYoutubeDiscoveryTriageModel, type YoutubeDiscoveryRunSafeErrorCode } from "@xuyenviet/database";
 import type { WorkerPollObservation } from "@xuyenviet/contracts";
 import { createUnavailableAiAskDiscoveryQuerySignalPort, createUnavailableKnowledgeDiscoveryQuerySignalPort, type AiAskDiscoveryQuerySignalPort, type DiscoveryQuerySignalPortResult, type KnowledgeDiscoveryQuerySignalPort, type YoutubeCaptureEligibilityPort } from "@xuyenviet/domain";
 import { searchYoutubeVideos } from "./youtube-search";
@@ -6,6 +6,7 @@ import { enrichYoutubeVideo } from "./youtube-enrichment";
 
 type DiscoveryStageResult = "complete" | "cancelled" | "stage_transient";
 type DiscoveryIncidentCategory = "provider_rate_limited" | "triage_schema_invalid";
+type DiscoveryDiagnosticStage = "load_query" | "search" | "persist_candidates" | "enrichment" | "persist_enrichment" | "triage" | "load_recommendation" | "eligibility" | "persist_recommendation";
 const planningPortTimeoutMs = 1_000;
 // Keep external work comfortably inside the active five-minute run lease.
 const executionStageTimeoutMs = 240_000;
@@ -37,6 +38,8 @@ export async function runYoutubeDiscoveryPoll(workerId: string): Promise<WorkerP
   if (active !== "active") return observationFor(claim.claim, active === "cancelled" ? "success" : "contended");
   let stageResult: DiscoveryStageResult;
   let incidentCategory: DiscoveryIncidentCategory | null = null;
+  let retryErrorCode: Exclude<YoutubeDiscoveryRunSafeErrorCode, "retry_exhausted" | "lease_retry_exhausted" | "policy_revoked"> = "stage_transient";
+  let lastStage: DiscoveryDiagnosticStage = "load_query";
   try {
     // The test seam exercises generic lease mechanics only; real provider work
     // must first read an enabled proposal through the fenced query accessor.
@@ -45,7 +48,7 @@ export async function runYoutubeDiscoveryPoll(workerId: string): Promise<WorkerP
       const run = await getYoutubeDiscoveryRunQuery(claim.claim);
       if (run === "cancelled") return observationFor(claim.claim, (await cancelYoutubeDiscoveryRunIfDisabled(claim.claim, undefined, true)) === "cancelled" ? "success" : "contended");
       if (run === "contended") return observationFor(claim.claim, "contended");
-      else if (!youtubeCaptureEligibilityPort) stageResult = "stage_transient";
+      else if (!youtubeCaptureEligibilityPort) { stageResult = "stage_transient"; retryErrorCode = "eligibility_unavailable"; }
       else {
         const activeClaim = claim.claim!;
         const apiKey = youtubeDataApiKey!;
@@ -54,45 +57,53 @@ export async function runYoutubeDiscoveryPoll(workerId: string): Promise<WorkerP
         const timedOut = Symbol("youtube_discovery_execution_timeout");
         try {
           const executionDeadlineAt = Date.now() + (executionStageTimeoutOverrideMs ?? executionStageTimeoutMs);
+          lastStage = "search";
           const result = await Promise.race([
             runYoutubeDiscoveryExecutionStage(claim.claim, run.queryText, controller.signal),
             new Promise<typeof timedOut>((resolve) => { timeout = setTimeout(() => { controller.abort(); resolve(timedOut); }, executionStageTimeoutOverrideMs ?? executionStageTimeoutMs); }),
           ]);
-          if (result === timedOut) stageResult = "stage_transient";
+          if (result === timedOut) { stageResult = "stage_transient"; retryErrorCode = "execution_timeout"; }
           else {
+            lastStage = "persist_candidates";
             const persisted = await persistYoutubeDiscoveryCandidates(activeClaim, result);
             if (persisted === "cancelled") return observationFor(activeClaim, "success");
-            if (persisted !== "completed") stageResult = "stage_transient";
+            if (persisted !== "completed") { stageResult = "stage_transient"; retryErrorCode = "stage_transient"; }
             else {
               for (const candidate of result) {
                 if ((await cancelYoutubeDiscoveryRunIfDisabled(activeClaim, undefined, true)) !== "active") throw new Error("youtube_enrichment_cancelled");
+                lastStage = "enrichment";
                 const enrichment = await youtubeEnrichment(candidate.videoId, apiKey, undefined, controller.signal, async () => {
                   if ((await cancelYoutubeDiscoveryRunIfDisabled(activeClaim, undefined, true)) !== "active") throw new Error("youtube_enrichment_cancelled");
                 });
+                lastStage = "persist_enrichment";
                 const stored = await persistYoutubeDiscoveryEnrichment(activeClaim, enrichment);
                 if (stored === "cancelled") return observationFor(activeClaim, "success");
                 if (stored !== "completed") throw new Error("youtube_enrichment_contended");
+                lastStage = "triage";
                 const triage = await runYoutubeDiscoveryTriage(activeClaim, candidate.videoId, controller.signal, executionDeadlineAt);
                 if (triage === "cancelled") return observationFor(activeClaim, "success");
                 if (triage !== "completed") {
                   if (triage === "schema_invalid") incidentCategory = "triage_schema_invalid";
                   else if (triage === "rate_limited") incidentCategory = "provider_rate_limited";
-                  throw new Error(triage === "deadline_exhausted" ? "youtube_triage_deadline_exhausted" : triage === "retry" ? "youtube_triage_transient" : "youtube_triage_contended");
+                  throw new Error(triage === "deadline_exhausted" ? "youtube_triage_timeout" : triage === "retry" ? "youtube_triage_transient" : "youtube_triage_contended");
                 }
                 // Check durable idempotency before crossing the opaque owner-port boundary.
+                lastStage = "load_recommendation";
                 const bundle = await getYoutubeDiscoveryRecommendationBundle(activeClaim, candidate.videoId);
                 if (bundle === "completed") continue;
                 if (bundle === "cancelled") return observationFor(activeClaim, "success");
                 if (bundle === "contended") throw new Error("youtube_recommendation_contended");
                 if (executionDeadlineAt <= Date.now() || controller.signal.aborted) throw new Error("youtube_recommendation_deadline_exhausted");
+                lastStage = "eligibility";
                 const eligibility = await raceWithDeadline(youtubeCaptureEligibilityPort!.check(candidate.videoId, controller.signal), controller.signal, executionDeadlineAt);
-                if ((eligibility !== "eligible" && eligibility !== "already_compatible") || controller.signal.aborted) throw new Error("youtube_capture_eligibility_unavailable");
+                if ((eligibility !== "eligible" && eligibility !== "already_compatible") || controller.signal.aborted) throw new Error("youtube_eligibility_unavailable");
                 const active = await cancelYoutubeDiscoveryRunIfDisabled(activeClaim, undefined, true);
                 if (active === "cancelled") return observationFor(activeClaim, "success");
                 if (active === "contended") throw new Error("youtube_eligibility_contended");
+                lastStage = "persist_recommendation";
                 const recommendation = await runYoutubeDiscoveryRecommendation(activeClaim, bundle, eligibility, controller.signal, executionDeadlineAt);
                 if (recommendation === "cancelled") return observationFor(activeClaim, "success");
-                if (recommendation !== "completed") throw new Error(recommendation === "deadline_exhausted" ? "youtube_recommendation_deadline_exhausted" : recommendation === "retry" ? "youtube_recommendation_transient" : "youtube_recommendation_contended");
+                if (recommendation !== "completed") throw new Error(recommendation === "deadline_exhausted" ? "youtube_recommendation_transient" : recommendation === "retry" ? "youtube_recommendation_transient" : "youtube_recommendation_contended");
               }
               stageResult = "complete";
             }
@@ -103,11 +114,25 @@ export async function runYoutubeDiscoveryPoll(workerId: string): Promise<WorkerP
       }
     }
   } catch (error) {
-    stageResult = error instanceof Error && error.message === "youtube_enrichment_cancelled" ? "cancelled" : "stage_transient";
+    const code = error instanceof Error ? error.message : "stage_transient";
+    stageResult = code === "youtube_enrichment_cancelled" ? "cancelled" : "stage_transient";
+    retryErrorCode = retryCodeFor(code);
   }
   if (stageResult === "cancelled") return observationFor(claim.claim, "success");
-  const disposition = stageResult === "complete" ? await finishYoutubeDiscoveryRun(claim.claim) : await retryYoutubeDiscoveryRun(claim.claim, incidentCategory);
-  return observationFor(claim.claim, disposition === "completed" ? "success" : disposition === "retrying" ? "retry" : disposition === "failed" ? "failure" : disposition === "cancelled" ? "success" : "contended");
+  const disposition = stageResult === "complete" ? await finishYoutubeDiscoveryRun(claim.claim) : await retryYoutubeDiscoveryRun(claim.claim, incidentCategory, undefined, retryErrorCode);
+  return observationFor(claim.claim, disposition === "completed" ? "success" : disposition === "retrying" ? "retry" : disposition === "failed" ? "failure" : disposition === "cancelled" ? "success" : "contended", disposition === "retrying" || disposition === "failed" ? retryErrorCode : undefined, disposition === "retrying" || disposition === "failed" ? lastStage : undefined);
+}
+
+function retryCodeFor(error: string): Exclude<YoutubeDiscoveryRunSafeErrorCode, "retry_exhausted" | "lease_retry_exhausted" | "policy_revoked"> {
+  if (error === "youtube_search_transient" || error === "youtube_search_configuration") return "search_transient";
+  if (error === "youtube_search_timeout") return "search_timeout";
+  if (error === "youtube_enrichment_transient" || error === "youtube_enrichment_configuration") return "enrichment_transient";
+  if (error === "youtube_triage_timeout") return "triage_timeout";
+  if (error === "youtube_triage_transient") return "triage_transient";
+  if (error === "youtube_eligibility_unavailable" || error === "youtube_capture_eligibility_unavailable") return "eligibility_unavailable";
+  if (error === "youtube_recommendation_transient") return "recommendation_transient";
+  if (error.endsWith("_contended")) return "persistence_contended";
+  return "stage_transient";
 }
 
 async function runYoutubeDiscoveryRecommendation(claim: NonNullable<Awaited<ReturnType<typeof claimNextYoutubeDiscoveryRun>>["claim"]>, bundle: Exclude<Awaited<ReturnType<typeof getYoutubeDiscoveryRecommendationBundle>>, "completed" | "cancelled" | "contended">, eligibility: "eligible" | "already_compatible", signal: AbortSignal, executionDeadlineAt: number): Promise<"completed" | "cancelled" | "contended" | "deadline_exhausted" | "retry"> {
@@ -165,12 +190,14 @@ async function runYoutubeDiscoveryExecutionStage(claim: NonNullable<Awaited<Retu
   return results;
 }
 
-function observationFor(claim: NonNullable<Awaited<ReturnType<typeof claimNextYoutubeDiscoveryRun>>["claim"]>, resultCode: WorkerPollObservation["resultCode"]): WorkerPollObservation {
+function observationFor(claim: NonNullable<Awaited<ReturnType<typeof claimNextYoutubeDiscoveryRun>>["claim"]>, resultCode: WorkerPollObservation["resultCode"], diagnosticCode?: string, diagnosticStage?: DiscoveryDiagnosticStage): WorkerPollObservation {
   return {
     capability: "youtube.discovery",
     resultCode,
     durableId: claim.id,
     retryCount: claim.attemptCount,
+    ...(diagnosticCode ? { diagnosticCode } : {}),
+    ...(diagnosticStage ? { diagnosticStage } : {}),
     jobLagMs: Math.max(0, claim.claimedAt.getTime() - claim.nextRunAt.getTime()),
     leaseRecovery: claim.recoveredCount ? "recovered" : "none",
     ...(claim.recoveredCount ? { leaseRecoveryCount: claim.recoveredCount } : {}),

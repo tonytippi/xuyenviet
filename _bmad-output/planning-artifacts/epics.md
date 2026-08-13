@@ -2461,7 +2461,7 @@ Operators can act on the few Discovery items that need attention, trace mission 
 
 **Requirements covered:** YTD-FR11, YTD-FR12; YTD-UX1, YTD-UX5, YTD-UX6, YTD-UX7, YTD-UX8; YTD-NFR7, YTD-NFR8.
 
-**Implementation notes:** The default entry is an action-required queue, not a KPI dashboard. Mission delivers Coverage needs, Queries, Candidates, and Funnel drill-down. Health delivers schedule, backlog, incidents, telemetry freshness, and safe affected-record detail. The immediate global switch fences Discovery work only; it never changes queued Knowledge sources or executes/cancels manual `youtube:capture`. Blocking/exclusion policy and hard budget enforcement remain deferred.
+**Implementation notes:** The default entry is an action-required queue, not a KPI dashboard. Mission delivers Coverage needs, Queries, Candidates, and Funnel drill-down. Health delivers schedule, backlog, incidents, telemetry freshness, and safe affected-record detail. The immediate global switch fences Discovery work only; it never changes queued Knowledge sources or executes/cancels manual `youtube:capture`. Story 20.6 corrects query-level head-of-line retry by separating durable candidate processing from search runs while preserving all control-tower ownership and safety boundaries. Blocking/exclusion policy and hard budget enforcement remain deferred.
 
 ### Story 18.1: Establish Discovery Ownership, Policy, and Audit Foundation
 
@@ -2887,6 +2887,39 @@ So that operational convenience cannot bypass the Discovery, Knowledge intake, o
 **When** they exercise one representative Action queue item, one Mission/Health drill-down, Accept, and the global switch
 **Then** no hidden path directly creates a source, invokes Gemini video analysis, schedules/retries `youtube:capture`, or changes a Knowledge claim
 **And** only the existing Knowledge intake API may create a source after a Discovery accept command.
+
+### Story 20.6: Decouple Candidate Processing From Discovery Search Runs
+
+As an operator,
+I want each discovered URL to be processed and retried independently after search,
+So that one failed enrichment, triage, or recommendation does not block a query run, unrelated URLs, or the Discovery review queue.
+
+**Acceptance Criteria:**
+
+**Given** an eligible query run returns documented YouTube search results
+**When** canonical candidates and immutable appearances persist under its active lease
+**Then** the same fenced transaction idempotently enqueues one candidate-processing job per appearance
+**And** the query run completes after search and enqueue without waiting for enrichment, triage, or recommendation.
+
+**Given** a candidate-processing job is eligible
+**When** the Worker claims, recovers, retries, cancels, or completes it
+**Then** it uses its own PostgreSQL lease, fencing token, policy/retry snapshots, closed state, bounded safe error code, and terminal audit
+**And** every enrichment, triage, eligibility, recommendation, Usage, and ranking write is fenced to the immutable candidate/appearance/originating-run provenance tuple.
+
+**Given** one URL fails transiently or exhausts retries
+**When** other jobs from the same or another query remain eligible
+**Then** those jobs continue independently without re-searching or retrying the completed query run
+**And** stale or duplicate claimants cannot write a later candidate result, recommendation, Usage event, retry, cancellation, or terminal audit.
+
+**Given** queued or retrying candidate work reaches the policy-bounded backlog threshold
+**When** the scheduler considers a new due query run
+**Then** it records a safe backpressure/deferred outcome and does not call YouTube search
+**And** it neither deletes, cancels, nor mutates existing candidate jobs or Knowledge/manual-capture work.
+
+**Given** historical appearances predate candidate jobs
+**When** the migration/backfill runs
+**Then** exactly one queued job is created for each appearance lacking one, preserving original provenance without replaying search or changing existing recommendation/review state
+**And** rerunning the backfill is idempotent.
 
 ## Epic 17: Current Operator Runbook
 

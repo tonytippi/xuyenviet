@@ -48,11 +48,11 @@ PostgreSQL-backed modular workflow with Worker-owned scheduled execution. Discov
 - **Prevents:** duplicate review queues and incompatible candidate histories for the same video.
 - **Rule:** Discovery and Knowledge intake share one exported canonicalizer for documented HTTPS `youtube.com`/`youtu.be` individual-video forms; it validates the video ID and returns a normalized `https://www.youtube.com/watch?v=<video-id>` URL. A Discovery candidate is unique by that video ID; query/run appearances reference that candidate. Immutable triage recommendation is `skip | defer | consider`; mutable operator state is `pending | accepted | deferred | skipped`. `accepted` means the existing Knowledge intake API has already returned `submitted` or `duplicate` for the candidate URL.
 
-### AD-3 - Worker Owns Scheduled Discovery Execution [ADOPTED]
+### AD-3 - Worker Owns Scheduled Discovery Execution [AMENDED 2026-08-13]
 
 - **Binds:** query schedules, run creation, provider calls, retries, run state.
 - **Prevents:** request-serving execution, platform-specific cron ownership, overlapping runs, and a hidden capture scheduler.
-- **Rule:** Discovery is a registered Worker adapter with explicit readiness and telemetry. Its separately leased planning stage idempotently creates/refreshes system proposals; its due-query stage creates and claims runs only while the global switch is enabled. Before every provider call, candidate write, and retry/requeue write, the Worker compares its claimed policy version and enabled switch to current policy under the lease. A revoked run becomes `cancelled` with a safe usage/audit outcome and creates no further work. API/admin commands create or change policy/query state and read projections; they never execute Discovery stages. Provider-stage failures use bounded exponential backoff and safe terminal error codes; later scheduled runs remain independent.
+- **Rule:** Discovery is a registered Worker adapter with explicit readiness and telemetry. Its separately leased planning stage idempotently creates/refreshes system proposals; its due-query stage creates and claims runs only while the global switch is enabled. A due-query run searches, persists canonical candidates and immutable appearances, atomically enqueues one candidate-processing job per appearance, then completes. Candidate jobs independently perform enrichment, metadata triage, deterministic eligibility, and recommendation. Before every provider call, Discovery write, and retry/requeue write, the Worker compares current enablement under the matching active lease. A revoked run or job becomes `cancelled` with a safe terminal audit outcome and creates no further work. API/admin commands create or change policy/query state and read projections; they never execute Discovery stages. Provider-stage failures use bounded exponential backoff and safe terminal error codes at the candidate-job unit, so one URL cannot block a query or unrelated URL. Later scheduled query runs remain independent.
 
 ### AD-4 - One Query Proposal Aggregate Serves System And Operator Origins [ADOPTED]
 
@@ -78,11 +78,19 @@ PostgreSQL-backed modular workflow with Worker-owned scheduled execution. Discov
 - **Prevents:** scattered environment policy, unaudited operational changes, and presentation-layer domain ownership.
 - **Rule:** Discovery policy is one versioned PostgreSQL record changed only through role-protected, audited admin API commands. Each run snapshots its effective policy version. Discovery has no hard budget/quota admission or reservation aggregate; provider/Usage telemetry is recorded where available. `apps/admin` is a typed API client only. Operator candidate actions and query changes are server-side commands with actor, target, action, timestamp, and safe before/after summary.
 
-### AD-8 - Discovery Uses Closed Operational States And A Registered System Executor
+### AD-8 - Discovery Uses Closed Operational States And A Registered System Executor [AMENDED 2026-08-13]
 
 - **Binds:** Worker adapter registration, run lifecycle, retries, cancellation, audit, Usage attribution, control-tower counters.
 - **Prevents:** incompatible continuous worker loops, ambiguous terminal states, or discovery work attributed as another system capability.
-- **Rule:** The registered Worker adapter capability and automated actor are both `youtube-discovery`; the immutable system executor ID is `system-youtube-discovery`. A planning or query run state is exactly `queued | running | retrying | completed | failed | cancelled`. Only the Worker moves a run from `queued`, `running`, or `retrying`; `completed`, `failed`, and `cancelled` are terminal. Lease expiry returns nonterminal work to `queued`; policy revocation moves it to `cancelled`. Each terminal transition writes one safe audit outcome, and each AI-triage invocation records the Discovery model purpose, prompt version, system executor, and linked run.
+- **Rule:** The registered Worker adapter capability and automated actor are both `youtube-discovery`; the immutable system executor ID is `system-youtube-discovery`. Query run and candidate job each use exactly `queued | running | retrying | completed | failed | cancelled`; their terminal states never reopen. Only the Worker moves either nonterminal record. Lease expiry returns nonterminal work to `queued`; policy revocation moves active work to `cancelled`. Every candidate job carries an immutable provenance tuple of candidate, appearance, originating run, and policy version; appearances remain immutable. Fenced candidate-job persistence remains linked to that originating run for audit, ranking history, and AI Usage. Each terminal transition writes one safe audit outcome, and each AI-triage invocation records the Discovery model purpose, prompt version, system executor, originating run, and candidate job.
+
+### AD-9 - Candidate Processing Is Independently Durable [ADOPTED 2026-08-13]
+
+- **Binds:** appearance enqueueing, candidate processing, retry/fencing, backpressure, historical discovered work, health projections.
+- **Prevents:** one failing URL retrying an entire query, re-searching already persisted results, mutable discovery provenance, and unbounded candidate backlog.
+- **Rule:** `youtube_discovery_candidate_jobs` is the Discovery-owned technical execution aggregate for one immutable appearance. A unique appearance-to-job relationship makes enqueue idempotent. The enqueue transaction is fenced by the active query-run lease and creates no duplicate appearance, job, ranking history, or review work. Candidate-job claim, recovery, retry, cancellation, completion, safe error code, lease, and fencing are independent from query-run state. The job uses its own immutable retry/concurrency-policy snapshots; every derived write is guarded by the job lease/fence and its immutable provenance tuple. Query runs do not wait for candidate work after enqueue.
+- **Rule:** Scheduling applies a policy-bounded candidate-job backlog threshold before admitting a new due-query run. At or above the threshold, the scheduler records a bounded safe deferred/backpressure result and does not call YouTube search; it does not cancel or mutate queued candidate jobs. Backlog values, current job state, safe stage, retry timing, and terminal safe error code are exposed only through safe operational projections.
+- **Rule:** The forward migration backfills exactly one queued job for every existing appearance lacking one. Backfill preserves original run/policy provenance, is idempotent, does not replay search, does not alter an appearance, recommendation, review state, or existing ranking history, and is subject to normal policy enablement and candidate-job fences when later claimed.
 
 ```mermaid
 flowchart LR
@@ -112,8 +120,8 @@ flowchart LR
 | --- | --- |
 | Naming | Use `youtube_discovery_*` for Discovery-owned tables, jobs, policies, and read models. Use canonical YouTube video ID as the dedupe identity; preserve canonical URL as safe display metadata. |
 | Data & formats | Provider input/output is bounded and schema-validated. Store timestamps in UTC. Safe errors use stable code plus bounded summary, never provider payload text. |
-| State & cross-cutting | Discovery command mutations are audited; Worker work is lease/fence guarded; policy version is snapshotted per run; policy revocation fences every external call/write; normal admin reads use projections. |
-| Operational states | Triage recommendation, operator review state, and planning/query-run state are separate closed enums; terminal run states are never reopened. |
+| State & cross-cutting | Discovery command mutations are audited; Worker work is lease/fence guarded; policy version is snapshotted per query run and candidate job; policy revocation fences every external call/write; normal admin reads use projections. |
+| Operational states | Triage recommendation, operator review state, query-run state, and candidate-job state are separate closed enums; terminal execution states are never reopened. |
 | Privacy | Derived comment signals are untrusted triage metadata, never Knowledge evidence or traveler-facing content. AI Ask signals are aggregate and anonymized. |
 
 ## Stack
@@ -149,7 +157,8 @@ apps/admin/
 | Capability / Area | Lives in | Governed by |
 | --- | --- | --- |
 | System/operator query proposals | Discovery domain, PostgreSQL | AD-3, AD-4, AD-7 |
-| Search, enrichment, dedupe | Worker and Discovery domain | AD-2, AD-3, AD-6 |
+| Search and appearance enqueue | Worker and Discovery domain | AD-2, AD-3, AD-6, AD-9 |
+| Candidate enrichment, triage, ranking | Worker and Discovery domain | AD-3, AD-5, AD-6, AD-9 |
 | Metadata AI triage and ranking | Discovery domain, AI Gateway, Usage | AD-5, AD-6 |
 | Operator review and Knowledge intake handoff | Admin API/read models and Discovery domain | AD-1, AD-2, AD-7 |
 | Discovery health/control tower | Discovery read models | AD-3, AD-6, AD-7, AD-8 |
