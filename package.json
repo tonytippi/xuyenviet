@@ -16,7 +16,7 @@
     "test:integration": "vitest run --project integration",
     "typecheck": "tsc --noEmit && pnpm --filter @xuyenviet/web typecheck && pnpm --filter @xuyenviet/admin typecheck && pnpm --filter @xuyenviet/worker-domain typecheck && pnpm --filter @xuyenviet/api typecheck && pnpm --filter @xuyenviet/worker typecheck",
     "db:generate": "drizzle-kit generate",
-    "db:migrate": "tsx scripts/migrate-api-schema.ts",
+    "db:migrate": "node --env-file=apps/api/.env.local --import tsx scripts/migrate-api-schema.ts",
     "db:seed": "tsx scripts/db-seed.ts",
     "db:reset": "tsx scripts/db-reset.ts",
     "db:reset:local": "APP_ENV=local DB_RESET_DISPOSABLE_CONFIRMATION=confirm-disposable-reset DB_RESET_NO_RUNTIME_OVERLAP=confirm-no-runtime-overlap DB_RESET_EXPECTED_TARGET_IDENTITY='database=xuyenviet;host=127.0.0.1;port=5432' node --env-file=apps/api/.env.local --import tsx scripts/db-reset.ts",
