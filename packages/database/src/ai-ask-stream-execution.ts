@@ -3,6 +3,7 @@ import { AiAskAdmissionValidationError, type AiAskStreamAdmission, type AiAskStr
 import { consoleOperationalTelemetrySink, emitOperationalTelemetry, type AiAskStreamInput, type OperationalTelemetrySink, type RequestPrincipal } from "@xuyenviet/contracts";
 
 import { acquireAiAskCommand, finalizeAiAskCommand, readAiAskCommandTerminalResult, terminalizeAiAskCommand } from "./ai-ask-commands";
+import { insertConversationMessage } from "./conversation-content-revisions";
 import { ensureAiAskFreshnessWarning } from "./answer-freshness";
 import { getDb } from "./client";
 import { streamInitialAiAskAnswer } from "./gateway";
@@ -269,12 +270,7 @@ async function streamAnswer({
       await sink.emit({ type: "delta", content: assistantContent.appendedWarning });
     }
     const finalization = await finalizeAiAskCommand(command.commandId, async (transaction, fencedCommand) => {
-        const [assistantMessage] = await transaction
-          .insert(messages)
-          .values({ conversationId: fencedCommand.conversationId, userId: fencedCommand.userId, role: "assistant", content: assistantContent.content })
-          .returning({ id: messages.id });
-
-        await transaction.update(conversations).set({ updatedAt: new Date() }).where(eq(conversations.id, fencedCommand.conversationId));
+        const { message: assistantMessage } = await insertConversationMessage(transaction, { conversationId: fencedCommand.conversationId, userId: fencedCommand.userId, role: "assistant", content: assistantContent.content });
 
         const [snapshot] = await transaction.insert(tripAnswerContextSnapshots).values({
           userId: fencedCommand.userId,

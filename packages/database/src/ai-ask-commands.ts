@@ -6,6 +6,7 @@ import { getDb } from "./client";
 import { aiAskCommands, conversations, domainOutbox, messageImageAttachments, messages, tripProjects } from "./schema";
 import { enqueueAiAskFollowUpInTransaction } from "./domain-outbox";
 import { resolveOwnedPrimaryConversationInTransaction } from "./primary-conversation";
+import { insertConversationMessage } from "./conversation-content-revisions";
 
 const keyPattern = /^[A-Za-z0-9_-]{16,128}$/;
 const commandLifetimeMs = 24 * 60 * 60 * 1000;
@@ -130,9 +131,8 @@ export async function acquireAiAskCommand(input: AcquireAiAskCommandInput): Prom
     const conversation = resolved.conversation ?? (await transaction.insert(conversations).values({ userId: input.userId }).returning({ id: conversations.id, tripProjectId: conversations.tripProjectId, lifecycleVersion: conversations.lifecycleVersion, updatedAt: conversations.updatedAt }))[0];
     await transaction.update(aiAskCommands).set({ conversationId: conversation.id, conversationLifecycleVersion: conversation.lifecycleVersion, updatedAt: new Date() }).where(eq(aiAskCommands.id, inserted.id));
     const history = await transaction.select({ role: messages.role, content: messages.content }).from(messages).where(and(eq(messages.conversationId, conversation.id), eq(messages.userId, input.userId))).orderBy(asc(messages.createdAt), asc(messages.id));
-    const [message] = await transaction.insert(messages).values({ conversationId: conversation.id, userId: input.userId, role: "user", content: question }).returning({ id: messages.id, content: messages.content });
+    const { message } = await insertConversationMessage(transaction, { conversationId: conversation.id, userId: input.userId, role: "user", content: question });
     if (attachment) await transaction.insert(messageImageAttachments).values({ conversationId: conversation.id, messageId: message.id, userId: input.userId, originalFileName: attachment.fileName, mimeType: attachment.mimeType, byteSize: attachment.byteSize, storageKey: null });
-    await transaction.update(conversations).set({ updatedAt: new Date() }).where(eq(conversations.id, conversation.id));
     await transaction.update(aiAskCommands).set({ userMessageId: message.id, updatedAt: new Date() }).where(eq(aiAskCommands.id, inserted.id));
     await enqueueAiAskFollowUpInTransaction(transaction, {
       eventType: "ai_ask.context_extraction.v1",

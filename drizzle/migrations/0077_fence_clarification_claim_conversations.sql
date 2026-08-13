@@ -1,0 +1,4 @@
+CREATE UNIQUE INDEX IF NOT EXISTS "planning_clarification_session_id_conversation_owner_idx" ON "planning_clarification_sessions" ("id", "conversation_id", "user_id");
+CREATE UNIQUE INDEX IF NOT EXISTS "ai_ask_commands_id_conversation_user_id_idx" ON "ai_ask_commands" ("id", "conversation_id", "user_id");
+ALTER TABLE "planning_clarification_claims" ADD CONSTRAINT "planning_clarification_claim_session_conversation_owner_fk" FOREIGN KEY ("session_id", "conversation_id", "user_id") REFERENCES "planning_clarification_sessions" ("id", "conversation_id", "user_id") ON DELETE CASCADE NOT VALID;
+ALTER TABLE "planning_clarification_claims" ADD CONSTRAINT "planning_clarification_claim_command_conversation_owner_fk" FOREIGN KEY ("command_id", "conversation_id", "user_id") REFERENCES "ai_ask_commands" ("id", "conversation_id", "user_id") ON DELETE CASCADE NOT VALID;

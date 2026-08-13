@@ -28,6 +28,7 @@ const unitTests = [
   "tests/legacy-auth-retirement.test.ts",
   "tests/local-direct-transport.test.ts",
   "tests/planning-context-profiles.test.ts",
+  "tests/planning-clarification-state.test.ts",
   "tests/trip-home.test.ts",
   "tests/traveler-writer-inventory.test.ts",
   "tests/web-search-quality.test.ts",

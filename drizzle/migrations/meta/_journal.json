@@ -69,6 +69,16 @@
     { "idx": 64, "version": "7", "when": 1787846400000, "tag": "0064_discovery_stage_safe_error_codes", "breakpoints": true },
     { "idx": 65, "version": "7", "when": 1787932800000, "tag": "0065_discovery_persistence_contended_error", "breakpoints": true },
     { "idx": 66, "version": "7", "when": 1788000000000, "tag": "0066_discovery_candidate_jobs", "breakpoints": true },
-    { "idx": 67, "version": "7", "when": 1788003600000, "tag": "0067_add_planning_context_profiles", "breakpoints": true }
+    { "idx": 67, "version": "7", "when": 1788003600000, "tag": "0067_add_planning_context_profiles", "breakpoints": true },
+    { "idx": 68, "version": "7", "when": 1788090000000, "tag": "0068_add_planning_clarification_state", "breakpoints": true },
+    { "idx": 69, "version": "7", "when": 1788176400000, "tag": "0069_harden_planning_clarification_state", "breakpoints": true },
+    { "idx": 70, "version": "7", "when": 1788262800000, "tag": "0070_add_clarification_session_fences", "breakpoints": true },
+    { "idx": 71, "version": "7", "when": 1788349200000, "tag": "0071_add_clarification_owner_fences", "breakpoints": true },
+    { "idx": 72, "version": "7", "when": 1788435600000, "tag": "0072_harden_clarification_claims_and_transitions", "breakpoints": true },
+    { "idx": 73, "version": "7", "when": 1788522000000, "tag": "0073_refine_clarification_evidence_invalidation", "breakpoints": true },
+    { "idx": 74, "version": "7", "when": 1788608400000, "tag": "0074_scope_clarification_invalidation_and_pin_proposals", "breakpoints": true },
+    { "idx": 75, "version": "7", "when": 1788694800000, "tag": "0075_recompute_clarification_deletion_completeness", "breakpoints": true },
+    { "idx": 76, "version": "7", "when": 1788781200000, "tag": "0076_harden_clarification_completion_and_scope_projections", "breakpoints": true },
+    { "idx": 77, "version": "7", "when": 1788867600000, "tag": "0077_fence_clarification_claim_conversations", "breakpoints": true }
   ]
 }

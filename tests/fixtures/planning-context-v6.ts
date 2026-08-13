@@ -16,3 +16,12 @@ export const clar22 = { id: "clar-22", description: "Incomparable overlapping va
 export const clar23 = { id: "clar-23", description: "Undeclared version pins are rejected.", proposal: { ...clar01.proposal, versions: { ...planningContextVersions, valueSchemaVersions: { ...planningContextVersions.valueSchemaVersions, unknown: "unknown:v1" } } } satisfies PlanningContextProposal } as const;
 
 export const planningContextCanonicalCases = [clar01, clar07, clar08, clar13, clar21, clar22, clar23] as const;
+
+export const clar02 = { id: "clar-02", description: "Vehicle and party evidence leave direction missing." } as const;
+export const clar03 = { id: "clar-03", description: "Equal-scope contradictions remain ambiguous." } as const;
+export const clar09 = { id: "clar-09", description: "Narrower scoped values remain local." } as const;
+export const clar11 = { id: "clar-11", description: "Duplicate deliveries do not replace values." } as const;
+export const clar14 = { id: "clar-14", description: "Terminal instances cannot be changed by stale work." } as const;
+export const clar24 = { id: "clar-24", description: "Only ready instances can be claimed." } as const;
+export const clar25 = { id: "clar-25", description: "Disjoint ready claims remain independent." } as const;
+export const clar26 = { id: "clar-26", description: "Overlapping claims are rejected." } as const;

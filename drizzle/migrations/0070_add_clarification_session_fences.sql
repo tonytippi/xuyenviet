@@ -1,0 +1,12 @@
+ALTER TABLE "planning_clarification_sessions" ADD COLUMN IF NOT EXISTS "command_id" text REFERENCES "ai_ask_commands"("id") ON DELETE CASCADE;
+ALTER TABLE "planning_clarification_sessions" ADD COLUMN IF NOT EXISTS "conversation_lifecycle_version" integer;
+ALTER TABLE "planning_clarification_sessions" ADD COLUMN IF NOT EXISTS "trip_project_aggregate_version" integer;
+ALTER TABLE "planning_clarification_sessions" ADD COLUMN IF NOT EXISTS "proposal_id" text;
+ALTER TABLE "planning_clarification_sessions" ADD COLUMN IF NOT EXISTS "proposal_version" integer;
+CREATE UNIQUE INDEX IF NOT EXISTS "ai_ask_commands_id_user_id_idx" ON "ai_ask_commands" ("id", "user_id");
+ALTER TABLE "planning_clarification_attempts" DROP CONSTRAINT IF EXISTS "planning_clarification_attempt_command_owner_fk";
+ALTER TABLE "planning_clarification_attempts" ADD CONSTRAINT "planning_clarification_attempt_command_owner_fk" FOREIGN KEY ("command_id", "user_id") REFERENCES "ai_ask_commands"("id", "user_id") ON DELETE CASCADE;
+ALTER TABLE "planning_clarification_sessions" DROP CONSTRAINT IF EXISTS "planning_clarification_session_command_owner_fk";
+ALTER TABLE "planning_clarification_sessions" ADD CONSTRAINT "planning_clarification_session_command_owner_fk" FOREIGN KEY ("command_id", "user_id") REFERENCES "ai_ask_commands"("id", "user_id") ON DELETE CASCADE;
+ALTER TABLE "planning_clarification_sessions" DROP CONSTRAINT IF EXISTS "planning_clarification_session_fence_check";
+ALTER TABLE "planning_clarification_sessions" ADD CONSTRAINT "planning_clarification_session_fence_check" CHECK (("command_id" is null and "conversation_lifecycle_version" is null and "trip_project_aggregate_version" is null) OR ("command_id" is not null and "conversation_lifecycle_version" >= 1 AND (("trip_project_id" IS NULL AND "trip_project_aggregate_version" IS NULL) OR ("trip_project_id" IS NOT NULL AND "trip_project_aggregate_version" >= 1))));

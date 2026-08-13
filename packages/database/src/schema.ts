@@ -53,6 +53,11 @@ export type YoutubeDiscoveryCandidateJobSafeErrorCode = (typeof youtubeDiscovery
 export const aiAskCommandStatusValues = ["pending", "completed", "failed", "aborted", "discarded"] as const;
 export type AiAskCommandStatus = (typeof aiAskCommandStatusValues)[number];
 
+export const planningClarificationSessionStateValues = ["active", "superseded", "completed"] as const;
+export type PlanningClarificationSessionState = (typeof planningClarificationSessionStateValues)[number];
+export const planningClarificationInstanceStateValues = ["collecting", "ready", "claimed", "completed", "abandoned"] as const;
+export type PlanningClarificationInstanceState = (typeof planningClarificationInstanceStateValues)[number];
+
 export const domainOutboxStatusValues = ["pending", "processing", "completed", "failed"] as const;
 export type DomainOutboxStatus = (typeof domainOutboxStatusValues)[number];
 
@@ -1064,6 +1069,7 @@ export const tripChangeProposals = pgTable(
     rationale: text("rationale").notNull(),
     operations: jsonb("operations").$type<unknown>().notNull(),
     expectedAggregateVersion: integer("expected_aggregate_version").notNull(),
+    version: integer("version").default(1).notNull(),
     expectedItemVersions: jsonb("expected_item_versions").$type<Record<string, number>>(),
     orderingPreconditions: jsonb("ordering_preconditions").$type<unknown>(),
     alternatives: jsonb("alternatives").$type<unknown>(),
@@ -1083,6 +1089,7 @@ export const tripChangeProposals = pgTable(
     check("trip_change_proposals_creator_class_check", sql`${row.creatorClass} in ('ai_orchestration', 'owner_command')`),
     check("trip_change_proposals_status_check", sql`${row.status} in ('pending', 'applied', 'dismissed', 'expired')`),
     check("trip_change_proposals_expected_aggregate_version_check", sql`${row.expectedAggregateVersion} >= 1`),
+    check("trip_change_proposals_version_check", sql`${row.version} >= 1`),
     check("trip_change_proposals_rationale_check", sql`length(btrim(${row.rationale})) between 1 and 500 and position(chr(10) in ${row.rationale}) = 0 and position(chr(13) in ${row.rationale}) = 0`),
     check("trip_change_proposals_operations_array_check", sql`jsonb_typeof(${row.operations}) = 'array' and jsonb_array_length(${row.operations}) between 1 and 20`),
     check("trip_change_proposals_expected_item_versions_check", sql`${row.expectedItemVersions} is null or jsonb_typeof(${row.expectedItemVersions}) = 'object'`),
@@ -1141,6 +1148,7 @@ export const conversations = pgTable(
       .references(() => users.id, { onDelete: "cascade" }),
     tripProjectId: text("trip_project_id"),
     lifecycleVersion: integer("lifecycle_version").default(1).notNull(),
+    contentRevision: integer("content_revision").default(0).notNull(),
     createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { mode: "date" }).defaultNow().notNull(),
   },
@@ -1158,6 +1166,7 @@ export const conversations = pgTable(
     index("conversations_user_id_updated_at_idx").on(conversation.userId, conversation.updatedAt),
     index("conversations_user_id_created_at_idx").on(conversation.userId, conversation.createdAt),
     check("conversations_lifecycle_version_check", sql`${conversation.lifecycleVersion} >= 1`),
+    check("conversations_content_revision_check", sql`${conversation.contentRevision} >= 0`),
   ],
 );
 
@@ -1175,6 +1184,7 @@ export const messages = pgTable(
       .references(() => users.id, { onDelete: "cascade" }),
     role: text("role").$type<MessageRole>().notNull(),
     content: text("content").notNull(),
+    ordinal: integer("ordinal").default(1).notNull(),
     answerAnnotations: jsonb("answer_annotations").$type<Array<Record<string, unknown>>>().default([]).notNull(),
     createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
   },
@@ -1188,9 +1198,11 @@ export const messages = pgTable(
     uniqueIndex("messages_id_conversation_id_user_id_idx").on(message.id, message.conversationId, message.userId),
     uniqueIndex("messages_id_conversation_id_user_id_role_unique").on(message.id, message.conversationId, message.userId, message.role),
     index("messages_conversation_id_created_at_idx").on(message.conversationId, message.createdAt),
+    uniqueIndex("messages_conversation_ordinal_idx").on(message.conversationId, message.ordinal),
     index("messages_user_id_created_at_idx").on(message.userId, message.createdAt),
     check("messages_role_check", sql`${message.role} in ('user', 'assistant')`),
     check("messages_content_not_empty_check", sql`length(btrim(${message.content})) > 0`),
+    check("messages_ordinal_check", sql`${message.ordinal} >= 1`),
     check("messages_user_content_length_check", sql`${message.role} <> 'user' or char_length(${message.content}) <= 2000`),
     check("messages_answer_annotations_array_check", sql`jsonb_typeof(${message.answerAnnotations}) = 'array'`),
   ],
@@ -1292,6 +1304,8 @@ export const aiAskCommands = pgTable(
       name: "ai_ask_commands_assistant_message_conversation_owner_fk",
     }).onDelete("set null"),
     uniqueIndex("ai_ask_commands_owner_scope_key_idx").on(command.userId, command.scopeKind, command.scopeId, command.idempotencyKey),
+    uniqueIndex("ai_ask_commands_id_user_id_idx").on(command.id, command.userId),
+    uniqueIndex("ai_ask_commands_id_conversation_user_id_idx").on(command.id, command.conversationId, command.userId),
     uniqueIndex("ai_ask_commands_new_conversation_key_idx").on(command.userId, command.idempotencyKey).where(sql`${command.scopeKind} = 'new_conversation'`),
     index("ai_ask_commands_owner_conversation_idx").on(command.userId, command.conversationId),
     index("ai_ask_commands_owner_fence_finalization_idx").on(command.userId, command.tripProjectId, command.conversationId, command.status),
@@ -1307,6 +1321,140 @@ export const aiAskCommands = pgTable(
     check("ai_ask_commands_snapshot_terminal_check", sql`${command.tripAnswerContextSnapshotId} is null or (${command.status} = 'completed' and ${command.assistantMessageId} is not null)`),
   ],
 );
+
+// AI Orchestration records immutable proposals/extractions. Chat/Trips owns the
+// mutable session state below and never recreates these input identities.
+export const planningClarificationAttempts = pgTable("planning_clarification_attempts", {
+  id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+  commandId: text("command_id").notNull().references(() => aiAskCommands.id, { onDelete: "cascade" }),
+  sourceMessageId: text("source_message_id").notNull().references(() => messages.id, { onDelete: "cascade" }),
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  expectedSessionRevision: integer("expected_session_revision").notNull(),
+  promptVersion: text("prompt_version").notNull(),
+  kind: text("kind").notNull(),
+  payload: jsonb("payload").$type<Record<string, unknown>>().notNull(),
+  digest: text("digest").notNull(),
+  createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
+}, (row) => [
+  uniqueIndex("planning_clarification_attempt_identity_idx").on(row.commandId, row.sourceMessageId, row.expectedSessionRevision, row.promptVersion),
+  foreignKey({ columns: [row.sourceMessageId, row.userId], foreignColumns: [messages.id, messages.userId], name: "planning_clarification_attempt_message_owner_fk" }).onDelete("cascade"),
+  foreignKey({ columns: [row.commandId, row.userId], foreignColumns: [aiAskCommands.id, aiAskCommands.userId], name: "planning_clarification_attempt_command_owner_fk" }).onDelete("cascade"),
+  check("planning_clarification_attempt_revision_check", sql`${row.expectedSessionRevision} >= 0`),
+  check("planning_clarification_attempt_kind_check", sql`${row.kind} in ('plan', 'extraction')`),
+  check("planning_clarification_attempt_digest_check", sql`${row.digest} ~ '^[a-f0-9]{64}$'`),
+  check("planning_clarification_attempt_payload_check", sql`jsonb_typeof(${row.payload}) = 'object'`),
+]);
+
+export const planningClarificationSessions = pgTable("planning_clarification_sessions", {
+  id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  conversationId: text("conversation_id").notNull().references(() => conversations.id, { onDelete: "cascade" }),
+  tripProjectId: text("trip_project_id").references(() => tripProjects.id, { onDelete: "cascade" }),
+  commandId: text("command_id").notNull().references(() => aiAskCommands.id, { onDelete: "cascade" }),
+  conversationLifecycleVersion: integer("conversation_lifecycle_version").notNull(),
+  tripProjectAggregateVersion: integer("trip_project_aggregate_version"),
+  proposalId: text("proposal_id"), proposalVersion: integer("proposal_version"),
+  state: text("state").$type<PlanningClarificationSessionState>().default("active").notNull(),
+  revision: integer("revision").default(1).notNull(),
+  contentRevision: integer("content_revision").notNull(),
+  graphDigest: text("graph_digest").notNull(),
+  planAttemptId: text("plan_attempt_id").notNull().references(() => planningClarificationAttempts.id, { onDelete: "restrict" }),
+  profileVersion: text("profile_version").notNull(),
+  policyVersion: text("policy_version").notNull(),
+  comparatorVersion: text("comparator_version").notNull(),
+  scopeGraph: jsonb("scope_graph").$type<unknown[]>().notNull(),
+  createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { mode: "date" }).defaultNow().notNull(),
+}, (row) => [
+  foreignKey({ columns: [row.conversationId, row.userId], foreignColumns: [conversations.id, conversations.userId], name: "planning_clarification_session_conversation_owner_fk" }).onDelete("cascade"),
+  foreignKey({ columns: [row.tripProjectId, row.userId], foreignColumns: [tripProjects.id, tripProjects.userId], name: "planning_clarification_session_project_owner_fk" }).onDelete("cascade"),
+  foreignKey({ columns: [row.commandId, row.userId], foreignColumns: [aiAskCommands.id, aiAskCommands.userId], name: "planning_clarification_session_command_owner_fk" }).onDelete("cascade"),
+  uniqueIndex("planning_clarification_session_id_user_id_idx").on(row.id, row.userId),
+  uniqueIndex("planning_clarification_session_id_conversation_owner_idx").on(row.id, row.conversationId, row.userId),
+  uniqueIndex("planning_clarification_one_active_conversation_idx").on(row.conversationId).where(sql`${row.state} = 'active'`),
+  index("planning_clarification_session_owner_conversation_idx").on(row.userId, row.conversationId),
+  check("planning_clarification_session_state_check", sql`${row.state} in ('active', 'superseded', 'completed')`),
+  check("planning_clarification_session_revision_check", sql`${row.revision} >= 1 and ${row.contentRevision} >= 0`),
+  check("planning_clarification_session_fence_check", sql`${row.conversationLifecycleVersion} >= 1 and ((${row.tripProjectId} is null and ${row.tripProjectAggregateVersion} is null) or (${row.tripProjectId} is not null and ${row.tripProjectAggregateVersion} >= 1))`),
+  check("planning_clarification_session_proposal_pin_check", sql`(${row.proposalId} is null and ${row.proposalVersion} is null) or (${row.proposalId} is not null and ${row.proposalVersion} >= 1 and ${row.tripProjectId} is not null)`),
+  check("planning_clarification_session_digest_check", sql`${row.graphDigest} ~ '^[a-f0-9]{64}$'`),
+  check("planning_clarification_session_scope_graph_check", sql`jsonb_typeof(${row.scopeGraph}) = 'array'`),
+]);
+
+export const planningClarificationInstances = pgTable("planning_clarification_instances", {
+  id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+  sessionId: text("session_id").notNull().references(() => planningClarificationSessions.id, { onDelete: "cascade" }),
+  deliverableId: text("deliverable_id").notNull(),
+  kind: text("kind").notNull(),
+  scopeId: text("scope_id").notNull(),
+  state: text("state").$type<PlanningClarificationInstanceState>().default("collecting").notNull(),
+  revision: integer("revision").default(1).notNull(),
+  profile: jsonb("profile").$type<Record<string, unknown>>().notNull(),
+  createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { mode: "date" }).defaultNow().notNull(),
+}, (row) => [
+  uniqueIndex("planning_clarification_instance_session_deliverable_idx").on(row.sessionId, row.deliverableId),
+  check("planning_clarification_instance_state_check", sql`${row.state} in ('collecting', 'ready', 'claimed', 'completed', 'abandoned')`),
+  check("planning_clarification_instance_revision_check", sql`${row.revision} >= 1`),
+  check("planning_clarification_instance_profile_check", sql`jsonb_typeof(${row.profile}) = 'object'`),
+]);
+
+export const planningClarificationValues = pgTable("planning_clarification_values", {
+  id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+  sessionId: text("session_id").notNull().references(() => planningClarificationSessions.id, { onDelete: "cascade" }),
+  key: text("key").notNull(), value: text("value").notNull(), scopeId: text("scope_id").notNull(), schemaVersion: text("schema_version").notNull(), precedence: text("precedence").notNull(),
+  sourceMessageId: text("source_message_id").notNull().references(() => messages.id, { onDelete: "cascade" }),
+  sourceMessageOrdinal: integer("source_message_ordinal").notNull(), startOffset: integer("start_offset").notNull(), endOffset: integer("end_offset").notNull(), evidenceDigest: text("evidence_digest").notNull(),
+  createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
+}, (row) => [
+  uniqueIndex("planning_clarification_value_evidence_idx").on(row.sessionId, row.key, row.scopeId, row.sourceMessageId, row.startOffset, row.endOffset),
+  check("planning_clarification_value_precedence_check", sql`${row.precedence} in ('nearest_ancestor', 'explicit_compatible')`),
+  check("planning_clarification_value_offsets_check", sql`${row.sourceMessageOrdinal} >= 1 and ${row.startOffset} >= 0 and ${row.endOffset} > ${row.startOffset}`),
+  check("planning_clarification_value_digest_check", sql`${row.evidenceDigest} ~ '^[a-f0-9]{64}$'`),
+]);
+
+export const planningClarificationAssumptions = pgTable("planning_clarification_assumptions", {
+  id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+  sessionId: text("session_id").notNull().references(() => planningClarificationSessions.id, { onDelete: "cascade" }),
+  instanceId: text("instance_id").notNull().references(() => planningClarificationInstances.id, { onDelete: "cascade" }),
+  key: text("key").notNull(), value: text("value").notNull(), scopeId: text("scope_id").notNull(), schemaVersion: text("schema_version").notNull(),
+  disclosed: boolean("disclosed").notNull(), createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
+}, (row) => [
+  uniqueIndex("planning_clarification_assumption_instance_key_idx").on(row.instanceId, row.key),
+  check("planning_clarification_assumption_value_check", sql`length(btrim(${row.value})) > 0`),
+]);
+
+export const planningClarificationFieldStates = pgTable("planning_clarification_field_states", {
+  id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+  sessionId: text("session_id").notNull().references(() => planningClarificationSessions.id, { onDelete: "cascade" }),
+  instanceId: text("instance_id").notNull().references(() => planningClarificationInstances.id, { onDelete: "cascade" }),
+  key: text("key").notNull(), state: text("state").notNull(), candidates: jsonb("candidates").$type<unknown[]>().default([]).notNull(), updatedAt: timestamp("updated_at", { mode: "date" }).defaultNow().notNull(),
+}, (row) => [
+  uniqueIndex("planning_clarification_field_state_instance_key_idx").on(row.instanceId, row.key),
+  check("planning_clarification_field_state_check", sql`${row.state} in ('missing', 'ambiguous', 'resolved', 'assumed', 'declined')`),
+  check("planning_clarification_field_state_candidates_check", sql`jsonb_typeof(${row.candidates}) = 'array'`),
+]);
+
+export const planningClarificationClaims = pgTable("planning_clarification_claims", {
+  id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  conversationId: text("conversation_id").notNull().references(() => conversations.id, { onDelete: "cascade" }),
+  sessionId: text("session_id").notNull().references(() => planningClarificationSessions.id, { onDelete: "cascade" }),
+  instanceId: text("instance_id").notNull().references(() => planningClarificationInstances.id, { onDelete: "cascade" }),
+  commandId: text("command_id").notNull().references(() => aiAskCommands.id, { onDelete: "cascade" }),
+  sessionRevision: integer("session_revision").notNull(), contentRevision: integer("content_revision").notNull(),
+  state: text("state").default("live").notNull(), createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
+}, (row) => [
+  uniqueIndex("planning_clarification_live_claim_instance_idx").on(row.instanceId).where(sql`${row.state} = 'live'`),
+  uniqueIndex("planning_clarification_claim_command_instance_idx").on(row.commandId, row.instanceId),
+  foreignKey({ columns: [row.sessionId, row.userId], foreignColumns: [planningClarificationSessions.id, planningClarificationSessions.userId], name: "planning_clarification_claim_session_owner_fk" }).onDelete("cascade"),
+  foreignKey({ columns: [row.commandId, row.userId], foreignColumns: [aiAskCommands.id, aiAskCommands.userId], name: "planning_clarification_claim_command_owner_fk" }).onDelete("cascade"),
+  foreignKey({ columns: [row.conversationId, row.userId], foreignColumns: [conversations.id, conversations.userId], name: "planning_clarification_claim_conversation_owner_fk" }).onDelete("cascade"),
+  foreignKey({ columns: [row.sessionId, row.conversationId, row.userId], foreignColumns: [planningClarificationSessions.id, planningClarificationSessions.conversationId, planningClarificationSessions.userId], name: "planning_clarification_claim_session_conversation_owner_fk" }).onDelete("cascade"),
+  foreignKey({ columns: [row.commandId, row.conversationId, row.userId], foreignColumns: [aiAskCommands.id, aiAskCommands.conversationId, aiAskCommands.userId], name: "planning_clarification_claim_command_conversation_owner_fk" }).onDelete("cascade"),
+  check("planning_clarification_claim_state_check", sql`${row.state} in ('live', 'completed', 'abandoned')`),
+  check("planning_clarification_claim_revision_check", sql`${row.sessionRevision} >= 1 and ${row.contentRevision} >= 0`),
+]);
 
 // Immutable answer-generation evidence. It cascades with the answer/conversation so
 // retained command metadata cannot reconstitute deleted project or chat content.
@@ -2526,6 +2674,13 @@ export const schema = {
   tripPlanChangeHistory,
   conversations,
   messages,
+  planningClarificationAttempts,
+  planningClarificationSessions,
+  planningClarificationInstances,
+  planningClarificationValues,
+  planningClarificationAssumptions,
+  planningClarificationFieldStates,
+  planningClarificationClaims,
   messageImageAttachments,
   chatContext,
   aiGatewayModels,
