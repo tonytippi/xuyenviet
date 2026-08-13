@@ -1,5 +1,5 @@
 # generated: 2026-07-25
-# last_updated: 2026-08-13 (Epic 21 sprint plan added after implementation readiness passed; Stories 21.1-21.12 are backlog.)
+# last_updated: 2026-08-13 (Epic 21 story guides 21.1-21.12 created; all are ready-for-dev.)
 # project: xuyenviet
 # project_key: NOKEY
 # tracking_system: file-system
@@ -33,7 +33,7 @@
 #   - done: Completed
 
 generated: 2026-07-25
-last_updated: 2026-08-13 (Epic 21 sprint plan added after implementation readiness passed; Stories 21.1-21.12 are backlog.)
+last_updated: 2026-08-13 (Epic 21 story guides 21.1-21.12 created; all are ready-for-dev.)
 project: xuyenviet
 project_key: NOKEY
 tracking_system: file-system
@@ -455,23 +455,23 @@ development_status:
   # Epic 21 readiness passed 2026-08-13. Every story must cite the v6.2
   # Trip-Aware UX addendum when created. Stories 21.11 and 21.12 retain
   # their evidence-window, rollback, and Product Owner approval gates.
-  epic-21: backlog
-  21-1-define-versioned-planning-context-profiles-and-scope-rules: backlog
-  21-2-persist-scoped-multi-turn-clarification-state-safely: backlog
-  21-3-run-bounded-preflight-clarification-before-main-answers: backlog
-  21-4-preserve-applied-trip-authority-across-planning-modes: backlog
-  21-5-preserve-canonical-trip-paths-and-supported-route-coverage: backlog
-  21-6-retrieve-and-pack-evidence-by-required-planning-need: backlog
-  21-7-verify-fresh-external-facts-through-replayable-web-scope: backlog
-  21-8-finalize-and-delete-planning-evidence-atomically: backlog
-  21-9-keep-a-current-chat-to-trip-opportunity-available: backlog
-  21-10-convert-the-latest-eligible-context-into-a-reviewable-trip: backlog
+  epic-21: in-progress
+  21-1-define-versioned-planning-context-profiles-and-scope-rules: ready-for-dev
+  21-2-persist-scoped-multi-turn-clarification-state-safely: ready-for-dev
+  21-3-run-bounded-preflight-clarification-before-main-answers: ready-for-dev
+  21-4-preserve-applied-trip-authority-across-planning-modes: ready-for-dev
+  21-5-preserve-canonical-trip-paths-and-supported-route-coverage: ready-for-dev
+  21-6-retrieve-and-pack-evidence-by-required-planning-need: ready-for-dev
+  21-7-verify-fresh-external-facts-through-replayable-web-scope: ready-for-dev
+  21-8-finalize-and-delete-planning-evidence-atomically: ready-for-dev
+  21-9-keep-a-current-chat-to-trip-opportunity-available: ready-for-dev
+  21-10-convert-the-latest-eligible-context-into-a-reviewable-trip: ready-for-dev
   # Do not mark done on implementation evidence alone: requires the exact
   # qualification window and Product Owner-approved cutover record.
-  21-11-prove-v6-retrieval-in-shadow-and-cut-over-safely: backlog
+  21-11-prove-v6-retrieval-in-shadow-and-cut-over-safely: ready-for-dev
   # Do not start physical cleanup until Story 21.11's qualified rollback
   # evidence and the required Product Owner approval are present.
-  21-12-retire-the-legacy-card-count-trigger-without-losing-rollback: backlog
+  21-12-retire-the-legacy-card-count-trigger-without-losing-rollback: ready-for-dev
   epic-21-retrospective: optional
 
 action_items:
