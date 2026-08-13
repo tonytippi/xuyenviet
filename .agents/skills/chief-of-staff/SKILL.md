@@ -83,6 +83,13 @@ For every stage, create a new sibling pane, retain the returned pane ID, start a
 uniquely named OpenCode agent, and submit the stage prompt. Always use an
 explicit pane ID, `--cwd "$PWD"`, and `--no-focus`.
 
+Submit exactly one stage prompt to a worker. After that command, never send that
+worker a continuation, keep-going, status, report-reprint, correction, or retry
+prompt. In particular, never send `Continue the active bmad-build-auto run` or
+equivalent. OpenCode queues prompts received while its current turn or a child
+is active; a queued continuation can run the workflow twice after the original
+turn completes.
+
 ```bash
 herdr pane split --current --direction right --cwd "$PWD" --no-focus
 herdr agent start <unique-name> --kind opencode --pane <worker-pane-id>
@@ -98,13 +105,42 @@ and print its final coordinator report only after the skill returns.
 
 Treat `idle`, `unknown`, timeout, and `agent_not_running` as observations, not
 success or failure by themselves. After each observation, inspect process
-liveness and pane output. While the process is live and output shows explicit
-progress, poll in bounded windows of at most 120 seconds. Do not spin on an idle
-agent. A complete report plus independently verified artifacts can be accepted
-after the process exits. Otherwise allow one narrowly scoped recovery worker
-for an operational failure; never use recovery to bypass a build-auto `blocked`
-result or a product, approval, security, data-integrity, or external-evidence
-gate.
+liveness and pane output without writing to the pane or agent. `idle` can mean
+the foreground OpenCode turn is awaiting synchronous build-auto subagents; it
+does not authorize another prompt, another worker, target selection, sprint
+sync, or failure classification.
+
+Use only passive observations after the single stage prompt:
+
+```bash
+herdr agent get <unique-name>
+herdr agent explain <unique-name>
+herdr pane process-info --pane <worker-pane-id>
+herdr pane read <worker-pane-id> --source recent-unwrapped --lines 300
+```
+
+Wait in bounded intervals of at most 120 seconds, then repeat those read-only
+observations. If output reports a subagent, tool call, review layer, command,
+queued internal work, or active build-auto step, keep waiting even when Herdr
+reports `idle`. A changed pane snapshot, changed generated-spec status, new Git
+revision, or explicit active-work message resets the inactivity clock.
+
+For a build-auto dispatch, allow a two-hour stage deadline and require 30
+continuous minutes with no changed snapshot, artifact, Git revision, or explicit
+active-work evidence before classifying it as stalled. Reaching that threshold
+still does not authorize prompting the same worker. Re-inspect the generated
+spec, Git state, foreground process, and pane once; if child completion remains
+ambiguous, stop and report an operational stall rather than risk duplicate
+execution.
+
+Accept completion only when the complete Chief-of-Staff report is visible and
+independently agrees with artifacts, or when the process has exited and the
+terminal build-auto state can be independently verified. Allow one narrowly
+scoped recovery worker only after the original process has exited, no queued or
+active child work is evidenced, and terminal artifacts do not establish success
+or a legitimate build-auto block. Never use recovery to bypass a build-auto
+`blocked` result or a product, approval, security, data-integrity, or
+external-evidence gate.
 
 Every worker must finish with:
 
