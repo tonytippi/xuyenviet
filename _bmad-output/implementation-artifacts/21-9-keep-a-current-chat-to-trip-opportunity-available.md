@@ -23,6 +23,7 @@ As a traveler, I want a persistent `Chuyển thành chuyến đi` action when ch
 
 ## Dev Notes
 
+- Depends on Story 21.8's atomic finalization path; opportunity refresh extends that terminalization and must not create a competing finalizer.
 - AD-40/RTA-13: Chat/Trips owns closed opportunity transitions `eligible -> suspended|dismissed|consumed|invalidated` and `suspended -> eligible|invalidated`.
 - One ordinary conversation has one current nonterminal opportunity and manifest. Pending newer turn is visible-disabled projection only, never dismissal.
 - Manifest pins revisions, claims/value IDs, policy/schema/serialization versions, source watermark, typed payload, and digest. Fail closed for ambiguity, assumptions-only, unsupported or digest mismatch.

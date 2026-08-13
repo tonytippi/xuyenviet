@@ -73,7 +73,7 @@ The roadmap's production journeys are preserved by the following PRD-owned outco
 - Deletion must support owner chats and Trip Projects, preserve a live Trip from implicit primary-conversation deletion, and invalidate derived reconstructable planning/retrieval context; Architecture owns the cascade, retention, and transaction mechanism.
 - Conversation transcript retention must follow the final PRD and privacy notice; do not treat earlier debugging-retention assumptions as active requirements unless a later privacy decision reinstates them.
 - Architecture must define the Trip Project aggregate boundary, primary-conversation migration, owner-scoped plan/proposal commands, proposal expiry/conflict handling, audit history, and deletion propagation for all derived Trip Planning data.
-- Architecture must choose a canonical route/path representation and owner-confirmed proposal operations for Trip legs, preserve existing structured Trip data through migration, and define safe rollback or refresh behavior. Until that contract is approved, free-text route labels cannot grant durable route authority.
+- Architecture AD-29, AD-30, and AD-35 now define the approved canonical Trip leg-path representation, owner-confirmed proposal operations, migration behavior, supported-coverage resolution, and safe stale-reference recovery. Free-text route labels remain query aids and cannot grant durable route authority.
 - The former broad-query `< 3 relevant cards` web-search trigger may remain only as a temporary compatibility behavior. It is retired when the required-need vocabulary and Architecture contract are approved, the versioned evaluation profile includes broad-query compatibility and missing-need cohorts, shadow evaluation passes the approved non-regression gates for the agreed evidence window, and the Product Owner approves production cutover from the recorded evaluation report. Architecture/Evaluation owns numeric thresholds and evidence-window length; the Product Owner owns retirement approval.
 - Weather, location, Google Maps/Places/Routes, booking/OTA data, dynamic provider snapshots, budget, checklists, travel vault, collaboration, and notifications remain deferred from the Trip Planning Foundation tranche.
 
@@ -102,4 +102,3 @@ The PRD and this addendum own product behavior and constraints. Architecture own
 
 - Exact web search provider/mechanism.
 - Exact privacy-policy wording for AI Gateway-backed memory and chat processing.
-- Exact canonical Trip route/path representation, migration, proposal operations, and stale-reference recovery.

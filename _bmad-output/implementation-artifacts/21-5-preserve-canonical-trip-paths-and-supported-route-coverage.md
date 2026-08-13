@@ -33,8 +33,9 @@ As a traveler, I want route advice to reflect my selected path or real product c
 - [Source: packages/database/src/trip-plan-commands.ts]
 - [Source: packages/database/src/traveler-proposal-commands.ts]
 - [Source: tests/trip-proposal-command-contract.test.ts]
-- [Source: _bmad-output/planning-artifacts/architecture/architecture-xuyenviet-2026-07-04/retrieval-trip-aware/contracts.md#Canonical-Paths-And-Route-Coverage]
-- [Source: _bmad-output/planning-artifacts/architecture/architecture-xuyenviet-2026-07-04/retrieval-trip-aware/fixtures.md#Route-Paths]
+- [Source: _bmad-output/planning-artifacts/architecture/architecture-xuyenviet-2026-07-04/retrieval-trip-aware/contracts.md#Trip-Persistence-Delta]
+- [Source: _bmad-output/planning-artifacts/architecture/architecture-xuyenviet-2026-07-04/retrieval-trip-aware/contracts.md#Route-Registry-And-Resolution]
+- [Source: _bmad-output/planning-artifacts/architecture/architecture-xuyenviet-2026-07-04/retrieval-trip-aware/fixtures.md#Canonical-Trip-Path-And-Route-Resolution]
 - [Source: _bmad-output/planning-artifacts/ux-designs/ux-xuyenviet-2026-07-05/EXPERIENCE.md#v6.2-Trip-Aware-Planning-Addendum]
 
 ## Canonical Acceptance-Criteria Mapping

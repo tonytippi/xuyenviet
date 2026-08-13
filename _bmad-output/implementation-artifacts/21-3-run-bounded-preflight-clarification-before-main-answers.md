@@ -32,8 +32,8 @@ As a traveler, I want XuyenViet to ask follow-up questions until the relevant re
 - [Source: _bmad-output/planning-artifacts/epics.md#Story-21.3]
 - [Source: _bmad-output/planning-artifacts/architecture/architecture-xuyenviet-2026-07-04/ARCHITECTURE-SPINE.md#AD-39]
 - [Source: packages/database/src/ai-ask-stream-execution.ts]
-- [Source: _bmad-output/planning-artifacts/architecture/architecture-xuyenviet-2026-07-04/retrieval-trip-aware/contracts.md#Clarification-State]
-- [Source: _bmad-output/planning-artifacts/architecture/architecture-xuyenviet-2026-07-04/retrieval-trip-aware/fixtures.md#Clarification]
+- [Source: _bmad-output/planning-artifacts/architecture/architecture-xuyenviet-2026-07-04/retrieval-trip-aware/contracts.md#Multi-Turn-Clarification-And-Scoped-Context]
+- [Source: _bmad-output/planning-artifacts/architecture/architecture-xuyenviet-2026-07-04/retrieval-trip-aware/fixtures.md#Multi-Turn-Clarification-And-Scoped-Preferences]
 - [Source: tests/ai-ask-stream-execution.test.ts]
 - [Source: _bmad-output/planning-artifacts/ux-designs/ux-xuyenviet-2026-07-05/EXPERIENCE.md#v6.2-Trip-Aware-Planning-Addendum]
 

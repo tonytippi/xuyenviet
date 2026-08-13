@@ -32,8 +32,8 @@ As a traveler, I want changing external information checked for the exact place,
 - [Source: _bmad-output/planning-artifacts/architecture/architecture-xuyenviet-2026-07-04/ARCHITECTURE-SPINE.md#AD-35-and-AD-36]
 - [Source: packages/database/src/web-search.ts]
 - [Source: tests/web-search-quality.test.ts]
-- [Source: _bmad-output/planning-artifacts/architecture/architecture-xuyenviet-2026-07-04/retrieval-trip-aware/contracts.md#Replayable-Web-Scope]
-- [Source: _bmad-output/planning-artifacts/architecture/architecture-xuyenviet-2026-07-04/retrieval-trip-aware/fixtures.md#Web-Scope]
+- [Source: _bmad-output/planning-artifacts/architecture/architecture-xuyenviet-2026-07-04/retrieval-trip-aware/contracts.md#Web-Evidence-Scope]
+- [Source: _bmad-output/planning-artifacts/architecture/architecture-xuyenviet-2026-07-04/retrieval-trip-aware/fixtures.md#Web-Scope-And-Freshness]
 - [Source: _bmad-output/planning-artifacts/ux-designs/ux-xuyenviet-2026-07-05/EXPERIENCE.md#v6.2-Trip-Aware-Planning-Addendum]
 
 ## Canonical Acceptance-Criteria Mapping

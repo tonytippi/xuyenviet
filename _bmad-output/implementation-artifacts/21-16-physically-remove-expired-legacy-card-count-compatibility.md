@@ -28,5 +28,5 @@ The Given/When/Then acceptance criteria in `epics.md#Story-21.16` are normative.
 ### References
 
 - [Source: _bmad-output/planning-artifacts/epics.md#Story-21.16]
-- [Source: _bmad-output/planning-artifacts/architecture/architecture-xuyenviet-2026-07-04/retrieval-trip-aware/evaluation-and-release-gates.md#G3]
+- [Source: _bmad-output/planning-artifacts/architecture/architecture-xuyenviet-2026-07-04/retrieval-trip-aware/evaluation-and-release-gates.md#Gates]
 - [Source: _bmad-output/planning-artifacts/architecture/architecture-xuyenviet-2026-07-04/ARCHITECTURE-SPINE.md#AD-38]

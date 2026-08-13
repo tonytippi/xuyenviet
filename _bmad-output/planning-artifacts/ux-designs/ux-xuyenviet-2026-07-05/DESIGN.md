@@ -4,11 +4,13 @@ description: Responsive web UX for an AI-first Vietnam road-trip planning compan
 status: final
 project: xuyenviet
 created: 2026-07-05
-updated: 2026-08-05
+updated: 2026-08-13
 sources:
   - ../../prds/prd-xuyenviet-2026-07-04/prd.md
   - ../../architecture/architecture-xuyenviet-2026-07-04/ARCHITECTURE-SPINE.md
+  - ../../architecture/architecture-xuyenviet-2026-07-04/retrieval-trip-aware-solution-design.md
   - ../../epics.md
+  - ../../sprint-change-proposal-2026-08-13.md
   - ../../implementation-readiness-report-2026-07-21.md
 colors:
   primary: '#14532D'
@@ -273,7 +275,7 @@ Shape language is soft but not playful.
 - **Trip Home focus card** uses `{components.trip-home-focus}` and contains one focus label, short reason, the next action, and a link to the affected timeline item or proposal. It should feel like a calm briefing card, not an alert feed.
 - **Plan timeline** uses date dividers and a thin route-teal progression line. Anchors, legs, and activities use semantic icons and a visible state label. `Ý tưởng` is neutral/outlined, `Dự kiến` uses guide amber sparingly, `Đã chốt` uses `{components.plan-item-confirmed}`, and `Phương án B` uses `{components.plan-item-backup}`.
 - **Change proposal card** uses `{components.change-proposal}` and contains `Đề xuất`, rationale, before/after impact, and a bounded action row. `Áp dụng` uses the primary button, `Giữ kế hoạch` is secondary/destructive-neutral dismissal, and `Xem phương án khác` appears only when provided. Pending proposals must never look identical to confirmed timeline items.
-- **Companion action** is a compact conversational message block used only after the assistant has enough context to suggest saving a trip or continuing in an owned trip. It uses one clear explanation and at most two explicit choices; it is not a modal, dashboard card, or persistent callout.
+- **Companion action** is a compact conversational message block used only after the assistant has enough context to suggest saving a trip or continuing in an owned trip. It uses one clear explanation and at most two explicit choices; it is not a modal, dashboard card, or sticky banner. For `Chuyển thành chuyến đi`, eligibility is persistent server state across turns and navigation even though the visual treatment remains an inline conversational action.
 - **Plan history row** is visually compact and subdued: status icon/label, safe summary, actor, and timestamp. It is secondary to current plan state and does not show raw AI prose.
 - **Conversation row** uses one-line title plus optional short preview/date. It should feel like chat history, not a document library.
 - **Chat composer** uses `{components.chat-composer}` and remains visually anchored to the main chat column. It is a low-chrome surface: prompt text, an icon-only `{components.composer-icon-action}` attachment trigger when supported, and an icon-only `{components.composer-send-action}` send trigger. A visible label, keyboard cheat sheet, file-type/size explanation, or secondary bordered attachment region must not occupy the idle composer. Show that information contextually after focus, an attachment, validation failure, or an explicit help request. The composer expands only as needed for multiline text or an attachment preview without widening the reading column.

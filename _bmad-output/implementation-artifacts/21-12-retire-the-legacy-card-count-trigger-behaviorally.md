@@ -22,6 +22,7 @@ As a traveler, I want web verification to respond to missing or changing plannin
 
 ## Dev Notes
 
+- Depends on Story 21.15's Product Owner-approved cutover. This story records behavioral retirement; it does not independently collect the shadow window or activate `v6_active`.
 - AD-38/RTA-10: current `approvedKnowledgeTargetCount = 3` branch is a compatibility baseline, not v6 authority. Do not add environment flags or runtime-policy overrides.
 - This story does not alter Story 4.5 independently. It consumes required-need behavior and the persisted read-policy authority from 21.6/21.11.
 - Story 21.16 owns physical cleanup. This story completes after behavioral retirement and its Product approval while retaining runnable compatibility behavior.
@@ -32,13 +33,12 @@ As a traveler, I want web verification to respond to missing or changing plannin
 - [Source: _bmad-output/planning-artifacts/epics.md#Story-21.12]
 - [Source: _bmad-output/planning-artifacts/architecture/architecture-xuyenviet-2026-07-04/ARCHITECTURE-SPINE.md#AD-38]
 - [Source: packages/database/src/source-bundle.ts]
-- [Source: _bmad-output/planning-artifacts/architecture/architecture-xuyenviet-2026-07-04/retrieval-trip-aware/evaluation-and-release-gates.md#G3]
-- [Source: _bmad-output/planning-artifacts/implementation-readiness-report-2026-08-13-epic-21.md#Required-Execution-Gates]
+- [Source: _bmad-output/planning-artifacts/architecture/architecture-xuyenviet-2026-07-04/retrieval-trip-aware/evaluation-and-release-gates.md#Gates]
 - [Source: _bmad-output/planning-artifacts/ux-designs/ux-xuyenviet-2026-07-05/EXPERIENCE.md#v6.2-Trip-Aware-Planning-Addendum]
 
 ## Canonical Acceptance-Criteria Mapping
 
-`epics.md#Story-21.12` is normative. Guide AC 1-3 map to behavioral retirement; canonical AC 4 is a Story 21.16 external-gate dependency and cannot be marked complete here.
+`epics.md#Story-21.12` is normative. Guide AC 1-3 map to behavioral retirement. Guide AC 4 maps to current executable proof that physical cleanup remains blocked and compatibility remains runnable; Story 21.16 owns the later cleanup execution and is not a prerequisite for completing Story 21.12.
 
 ## Dev Agent Record
 

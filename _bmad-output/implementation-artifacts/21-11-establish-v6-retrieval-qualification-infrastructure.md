@@ -22,6 +22,7 @@ As a product owner, I want qualification and read-policy infrastructure before e
 
 ## Dev Notes
 
+- Depends on Story 21.13 so the canonical deletion matrix, races, and production-evaluation invalidation are executable inputs to qualification rather than prose-only metric names.
 - AD-37/AD-38/RTA-8/RTA-9 govern ownership. Deployment configuration cannot override the PostgreSQL read-policy row.
 - Shadow records bounded evaluation material only. It must never make a provider or web call, select a response, mutate traveler state, or write prompt/provenance/provider usage.
 - Completion is local infrastructure readiness only. Story 21.14 owns evidence collection/Product Owner approval; Story 21.15 owns activation and incident rollback.
@@ -30,9 +31,8 @@ As a product owner, I want qualification and read-policy infrastructure before e
 
 - [Source: _bmad-output/planning-artifacts/epics.md#Story-21.11]
 - [Source: _bmad-output/planning-artifacts/architecture/architecture-xuyenviet-2026-07-04/ARCHITECTURE-SPINE.md#AD-37-and-AD-38]
-- [Source: _bmad-output/planning-artifacts/architecture/architecture-xuyenviet-2026-07-04/retrieval-trip-aware/evaluation-and-release-gates.md#G0-G2]
+- [Source: _bmad-output/planning-artifacts/architecture/architecture-xuyenviet-2026-07-04/retrieval-trip-aware/evaluation-and-release-gates.md#Gates]
 - [Source: _bmad-output/planning-artifacts/architecture/architecture-xuyenviet-2026-07-04/retrieval-trip-aware/fixtures.md#Compatibility-And-Cutover]
-- [Source: _bmad-output/planning-artifacts/implementation-readiness-report-2026-08-13-epic-21.md#Required-Execution-Gates]
 - [Source: _bmad-output/planning-artifacts/ux-designs/ux-xuyenviet-2026-07-05/EXPERIENCE.md#v6.2-Trip-Aware-Planning-Addendum]
 
 ## Canonical Acceptance-Criteria Mapping

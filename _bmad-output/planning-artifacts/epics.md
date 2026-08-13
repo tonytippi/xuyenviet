@@ -3099,6 +3099,8 @@ Travelers can refine complex itinerary, route, lodging, food, and activity reque
 
 **Implementation precondition:** Before an Epic 21 story begins, the v6.2 Trip-Aware Planning Addendum in `ux-designs/ux-xuyenviet-2026-07-05/EXPERIENCE.md` must be current and cited by the story. The implementation must preserve its planning-mode, route-limitation, required-gap, and persistent-conversion interaction contracts.
 
+**Authoritative implementation sequence:** `21.1 -> 21.2 -> 21.3 -> 21.4 -> 21.5 -> 21.6 -> 21.7 -> 21.8 -> 21.9 -> 21.10 -> 21.13 -> 21.11 -> 21.14 -> 21.15 -> 21.12 -> 21.16`. Story identifiers 21.13 through 21.16 were appended during course correction; numeric order and file position do not override this dependency chain.
+
 ### Story 21.1: Define Versioned Planning Context Profiles And Scope Rules
 
 As a traveler,
@@ -3336,6 +3338,8 @@ So that retries or failures cannot leave partial or competing terminal state beh
 
 ### Story 21.9: Keep A Current Chat-To-Trip Opportunity Available
 
+**Dependency:** Complete Story 21.8's atomic planning-evidence finalization first; opportunity refresh extends that terminalization path.
+
 As a traveler,
 I want a persistent `Chuyển thành chuyến đi` action when my chat contains useful planning context,
 So that I can continue refining the plan and convert it when I am ready.
@@ -3392,6 +3396,8 @@ So that nothing is copied or applied until I explicitly approve the structured c
 
 ### Story 21.11: Establish V6 Retrieval Qualification Infrastructure
 
+**Dependency:** Complete Story 21.13's deletion invalidation first so qualification profiles and shadow contracts can include the canonical deletion metrics and fixtures.
+
 As a product owner,
 I want qualification and read-policy infrastructure before evidence collection,
 So that later evidence and activation cannot weaken route, context, provenance, privacy, or operational safety.
@@ -3420,6 +3426,8 @@ So that later evidence and activation cannot weaken route, context, provenance, 
 
 ### Story 21.13: Invalidate Planning Evidence On Conversation And Trip Deletion
 
+**Dependency:** Complete Stories 21.8 and 21.10 first so finalization and conversion artifacts exist before their deletion behavior is implemented.
+
 As a traveler,
 I want deleted planning data to stop influencing the system,
 So that a deleted conversation or Trip cannot leave reconstructable state behind.
@@ -3443,6 +3451,8 @@ So that a deleted conversation or Trip cannot leave reconstructable state behind
 
 ### Story 21.14: Collect And Approve V6 Shadow Qualification Evidence
 
+**Dependency:** Complete Story 21.11's qualification infrastructure first.
+
 As a product owner,
 I want a reviewed comparable shadow-evidence report,
 So that activation is based on one exact qualified window rather than local test success.
@@ -3460,6 +3470,8 @@ So that activation is based on one exact qualified window rather than local test
 **And** approval grants no direct cutover authority.
 
 ### Story 21.15: Cut Over V6 Retrieval Through Qualified Read Policy
+
+**Dependency:** Complete Story 21.14 with a passing Product Owner-approved report and runnable qualified rollback target first.
 
 As a product owner,
 I want required-need retrieval activated only through a qualified read-policy decision,
@@ -3513,6 +3525,8 @@ So that one exact answer is not over-searched and several irrelevant cards canno
 **And** any environmental blocker is recorded exactly rather than weakening or skipping a gate.
 
 ### Story 21.16: Physically Remove Expired Legacy Card-Count Compatibility
+
+**Dependency:** Complete Story 21.12's behavioral retirement first. This story remains independently blocked by its G3 cleanup prerequisites.
 
 As a product owner,
 I want legacy card-count compatibility removed only after rollback safety expires,

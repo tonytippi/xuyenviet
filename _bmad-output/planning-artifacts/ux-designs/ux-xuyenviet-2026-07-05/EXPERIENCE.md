@@ -3,12 +3,14 @@ name: XuyenViet
 status: final
 project: xuyenviet
 created: 2026-07-05
-updated: 2026-08-05
+updated: 2026-08-13
 sources:
   - ../../prds/prd-xuyenviet-2026-07-04/prd.md
   - ../../architecture/architecture-xuyenviet-2026-07-04/ARCHITECTURE-SPINE.md
+  - ../../architecture/architecture-xuyenviet-2026-07-04/retrieval-trip-aware-solution-design.md
   - ../../epics.md
   - ../../sprint-change-proposal-2026-08-03-direct-api-session-auth.md
+  - ../../sprint-change-proposal-2026-08-13.md
 ---
 
 # XuyenViet — Experience Spine
@@ -255,7 +257,7 @@ Rules:
 - **Planning modes:** A Trip-scoped answer distinguishes the current saved plan, an explored change, a pending-proposal review, and an unscoped/private question. Current-plan copy represents only applied Trip state. Exploration and pending proposals remain visibly hypothetical and cannot alter the displayed plan.
 - **Route coverage:** When a route is partial, ambiguous, unsupported, or has a stale selected path, the answer provides any safe scoped guidance, states the bounded limitation in plain Vietnamese, and offers the relevant clarification, review, or verification action. It never implies end-to-end, live navigation, traffic, closure, or guaranteed route-safety authority.
 - **Required planning needs:** If a consequential route, safety, family, vehicle, stop, or constraint need is uncovered, the answer identifies that gap concisely and offers a bounded clarification or verification action. It does not hide the gap behind unrelated recommendations.
-- **Persistent Trip conversion:** After a useful unscoped planning answer has current eligible durable context, the shell may show one persistent `Chuyển thành chuyến đi` action projected by the server. It reflects the latest eligible context, may suspend while information is ambiguous or incomplete, and changes no Trip state until the traveler explicitly converts and then applies the resulting proposal.
+- **Persistent Trip conversion:** After a useful unscoped planning answer has current eligible durable context, the shell may show one persistent `Chuyển thành chuyến đi` action projected by the server. Persistence belongs to the server opportunity across turns and navigation; the control remains an inline conversational action rather than a sticky banner. It reflects the latest eligible context, remains visible but disabled while a newer traveler turn is unterminated, may suspend while information is ambiguous or incomplete, and changes no Trip state until the traveler explicitly converts and then applies the resulting proposal. Not clicking is neutral; only an explicit dismissal creates a decline fence.
 
 ## Responsive & Platform
 

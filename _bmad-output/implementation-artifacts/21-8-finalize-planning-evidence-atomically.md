@@ -31,8 +31,7 @@ As a traveler, I want completed answers internally consistent, so that retries a
 - [Source: packages/database/src/ai-ask-commands.ts]
 - [Source: packages/database/src/ai-ask-stream-execution.ts]
 - [Source: packages/database/src/index.ts]
-- [Source: _bmad-output/planning-artifacts/architecture/architecture-xuyenviet-2026-07-04/retrieval-trip-aware/contracts.md#Finalization-And-Deletion]
-- [Source: _bmad-output/planning-artifacts/architecture/architecture-xuyenviet-2026-07-04/retrieval-trip-aware/fixtures.md#Deletion]
+- [Source: _bmad-output/planning-artifacts/architecture/architecture-xuyenviet-2026-07-04/retrieval-trip-aware/contracts.md#Replay-Identity-And-Manifests]
 - [Source: _bmad-output/planning-artifacts/ux-designs/ux-xuyenviet-2026-07-05/EXPERIENCE.md#v6.2-Trip-Aware-Planning-Addendum]
 
 ## Canonical Acceptance-Criteria Mapping

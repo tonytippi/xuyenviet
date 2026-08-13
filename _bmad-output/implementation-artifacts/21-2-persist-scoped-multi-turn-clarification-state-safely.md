@@ -25,14 +25,14 @@ As a traveler, I want valid answers to accumulate across clarification turns, so
 - Depends on Story 21.1's validated profile, comparator, scope graph, and pinned identities. Retrieval supplies the validated plan/evaluator; Chat/Trips is the sole writer of conversation-bound state. AI Orchestration owns only plan/extraction attempt identity.
 - Closed states: session `active|superseded|completed`; instance `collecting|ready|claimed|completed|abandoned`. Enforce the legal transition matrix and a partial unique one-active-session-per-conversation constraint. Validate owner, `sourceMessageOrdinal`, expected session/content revision, plan/extraction attempt identity, field/evidence digest, profile/scope, and Trip/proposal fences.
 - Values use zero-based UTF-16 exclusive-end evidence spans. Do not mutate a Trip aggregate from clarification state.
-- Design FKs/invalidation so Story 21.8 can synchronously remove reconstructable sessions, claims, values, and evidence on conversation/Trip deletion.
+- Design FKs/invalidation so Story 21.13 can synchronously remove reconstructable sessions, claims, values, and evidence on conversation/Trip deletion after finalization and conversion artifacts exist.
 
 ### References
 
 - [Source: _bmad-output/planning-artifacts/epics.md#Story-21.2]
 - [Source: _bmad-output/planning-artifacts/architecture/architecture-xuyenviet-2026-07-04/ARCHITECTURE-SPINE.md#AD-39]
-- [Source: _bmad-output/planning-artifacts/architecture/architecture-xuyenviet-2026-07-04/retrieval-trip-aware/contracts.md#Clarification-State]
-- [Source: _bmad-output/planning-artifacts/architecture/architecture-xuyenviet-2026-07-04/retrieval-trip-aware/fixtures.md#Clarification]
+- [Source: _bmad-output/planning-artifacts/architecture/architecture-xuyenviet-2026-07-04/retrieval-trip-aware/contracts.md#Multi-Turn-Clarification-And-Scoped-Context]
+- [Source: _bmad-output/planning-artifacts/architecture/architecture-xuyenviet-2026-07-04/retrieval-trip-aware/fixtures.md#Multi-Turn-Clarification-And-Scoped-Preferences]
 - [Source: tests/trip-recommendations.integration.test.ts]
 - [Source: _bmad-output/planning-artifacts/ux-designs/ux-xuyenviet-2026-07-05/EXPERIENCE.md#v6.2-Trip-Aware-Planning-Addendum]
 

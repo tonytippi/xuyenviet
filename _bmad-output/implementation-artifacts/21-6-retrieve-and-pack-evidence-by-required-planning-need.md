@@ -27,15 +27,15 @@ As a traveler, I want answers to cover important needs of my trip rather than me
 - Requirement identity includes intent-profile version, facet, importance, scope/leg, constraint, and freshness. Final coverage comes exclusively from the prompt-render manifest.
 - Consume Story 21.1 profile identities, Story 21.4 `PlanningExecutionRef`, and Story 21.5 route-resolution output with their pinned fences; stale inputs fail closed rather than being re-derived from chat or Trip rows.
 - Retrieval is sole writer for runs, keys, contributions, outcomes, and selection manifests; AI Orchestration may coordinate but cannot write Retrieval tables.
-- Do not retire the legacy target-count trigger in this story; Story 21.12 owns its behavioral and physical retirement.
+- Do not retire the legacy target-count trigger in this story; Story 21.12 owns behavioral retirement and Story 21.16 owns later physical cleanup after G3.
 
 ### References
 
 - [Source: _bmad-output/planning-artifacts/epics.md#Story-21.6]
 - [Source: _bmad-output/planning-artifacts/architecture/architecture-xuyenviet-2026-07-04/ARCHITECTURE-SPINE.md#AD-34-and-AD-36]
 - [Source: packages/database/src/source-bundle.ts]
-- [Source: _bmad-output/planning-artifacts/architecture/architecture-xuyenviet-2026-07-04/retrieval-trip-aware/contracts.md#Required-Need-Retrieval]
-- [Source: _bmad-output/planning-artifacts/architecture/architecture-xuyenviet-2026-07-04/retrieval-trip-aware/fixtures.md#Required-Needs]
+- [Source: _bmad-output/planning-artifacts/architecture/architecture-xuyenviet-2026-07-04/retrieval-trip-aware/contracts.md#Required-Needs-And-Coverage]
+- [Source: _bmad-output/planning-artifacts/architecture/architecture-xuyenviet-2026-07-04/retrieval-trip-aware/fixtures.md#Required-Need-Coverage-And-Capacity]
 - [Source: _bmad-output/planning-artifacts/ux-designs/ux-xuyenviet-2026-07-05/EXPERIENCE.md#v6.2-Trip-Aware-Planning-Addendum]
 
 ## Canonical Acceptance-Criteria Mapping

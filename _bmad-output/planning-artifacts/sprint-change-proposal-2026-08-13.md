@@ -291,10 +291,22 @@ Success criteria:
 - [x] 4.4 Recommended path selected: direct adjustment with moderate backlog reorganization.
 - [x] 5.1-5.5 Proposal, action plan, and handoff prepared.
 - [x] 6.1-6.2 Proposal reviewed for consistency with source artifacts.
-- [!] 6.3 Explicit user approval required before modifying authoritative planning artifacts or sprint status.
-- [N/A] 6.4 Sprint status update deferred until approval.
-- [!] 6.5 Handoff begins after approval.
+- [x] 6.3 Product Owner approval recorded on 2026-08-13, including the post-readiness document-unification instruction.
+- [x] 6.4 Sprint status updated with Stories 21.13-21.16 and retained in `backlog` pending just-in-time validation.
+- [x] 6.5 Handoff completed: Story 21.1 validation is the next required gate.
 
 ## Approval
 
-Approved by Product Owner on 2026-08-13 and applied to `epics.md`, `EXPERIENCE.md`, Epic 21 implementation guides, and `sprint-status.yaml`. Epic 21 remains in `backlog` pending story validation and an implementation-readiness recheck.
+Approved by Product Owner on 2026-08-13 and applied to `epics.md`, PRD addendum, UX spines, Epic 21 implementation guides, validation/readiness reports, and `sprint-status.yaml`. The implementation-readiness recheck is closed; Epic 21 remains in `backlog` pending Story 21.1 just-in-time validation.
+
+## Post-Readiness Closure
+
+The Epic 21 recheck identified four remaining implementation-handoff inconsistencies. The Product Owner's instruction to unify the documents approved their direct correction on 2026-08-13.
+
+- `epics.md` and the guides now carry one authoritative dependency chain, including 21.8→21.9, 21.10→21.13→21.11, and 21.15→21.12.
+- Story 21.13 owns deletion invalidation; Story 21.8 owns finalization only.
+- Story 21.12 owns behavioral retirement; Story 21.16 owns later G3 physical cleanup and is not a forward prerequisite for completing 21.12.
+- The story-guide validation report now has one final verdict, covers Stories 21.1-21.16, and agrees with the current `backlog` sprint status.
+- PRD addendum and UX metadata/wording no longer describe the approved canonical path contract as open or confuse persistent server opportunity state with a sticky visual banner.
+
+Closure status: **applied**. Epic 21 is ready for sequential just-in-time story validation. Story 21.1 remains `backlog` until that validation passes.

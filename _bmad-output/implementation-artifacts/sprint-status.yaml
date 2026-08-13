@@ -455,9 +455,10 @@ development_status:
   20-6-decouple-candidate-processing-from-discovery-search-runs: ready-for-dev
   epic-20-retrospective: optional
 
-  # 2026-08-13: Approved sprint-change-proposal-2026-08-13.md. Epic 21 is
-  # held in backlog pending story validation and readiness recheck. Story
-  # 21.13 separates deletion, 21.14 evidence, 21.15 cutover, and 21.16 G3 cleanup.
+  # 2026-08-13: Approved sprint-change-proposal-2026-08-13.md and closed
+  # implementation-readiness recheck. Epic 21 remains in backlog pending
+  # Story 21.1 just-in-time validation. Story 21.13 separates deletion,
+  # 21.14 evidence, 21.15 cutover, and 21.16 G3 cleanup.
   epic-21: backlog
   21-1-define-versioned-planning-context-profiles-and-scope-rules: backlog
   21-2-persist-scoped-multi-turn-clarification-state-safely: backlog
