@@ -79,6 +79,7 @@
     { "idx": 74, "version": "7", "when": 1788608400000, "tag": "0074_scope_clarification_invalidation_and_pin_proposals", "breakpoints": true },
     { "idx": 75, "version": "7", "when": 1788694800000, "tag": "0075_recompute_clarification_deletion_completeness", "breakpoints": true },
     { "idx": 76, "version": "7", "when": 1788781200000, "tag": "0076_harden_clarification_completion_and_scope_projections", "breakpoints": true },
-    { "idx": 77, "version": "7", "when": 1788867600000, "tag": "0077_fence_clarification_claim_conversations", "breakpoints": true }
+    { "idx": 77, "version": "7", "when": 1788867600000, "tag": "0077_fence_clarification_claim_conversations", "breakpoints": true },
+    { "idx": 78, "version": "7", "when": 1788954000000, "tag": "0078_freeze_clarification_session_identity", "breakpoints": true }
   ]
 }

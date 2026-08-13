@@ -190,6 +190,14 @@ describe("planning clarification persistence", () => {
     await expect(testDb.execute(sql`UPDATE planning_clarification_sessions SET state = 'completed' WHERE id = ${session!.id}`)).resolves.toBeDefined();
   });
 
+  test("database freezes clarification session identity and fence pins", async () => {
+    const seeded = await seed("owner", "immutable-session");
+    const session = await initializeClarificationSession({ userId: "owner", conversationId: seeded.conversationId, planAttemptId: (await planAttempt(seeded))!.id, context });
+    await expect(testDb.execute(sql`UPDATE planning_clarification_sessions SET scope_graph = '[]'::jsonb WHERE id = ${session!.id}`)).rejects.toThrow();
+    await expect(testDb.execute(sql`UPDATE planning_clarification_sessions SET graph_digest = ${"0".repeat(64)}, plan_attempt_id = ${"different-attempt"} WHERE id = ${session!.id}`)).rejects.toThrow();
+    await expect(testDb.execute(sql`UPDATE planning_clarification_sessions SET revision = revision + 1, content_revision = content_revision + 1, updated_at = now() WHERE id = ${session!.id}`)).resolves.toBeDefined();
+  });
+
   test("attempt admission rejects stale source content and active-session revision before persistence", async () => {
     const seeded = await seed("owner", "attempt-fences");
     const session = await initializeClarificationSession({ userId: "owner", conversationId: seeded.conversationId, planAttemptId: (await planAttempt(seeded))!.id, context });
