@@ -8,17 +8,46 @@ As a traveler, I want changing external information checked for the exact place,
 
 ## Acceptance Criteria
 
-1. Before Search, Retrieval persists an immutable minimized query-plan manifest containing requirement keys, canonical allowed scope terms, excluded private-context classes, query-builder and provider-request-policy versions, policy versions, and digest.
-2. Fact assertions pin capture, text, parser, segmentation, registry, and resolver versions; one query-specific decision binds one assertion to one requirement/leg.
-3. Mismatched, ambiguous, or unknown facts cannot satisfy coverage. Provider failure preserves a gap and practical recovery.
-4. Replay with identical dependencies reproduces a decision; changed dependencies create an immutable projection. `WS-01` through `WS-07` pass.
+**Given** a required need is missing, freshness-sensitive, conflicted, or explicitly requests current verification
+**When** web fallback is permitted
+**Then** Retrieval persists an immutable minimized query-plan manifest with exact requirement keys, allowed canonical scope terms, excluded private-context classes, policy versions, and request digest before Search is called
+**And** private Trip notes, child details, budget, or preferences are not sent unless the exact requirement permits that value.
+
+**Given** Search returns a result containing multiple facts or geographic references
+**When** fact extraction and scope resolution run
+**Then** immutable fact-level assertions pin capture payload, text digest, parser/segmentation, registry, and resolver versions, and one query-specific decision binds the exact assertion to one requirement/leg
+**And** mismatched, ambiguous, or unknown scope cannot satisfy coverage or become a factual premise.
+
+**Given** a recent warning describes an earlier closure or the provider fails
+**When** the traveler answer is rendered
+**Then** the warning retains source, applicable place/time, unverified status, and practical verification action without being described as live closure, traffic, navigation, or guaranteed safety
+**And** provider failure preserves the gap and returns bounded useful recovery rather than fail-open certainty.
+
+**Given** the same capture is replayed or a query/parser/resolver dependency changes
+**When** projection identity is evaluated
+**Then** unchanged dependencies reproduce the same decision while changed dependencies create a new immutable projection
+**And** `WS-01` through `WS-07`, FR-35, FR-65, SC-11, and AC-32 pass with complete query-to-fact-to-render provenance.
 
 ## Tasks / Subtasks
 
-- [ ] Evolve `web-search.ts` and `source-bundle.ts` to require need-specific admission/minimized scope from Story 21.6's immutable requirement key and Story 21.5's route/scope resolution, preserving run/leg/version fences (AC: 1-4).
-- [ ] Add immutable query, capture/fact assertion, projection, and scope-decision persistence via forward migration (AC: 1-4).
-- [ ] Integrate through prepared/finalized owner ports only; do not emit an answer before render provenance exists (AC: 2-3).
-- [ ] Add privacy, ordering, replay, provider-failure, exact-scope, query-to-capture-to-fact-to-decision-to-contribution-to-render provenance-chain, and `WS-01`-`WS-07` tests; verify rendered warnings contain source, applicable place/time, unverified status, and a practical action (AC: 1-4).
+- [ ] In `packages/database/src/schema.ts` and `drizzle/migrations/`, add one forward migration for immutable web query-plan manifests, captures, fact assertions, scope projections, query-specific decisions, and their run/requirement/leg/version fences; export Retrieval/Search transaction-aware owner ports from `packages/database/src/web-evidence-scope.ts` and `packages/database/src/index.ts` (AC: 1-4).
+- [ ] In `packages/database/src/web-search.ts`, replace whole-question admission with a bounded request built only from Story 21.6 requirement keys and Story 21.5 canonical allowed scope terms; persist the minimized manifest before the provider call and exclude private context unless the exact requirement policy permits it (AC: 1).
+- [ ] In `packages/database/src/web-evidence-scope.ts`, segment each captured result into immutable assertions, pin payload/text/parser/segmentation/registry/resolver identities, and persist one exact assertion-to-requirement/leg decision whose replay identity changes whenever a dependency changes (AC: 2, 4).
+- [ ] In `packages/database/src/source-bundle.ts` and `packages/database/src/provenance.ts`, admit only applicable exact/reviewed web decisions as contributions, preserve mismatched/ambiguous/unknown results as gaps or verification leads, and render source/place/time/unverified/action fields without live-authority wording (AC: 2-4).
+- [ ] In `packages/database/src/web-evidence-scope.ts`, expose immutable prepared decision/contribution rows and transaction-aware sealing ports for Story 21.8. Do not require `finalizeAiAnswer(...)` to exist yet and do not add a second terminalizer; the current AI Ask path may consume the prepared projection until Story 21.8 composes owner ports atomically (AC: 2-4).
+- [ ] In `tests/web-evidence-scope.test.ts`, `tests/web-search-adapter.test.ts`, and `tests/web-search-quality.test.ts`, add DB-free minimization/privacy, ordering, exact-scope, replay, prior-warning, provider-failure, and `WS-01` through `WS-07` coverage; in `tests/web-evidence-scope.integration.test.ts`, add serial PostgreSQL query-to-capture-to-assertion-to-decision-to-contribution-to-render provenance and immutable dependency-change coverage with local `resetTestDatabase()` setup (AC: 1-4).
+
+### Verification
+
+- `pnpm test:unit -- tests/web-evidence-scope.test.ts tests/web-search-adapter.test.ts tests/web-search-quality.test.ts`
+- `pnpm test:integration -- tests/web-evidence-scope.integration.test.ts`
+- `pnpm typecheck`
+- `pnpm exec drizzle-kit check`
+- `git diff --check`
+
+### Block If
+
+- Stories 21.5 and 21.6 are not complete or their pinned route/scope resolution and immutable requirement-key contracts are unavailable.
 
 ## Dev Notes
 

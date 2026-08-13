@@ -1,5 +1,5 @@
 # generated: 2026-07-25
-# last_updated: 2026-08-13 (Approved Epic 21 readiness correct course: stories reorganized and held in backlog pending revalidation.)
+# last_updated: 2026-08-13 (Epic 21 dev-auto preflight hardened; stories remain backlog for sequential execution.)
 # project: xuyenviet
 # project_key: NOKEY
 # tracking_system: file-system
@@ -33,7 +33,7 @@
 #   - done: Completed
 
 generated: 2026-07-25
-last_updated: 2026-08-13 (Approved Epic 21 readiness correct course: stories reorganized and held in backlog pending revalidation.)
+last_updated: 2026-08-13 (Epic 21 dev-auto preflight hardened; stories remain backlog for sequential execution.)
 project: xuyenviet
 project_key: NOKEY
 tracking_system: file-system

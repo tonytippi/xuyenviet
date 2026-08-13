@@ -3519,7 +3519,7 @@ So that one exact answer is not over-searched and several irrelevant cards canno
 **Then** cleanup remains blocked for Story 21.16 until the profile-owned rollback window, `COMP-06`, a passing cleanup report, Product approval, and a retained known-safe `v6_active` rollback target exist
 **And** behavioral retirement preserves the still-runnable compatibility path until that later cleanup completes.
 
-**Given** Epic 21 is complete
+**Given** Story 21.12 behavioral retirement is ready for completion and all earlier stories in the authoritative sequence have completed
 **When** focused unit tests, serial PostgreSQL integration tests, immutable fixture/evaluation checks, `pnpm lint`, `pnpm typecheck`, and `pnpm build` run
 **Then** every RTA-1..RTA-13, PCR-01..PCR-10, FR-61..65, SC-8..12, AC-28..33, and PJ-01..06 mapping has executable evidence
 **And** any environmental blocker is recorded exactly rather than weakening or skipping a gate.

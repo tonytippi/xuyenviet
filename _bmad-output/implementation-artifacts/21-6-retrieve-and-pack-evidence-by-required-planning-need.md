@@ -8,19 +8,57 @@ As a traveler, I want answers to cover important needs of my trip rather than me
 
 ## Acceptance Criteria
 
-1. Retrieval validates owner-row eligibility, resolves canonical geographic/facet authority, persists a deterministic scope-first allowlist with stable order and bounded inputs, and creates deterministic versioned requirement keys before candidate generation.
-2. Each contribution binds one eligible fact, revisions, scope/freshness decision, requirement key, and render variant; no card-level shortcut satisfies another need.
-3. Capacity pressure prioritizes consequential needs, records deterministic exclusions, and makes every dropped required need `missing`, `requires_verification`, or `requires_clarification` before generation.
-4. Final coverage recomputes from the prompt-render manifest, not card count. The lexical stage searches only the allowlist with field-aware fact fields; source metadata cannot affect relevance. FTS activates only after its G0 gate, otherwise deterministic indexed field-aware lexical remains active. `RN-01` through `RN-07` and lexical allowlist/isolation/order/bound/fallback fixtures pass.
+**Given** a ready planning execution enters Retrieval
+**When** the intent profile expands its needs
+**Then** it creates deterministic versioned requirement keys with exact facet, importance, scope/leg, constraint, and freshness identity before candidate generation
+**And** it validates current owner-row eligibility, resolves canonical geographic/facet authority, and persists a deterministic scope-first allowlist with stable order and bounded candidate inputs before lexical retrieval.
+
+**Given** a deterministic scope-first allowlist exists
+**When** the versioned field-aware lexical stage generates candidates
+**Then** it searches only that allowlist using title, type, canonical route/location, summary, tags, and policy-allowlisted practical-detail fields
+**And** source labels, URLs, publishers, capture/provenance/evidence/provider metadata, and other source metadata cannot create or improve lexical relevance.
+
+**Given** the G0 deployed PostgreSQL/provider/Vietnamese lexical spike result is recorded
+**When** Retrieval selects its v6 lexical implementation
+**Then** PostgreSQL FTS activates only after deployability, candidate-recall, and critical false-exclusion gates pass
+**And** otherwise `v6_active` uses the deterministic indexed field-aware lexical implementation and keeps FTS inactive.
+
+**Given** candidate evidence contains mixed facts, different legs, duplicate coverage, or an off-scope high-prestige source
+**When** eligibility and contribution decisions run
+**Then** each contribution binds one exact eligible fact, owner/capture revision, scope/freshness decision, requirement key, and permitted render variant
+**And** one fact, leg, source reputation, similarity score, or card-level shortcut cannot authorize another need or scope.
+
+**Given** token, candidate, or source-handle capacity cannot retain every contribution
+**When** the selector and final prompt packer run
+**Then** consequential route, safety, and traveler constraints take priority and stable pre-cap telemetry records eligible exclusions
+**And** every dropped required need becomes an explicit `missing`, `requires_verification`, or `requires_clarification` outcome before model generation.
+
+**Given** one exact contribution covers the only required need or three cards leave a required need uncovered
+**When** final coverage is recomputed from the prompt-render manifest
+**Then** the first request is sufficient without count-only web fallback and the second keeps the gap despite its card count
+**And** `RN-01` through `RN-07`, lexical allowlist/source-metadata/order/bound/fallback fixtures, FR-61..62, SC-8, SC-10, and AC-31 pass, including literal-zero hard-off-route, unrelated-need satisfaction, source-metadata leakage, and critical hard-filter/cap false exclusion.
 
 ## Tasks / Subtasks
 
-- [ ] Add Retrieval-owned requirement, contribution, outcome, and selection-manifest schema/migration and owner ports (AC: 1-4).
-- [ ] Evolve `source-bundle.ts`, `approved-knowledge.ts`, and `knowledge-search.ts` around required-need contributions; recompute outcomes from the final prompt-render manifest after packing, version revocation, and source-handle pressure, immediately before generation (AC: 1-4).
-- [ ] Persist/pin the allowlist, lexical implementation/version, search input projection version, stable candidate bound/order, and pre-cap exclusions. Search only title, type, canonical route/location, summary, tags, and allowlisted practical details; exclude source/provenance/evidence/provider metadata from lexical relevance (AC: 1, 4).
-- [ ] Record the G0 deployed PostgreSQL/provider/Vietnamese FTS spike result; use FTS only when its deployability, recall, and critical false-exclusion gates pass, otherwise keep deterministic indexed field-aware lexical active (AC: 4).
-- [ ] Prepare immutable retrieval inputs for existing finalization without taking Story 21.8 ownership (AC: 1-3).
-- [ ] Add pure identity/coverage tests and serial immutable provenance/capacity tests covering stable pre-cap telemetry, `eligible_but_cap_excluded`, and all `RN-01`-`RN-07` fixtures (AC: 1-4).
+- [ ] In `packages/database/src/schema.ts` and `drizzle/migrations/`, add one forward migration for Retrieval-owned runs, requirement keys, fact-bound contributions, outcomes, scope-first allowlists, pre-cap exclusions, and immutable selection manifests; export only aggregate-owned row types and transaction-aware ports from `packages/database/src/retrieval-required-needs.ts` and `packages/database/src/index.ts` (AC: 1, 4).
+- [ ] In `packages/database/src/knowledge-search.ts` and `packages/database/src/approved-knowledge.ts`, replace source-metadata-weighted document scoring with the versioned field-aware projection over title, type, canonical route/location, summary, tags, and policy-allowlisted practical details; constrain candidate generation to the persisted allowlist with stable bound/order and pin the lexical/search-projection versions (AC: 1-3).
+- [ ] In `packages/database/src/retrieval-required-needs.ts` and `packages/database/src/source-bundle.ts`, expand the pinned intent profile into deterministic requirement keys, bind each eligible atomic fact to one requirement/leg and render variant, prioritize consequential requirements, and persist `eligible_but_cap_excluded` plus explicit gap outcomes without retiring the legacy count trigger (AC: 1-5).
+- [ ] In `packages/database/src/source-bundle.ts`, recompute final outcomes exclusively from the final prompt-render manifest after packing, owner/capture revision revalidation, and source-handle pressure immediately before provider generation; expose immutable prepared inputs for Story 21.8 without implementing its terminal transaction (AC: 4-6).
+- [ ] In `_bmad-output/implementation-artifacts/evidence/story-21-6/g0-vietnamese-lexical-spike.md`, record the exact deployed PostgreSQL/provider version, Vietnamese corpus, SQL/CLI commands executed, allowlist/candidate bounds, recall and critical false-exclusion results, and the pass/fail decision. In `packages/database/src/knowledge-search.ts`, activate FTS only for a recorded passing result; otherwise select and test the deterministic indexed field-aware fallback (AC: 2-3, 6).
+- [ ] In `tests/retrieval-required-needs.test.ts` and `tests/knowledge-search.test.ts`, add DB-free identity, coalescing, lexical field-isolation, stable-order, capacity, and `RN-01` through `RN-07` coverage; in `tests/retrieval-required-needs.integration.test.ts`, add serial PostgreSQL allowlist, owner-row revalidation, immutable provenance, pre-cap telemetry, revocation-before-render, and prompt-manifest recomputation coverage with local `resetTestDatabase()` setup (AC: 1-6).
+
+### Verification
+
+- `pnpm test:unit -- tests/retrieval-required-needs.test.ts tests/knowledge-search.test.ts`
+- `pnpm test:integration -- tests/retrieval-required-needs.integration.test.ts`
+- `pnpm typecheck`
+- `pnpm exec drizzle-kit check`
+- `git diff --check`
+
+### Block If
+
+- Stories 21.1, 21.4, and 21.5 are not complete or their pinned profile, `PlanningExecutionRef`, and route-resolution contracts are unavailable.
+- FTS activation is blocked when `_bmad-output/implementation-artifacts/evidence/story-21-6/g0-vietnamese-lexical-spike.md` is absent, incomplete, or failing. No repository spike runner exists at story creation time; record the exact commands actually executed rather than inventing a passing script. This blocks FTS only: the story must proceed with the deterministic indexed field-aware fallback.
 
 ## Dev Notes
 

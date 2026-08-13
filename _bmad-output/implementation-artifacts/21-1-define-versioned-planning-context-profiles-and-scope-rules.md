@@ -8,25 +8,41 @@ As a traveler, I want XuyenViet to recognize the details material to each part o
 
 ## Acceptance Criteria
 
-1. Immutable typed profiles cover every itinerary, route, stay, food, activity, and mixed deliverable instance; readiness never derives from prose, confidence, global completeness, or undeclared keys.
-2. The versioned scope comparator returns only `equal`, `ancestor`, `descendant`, `overlap`, `sibling`, or `unrelated`; invalid graphs and policy-limit violations reject atomically.
-3. Values apply only through strict ancestry or declared precedence; incomparable overlap stays ambiguous.
-4. Sessions, claims, fixtures, and evaluations pin exact profile, policy, comparator, and schema versions. `CLAR-01`, `CLAR-07`, `CLAR-08`, `CLAR-13`, `CLAR-21` through `CLAR-23` remain executable.
+**Given** a profiled request asks for an itinerary, route comparison, accommodation, food, activity, or mixed planning deliverables
+**When** Retrieval resolves the applicable planning-context profiles
+**Then** every deliverable instance receives an immutable profile with typed fields, materiality, conditional applicability, allowed scopes, value validation, precedence, completeness, and safe-assumption policy
+**And** readiness cannot be declared from prompt prose, model confidence, global traveler completeness, or an undeclared context key.
+
+**Given** a planning request contains journey, day-range, leg, place, destination-stay, transit-stay, meal, activity, group, or deliverable scope
+**When** its proposed scope graph is validated
+**Then** the graph uses the versioned relation comparator and deterministic `equal`, `ancestor`, `descendant`, `overlap`, `sibling`, or `unrelated` result
+**And** cycles, duplicate nodes, orphan parents, invalid references, and policy limits for nodes, instances, depth, parents, values, and text lengths are rejected without partial persistence.
+
+**Given** a traveler specifies a nicer Đà Nẵng destination stay and simple sleep-only transit stays
+**When** effective values are evaluated
+**Then** strict ancestry or an explicit profile precedence rule applies each value only to its compatible subtree
+**And** incomparable overlap becomes ambiguous rather than latest-write-wins or journey-wide leakage.
+
+**Given** the profile, plan policy, scope comparator, or value schema changes
+**When** a session, answer claim, fixture result, or evaluation result is created
+**Then** it pins the exact versions used
+**And** `CLAR-01`, `CLAR-07`, `CLAR-08`, `CLAR-13`, `CLAR-21`, `CLAR-22`, and `CLAR-23` remain executable canonical cases for FR-5, RTA-11, and RTA-12.
 
 ## Tasks / Subtasks
 
-- [ ] Define browser-safe profile catalog/resolver for itinerary, route, stay, food, activity, mixed, and `general_planning` deliverables; define policy, scope-graph, validation, comparator, completeness, deterministic graph identity, and coalescing contracts in `packages/contracts/src/index.ts` (AC: 1-4).
-- [ ] Implement Retrieval-owned immutable profile/policy validation and pure scope comparison; reject invalid graphs before persistence (AC: 1-3).
-- [ ] Add only the profile/policy and required immutable version persistence to `packages/database/src/schema.ts` with a forward migration; do not prebuild Story 21.2 session state (AC: 1, 4).
-- [ ] Pin profile/policy/comparator/schema identities in every session, claim, fixture, and evaluation contract; add DB-free resolver/identity/coalescing fixture coverage and serial migration coverage (AC: 1-4).
+- [ ] Define browser-safe closed types, exact-key parsers, and version-reference contracts in new `packages/contracts/src/planning-context.ts`, then export them from `packages/contracts/src/index.ts`; keep traveler-free profile semantics out of the contracts package (AC: 1-4).
+- [ ] Implement the Retrieval-owned immutable catalog, deliverable resolver, plan-policy validator, deterministic graph identity/coalescing, completeness evaluator, and pure scope comparator in new `packages/database/src/planning-context-profiles.ts`, then export that feature from `packages/database/src/index.ts` (AC: 1-3).
+- [ ] Add only reusable profile/policy/value-schema version records to `packages/database/src/schema.ts` and create forward migration `drizzle/migrations/0066_add_planning_context_profiles.sql`; do not create conversation sessions, claims, values, or attempt rows in this story (AC: 1, 4).
+- [ ] Add canonical executable inputs for `CLAR-01`, `CLAR-07`, `CLAR-08`, `CLAR-13`, and `CLAR-21`-`CLAR-23` in new `tests/fixtures/planning-context-v6.ts`; add DB-free resolver/identity/coalescing coverage in new `tests/planning-context-profiles.test.ts` and serial schema/migration coverage in new `tests/planning-context-profiles.integration.test.ts` (AC: 1-4).
+- [ ] Verify with `pnpm test:unit -- tests/planning-context-profiles.test.ts`, `pnpm test:integration -- tests/planning-context-profiles.integration.test.ts`, `pnpm db:generate`, and `pnpm typecheck`; record any environmental database blocker exactly rather than weakening a fixture or assertion (AC: 1-4).
 
 ## Dev Notes
 
-- This is the vocabulary foundation for 21.2-21.12. Retrieval owns profile semantics and pure completeness; Chat/Trips must not duplicate them or write a global traveler profile.
+- This is the vocabulary foundation for 21.2-21.12. `packages/contracts` owns only browser-safe shapes/parsers; Retrieval owns profile semantics, validation, comparison, and pure completeness. Chat/Trips must not duplicate them or write a global traveler profile.
 - Every field pins type/schema version, materiality, condition, permitted scopes, validation, precedence, and safe-assumption rule. Bound node/instance/depth/parent/value/text sizes deterministically.
 - Validated graphs retry to the same identity and deterministically coalesce equivalent deliverables; no consumer may infer profile identity from prose or a global completion flag.
 - Do not add a service, queue, Worker loop, or environment configuration. New durable data requires deletion semantics when later chat/Trip-derived rows are introduced.
-- Unit tests: `pnpm test:unit`; schema/migration tests: serial `pnpm test:integration`, with local `resetTestDatabase()` when tables must be clean.
+- Session, answer-claim, and plan/extraction-attempt persistence belongs to Story 21.2. Story 21.1 supplies only the version references those rows will pin.
 
 ### Project Structure Notes
 

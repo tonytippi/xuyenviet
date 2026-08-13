@@ -8,18 +8,48 @@ As a traveler, I want a persistent `Chuyển thành chuyến đi` action when ch
 
 ## Acceptance Criteria
 
-1. Terminal useful unscoped profiled answers refresh one owner-bound persistent opportunity and CTA from canonical clarification claims, not flat `chat_context` or suppressed extraction.
-2. The projection deterministically reduces eligible non-superseded claims, refreshes its manifest, suspends recoverable ambiguity/insufficiency, and protects against stale tabs.
-3. Only explicit dismissal writes a decline fence; resolved context restores the suspended ID with a new manifest and later context creates a new opportunity.
-4. UI consumes server projection, is keyboard/touch accessible, and refetches after terminal AI Ask events. Required `TC-01` through `05`, `11`, `12`, `14` through `16`, `19`, `20` pass.
+**Given** an unscoped profiled turn commits a useful answer with at least one supported explicit planning operation
+**When** the same terminalization path refreshes Trip conversion state
+**Then** Chat/Trips exposes one owner-bound stable opportunity and persistent `Chuyển thành chuyến đi` CTA from canonical clarification claims without consulting the suppressed background extractor or legacy flat `chat_context`
+**And** not clicking, navigation, unmount, timeout, or hiding the control records no dismissal or decline fence.
+
+**Given** completed later turns replace or add compatible scoped values, reopen a deliverable, create ambiguity, or remain unterminated
+**When** the server projects the opportunity
+**Then** the canonical conversion projection deterministically reduces all eligible non-superseded claims, refreshes the manifest, suspends recoverable ambiguity/insufficiency, or returns a server-owned visible-disabled pending state
+**And** another tab cannot accept an older or unterminated context revision.
+
+**Given** the traveler explicitly dismisses or later resolves suspended context
+**When** the upgraded existing decline/refresh owner ports run
+**Then** only explicit dismissal records the exact material-context fence and terminalizes that opportunity, while resolved context restores the same suspended ID with a new manifest
+**And** later eligible context after dismissal creates a new opportunity rather than reactivating the dismissed ID.
+
+**Given** the opportunity UI is rendered on desktop, mobile, or another active tab
+**When** eligibility, pending-turn, suspension, dismissal, or refreshed-manifest state changes
+**Then** it uses the server projection, remains keyboard/touch accessible, refetches after terminal AI Ask events, and never infers eligibility solely from local streaming state
+**And** `TC-01` through `TC-05`, `TC-11` through `TC-16`, `TC-19`, and `TC-20` pass for FR-16J..L, PJ-01, and RTA-13.
 
 ## Tasks / Subtasks
 
-- [ ] Evolve the existing `trip-recommendations.ts` aggregate and recommendation schema in place to opportunity/manifest state (AC: 1-3).
-- [ ] Migrate contracts, domain ports, existing accept/decline controller/OpenAPI routes, direct API client, and composer from `decisionId` to `opportunityId`; no parallel endpoint (AC: 1-4).
-- [ ] Refresh synchronously in existing AI Ask terminalization and render server-projected CTA state (AC: 1, 4).
-- [ ] Validate `TripConversionProjectionPolicy` before eligibility and reject empty, over-limit, duplicate, conflicting, unknown-field, and schema-incompatible mappings; `TC-13` coverage is mandatory before this story can complete (AC: 1-3).
-- [ ] Add DB-free projection/policy/presentation tests with `pnpm test:unit`, and serial PostgreSQL manifest/CAS/ownership/deletion plus API contract tests with local `resetTestDatabase()` where clean tables are required (AC: 1-4).
+- [ ] In `packages/database/src/schema.ts` and `drizzle/migrations/`, evolve the existing recommendation tables in place into stable opportunity, canonical projection revision, immutable manifest/digest, decline-fence, and closed-transition persistence; retain one ordinary-conversation/nonterminal-opportunity invariant and add no second aggregate (AC: 1-3).
+- [ ] In `packages/database/src/trip-recommendations.ts`, replace profiled reads of `chat_context` and `ai_ask.context_extraction.v1` with canonical completed clarification claims; implement deterministic claim reduction, stable manifest refresh, `eligible -> suspended|dismissed|invalidated` and `suspended -> eligible|invalidated` transitions, pending-turn visible-disabled projection, and same-lock/version CAS for refresh/dismiss/delete (AC: 1-3).
+- [ ] In new `packages/domain/src/trip-conversion-opportunities.ts` and `packages/domain/src/index.ts`, define and startup-validate the finite code-shipped `TripConversionProjectionPolicy`; reject empty/over-limit catalogs, duplicate or conflicting field/scope mappings, unknown fields/operations, incompatible schemas, and invalid title rules before any opportunity becomes eligible (AC: 1-3; mandatory `TC-13`).
+- [ ] In `packages/contracts/src/index.ts`, `packages/domain/src/index.ts`, `apps/api/src/conversations/traveler-commands.controller.ts`, and `apps/api/src/openapi.controller.ts`, evolve the existing recommendation projection and accept/dismiss bodies from `decisionId` to `opportunityId`, add `eligible` and `visible_disabled` server projections, and preserve the existing endpoint identities (AC: 1-4).
+- [ ] In `packages/database/src/ai-ask-commands.ts`, `packages/database/src/ai-ask-stream-execution.ts`, and `packages/database/src/index.ts`, invoke `refreshTripConversionOpportunity(...)` through the Chat/Trips transaction-aware owner port after profiled clarification reduction or `finalizeAiAnswer(...)` and before returning the final projection; do not create a competing finalizer, outbox event, Worker, or asynchronous eligibility path (AC: 1, 4).
+- [ ] In `apps/web/src/features/ai/direct-api-client.ts` and `apps/web/src/features/ai/ai-ask-composer.tsx`, render the persistent `Chuyển thành chuyến đi` CTA from the server projection, preserve it while eligible, disable it for a pending newer turn, use `opportunityId` for accept/dismiss, and refetch after every terminal AI Ask event without inferring durable status from local stream state (AC: 1, 4).
+- [ ] In `tests/trip-conversion-opportunities.test.ts`, `tests/trip-recommendations.test.ts`, and `tests/direct-shell-proposal-actions.test.ts`, add DB-free policy/projection/presentation, keyboard/touch, and `TC-01` through `TC-05`, `TC-11` through `TC-16`, `TC-19`, `TC-20` coverage; in `tests/trip-conversion-opportunities.integration.test.ts` and `tests/trip-recommendations-api.integration.test.ts`, add serial PostgreSQL manifest/CAS/ownership/pending-tab/dismiss/refresh and opportunity-only conversation-deletion cascade tests with local `resetTestDatabase()` setup (AC: 1-4).
+
+### Verification
+
+- `pnpm test:unit -- tests/trip-conversion-opportunities.test.ts tests/trip-recommendations.test.ts tests/direct-shell-proposal-actions.test.ts`
+- `pnpm test:integration -- tests/trip-conversion-opportunities.integration.test.ts tests/trip-recommendations-api.integration.test.ts`
+- `pnpm typecheck`
+- `pnpm exec drizzle-kit check`
+- `git diff --check`
+
+### Block If
+
+- Story 21.8 is not complete or its atomic `finalizeAiAnswer(...)` transaction-aware Chat/Trips owner port is unavailable.
+- Full cross-owner deletion/invalidation remains Story 21.13. This story tests only opportunity/manifest state owned by Chat/Trips and must not claim the complete Retrieval/evaluation deletion matrix.
 
 ## Dev Notes
 
