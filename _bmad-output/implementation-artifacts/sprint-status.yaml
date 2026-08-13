@@ -460,8 +460,8 @@ development_status:
   # syncs this tracker after each folder+ID build-auto run; all stories remain
   # backlog until dispatched sequentially. Story 21.13 separates deletion,
   # 21.14 evidence, 21.15 cutover, and 21.16 G3 cleanup.
-  epic-21: backlog
-  21-1-define-versioned-planning-context-profiles-and-scope-rules: backlog
+  epic-21: in-progress
+  21-1-define-versioned-planning-context-profiles-and-scope-rules: in-progress
   21-2-persist-scoped-multi-turn-clarification-state-safely: backlog
   21-3-run-bounded-preflight-clarification-before-main-answers: backlog
   21-4-preserve-applied-trip-authority-across-planning-modes: backlog
