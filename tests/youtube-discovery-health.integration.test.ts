@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, test } from "vitest";
-import { aiUsageEvents, claimNextYoutubeDiscoveryCandidateJob, createPostgresAdminYoutubeDiscoveryPort, createSystemAuditActor, createUserAuditActor, createYoutubeDiscoveryPolicyVersion, createYoutubeDiscoveryQueryProposal, createYoutubeDiscoveryRun, claimNextYoutubeDiscoveryRun, finishYoutubeDiscoveryRun, persistYoutubeDiscoveryCandidates, retryYoutubeDiscoveryCandidateJob, retryYoutubeDiscoveryRun, youtubeDiscoveryCandidateJobs, youtubeDiscoveryCandidateReviewStates, youtubeDiscoveryCandidates, youtubeDiscoveryPolicyVersions, youtubeDiscoveryQueryProposals, youtubeDiscoveryRankingHistory, youtubeDiscoveryRuns } from "@xuyenviet/database";
+import { aiUsageEvents, claimNextYoutubeDiscoveryCandidateJob, createPostgresAdminYoutubeDiscoveryPort, createSystemAuditActor, createUserAuditActor, createYoutubeDiscoveryPolicyVersion, createYoutubeDiscoveryQueryProposal, createYoutubeDiscoveryRun, claimNextYoutubeDiscoveryRun, finishYoutubeDiscoveryCandidateJob, finishYoutubeDiscoveryRun, persistYoutubeDiscoveryCandidates, retryYoutubeDiscoveryCandidateJob, retryYoutubeDiscoveryRun, youtubeDiscoveryCandidateJobs, youtubeDiscoveryCandidateReviewStates, youtubeDiscoveryCandidates, youtubeDiscoveryPolicyVersions, youtubeDiscoveryQueryProposals, youtubeDiscoveryRankingHistory, youtubeDiscoveryRuns } from "@xuyenviet/database";
 import { parseAdminYoutubeDiscoveryHealthOverview, type RequestPrincipal } from "@xuyenviet/contracts";
 import { eq, sql } from "drizzle-orm";
 import { resetTestDatabase, seedTestOperator, testDb } from "./helpers/db";
@@ -25,8 +25,8 @@ describe.sequential("YouTube Discovery Health projections", () => {
     expect(overview).toMatchObject({ lastUpdatedAt: expect.any(String), policy: { enabled: true }, planning: { freshness: "unavailable", lastUpdatedAt: null }, latestQueryRun: { at: expect.any(String), lastUpdatedAt: expect.any(String), freshness: "current" }, querySchedule: { lastUpdatedAt: expect.any(String), freshness: "current" } });
     expect(overview.incidents).toEqual([{ kind: "health_incident", actionId: groupId, destination: "health", reason: "provider_rate_limited", priority: 10, occurredAt: expect.any(String) }]);
     expect(parseAdminYoutubeDiscoveryHealthOverview(overview)).toEqual(overview);
-    expect(detail).toMatchObject({ groupId, category: "provider_rate_limited", items: [{ runId: expect.any(String), at: expect.any(String) }], nextCursor: null });
-    expect(detail?.items).toEqual([expect.objectContaining({ runId: run.id, state: "failed", stage: "unavailable", phase: "terminal", category: "provider_rate_limited" })]);
+    expect(detail).toMatchObject({ groupId, category: "provider_rate_limited", items: [{ executionKind: "query_run", runId: expect.any(String), at: expect.any(String) }], nextCursor: null });
+    expect(detail?.items).toEqual([expect.objectContaining({ executionKind: "query_run", runId: run.id, state: "failed", stage: "unavailable", safeErrorCode: null, phase: "terminal", category: "provider_rate_limited" })]);
     expect(await snapshot()).toEqual(before);
   });
 
@@ -118,16 +118,15 @@ describe.sequential("YouTube Discovery Health projections", () => {
     expect(await persistYoutubeDiscoveryCandidates(claim, [{ videoId: "abcDEF12345", canonicalUrl: "https://www.youtube.com/watch?v=abcDEF12345", resultOrdinal: 0 }], testDb)).toBe("completed");
     expect(await finishYoutubeDiscoveryRun(claim, testDb)).toBe("completed");
     const job = (await claimNextYoutubeDiscoveryCandidateJob({ workerId: "candidate-incident" }, testDb)).claim!;
-    expect(await retryYoutubeDiscoveryCandidateJob(job, "triage_transient", "triage", testDb, "triage_schema_invalid")).toBe("retrying");
+    expect(await retryYoutubeDiscoveryCandidateJob(job, "triage_transient", "triage", testDb, "provider_rate_limited")).toBe("retrying");
     await testDb.update(youtubeDiscoveryCandidateJobs).set({ nextRunAt: sql`clock_timestamp()` }).where(eq(youtubeDiscoveryCandidateJobs.id, job.id));
     const retryJob = (await claimNextYoutubeDiscoveryCandidateJob({ workerId: "candidate-incident-retry" }, testDb)).claim!;
-    expect(await retryYoutubeDiscoveryCandidateJob(retryJob, "triage_transient", "triage", testDb, "triage_schema_invalid")).toBe("failed");
     const port = createPostgresAdminYoutubeDiscoveryPort(undefined, testDb);
-    const groupId = `${job.id}:triage_schema_invalid`;
-    expect((await port.healthOverview()).incidents).toEqual(expect.arrayContaining([expect.objectContaining({ actionId: groupId, reason: "triage_schema_invalid" })]));
-    expect((await port.listActionRequired({ userId: "operator", email: "operator@example.com", roles: ["operator"], sessionId: "candidate-incident", authorizationVersion: 1 }, null)).items).toEqual(expect.arrayContaining([expect.objectContaining({ actionId: groupId, reason: "triage_schema_invalid" })]));
-    expect((await port.getHealthIncident(groupId, null))?.items).toEqual([expect.objectContaining({ runId: job.id, state: "failed", category: "triage_schema_invalid" })]);
-    await testDb.update(youtubeDiscoveryCandidateJobs).set({ state: "completed", terminalAt: new Date(), terminalOutcome: "completed", safeErrorCode: null, incidentCategory: null, claimedBy: null, claimedAt: null, leaseExpiresAt: null, fencingToken: null }).where(eq(youtubeDiscoveryCandidateJobs.id, job.id));
+    const groupId = `${job.id}:provider_rate_limited`;
+    expect((await port.healthOverview()).incidents).toEqual(expect.arrayContaining([expect.objectContaining({ actionId: groupId, reason: "provider_rate_limited" })]));
+    expect((await port.listActionRequired({ userId: "operator", email: "operator@example.com", roles: ["operator"], sessionId: "candidate-incident", authorizationVersion: 1 }, null)).items).toEqual(expect.arrayContaining([expect.objectContaining({ actionId: groupId, reason: "provider_rate_limited" })]));
+    expect((await port.getHealthIncident(groupId, null))?.items).toEqual([expect.objectContaining({ executionKind: "candidate_job", candidateJobId: job.id, state: "running", stage: null, safeErrorCode: null, category: "provider_rate_limited" })]);
+    expect(await finishYoutubeDiscoveryCandidateJob(retryJob, testDb)).toBe("completed");
     expect((await port.healthOverview()).incidents.some((item) => item.actionId === groupId)).toBe(false);
     expect(run.id).toEqual(expect.any(String));
   });
@@ -259,7 +258,7 @@ describe.sequential("YouTube Discovery Health projections", () => {
     const detail = await port.getHealthIncident(`${run.id}:provider_rate_limited`, null);
 
     expect(overview.latestQueryRun).toMatchObject({ state: "retrying", nextRunAt: expect.any(String), lastUpdatedAt: expect.any(String), freshness: "current" });
-    expect(detail?.items).toEqual([expect.objectContaining({ runId: run.id, state: "retrying", stage: "unavailable", phase: "retrying", nextRunAt: expect.any(String) })]);
+    expect(detail?.items).toEqual([expect.objectContaining({ executionKind: "query_run", runId: run.id, state: "retrying", stage: "unavailable", safeErrorCode: null, phase: "retrying", nextRunAt: expect.any(String) })]);
   });
 
   test.each(["triage_schema_invalid", "execution_terminal"] as const)("limits %s detail to the currently admitted incident episode", async (category) => {
@@ -289,8 +288,8 @@ describe.sequential("YouTube Discovery Health projections", () => {
 
     const detail = await createPostgresAdminYoutubeDiscoveryPort(undefined, testDb).getHealthIncident(`${currentIds[0]!}:${category}`, null);
 
-    expect(detail?.items.map((item) => item.runId)).toEqual([currentIds[0]]);
-    expect(detail?.items).toEqual(expect.arrayContaining([expect.objectContaining({ state: "failed", stage: "unavailable", phase: "terminal", category })]));
+    expect(detail?.items.map((item) => item.executionKind === "query_run" ? item.runId : item.candidateJobId)).toEqual([currentIds[0]]);
+    expect(detail?.items).toEqual(expect.arrayContaining([expect.objectContaining({ executionKind: "query_run", state: "failed", stage: "unavailable", safeErrorCode: null, phase: "terminal", category })]));
   });
 
   test("bounds usage totals to the documented 24-hour window while retaining all-time freshness", async () => {

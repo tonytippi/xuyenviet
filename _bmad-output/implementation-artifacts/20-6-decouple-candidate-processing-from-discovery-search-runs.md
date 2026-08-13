@@ -60,6 +60,12 @@ so that one failing URL cannot block a query run, unrelated URLs, or Discovery r
   - [ ] Update fixtures and helpers that currently complete the entire downstream pipeline under a query-run claim. Search fixtures enqueue under the query-run lease; downstream setup claims and completes candidate jobs. Cover the Mission, review, Accept, triage, and Story 20.5 fixture paths.
   - [ ] Run focused `pnpm test:unit` and serial `pnpm test:integration`, then `pnpm lint`, `pnpm typecheck`, `pnpm build`, and `git diff --check`. Record exact blockers; unit tests must remain database-free and integration files remain serial.
 
+### Review Findings
+
+- [x] [Review][Patch] Backfill appearance-scoped metadata before creating legacy candidate jobs [drizzle/migrations/0066_discovery_candidate_jobs.sql:4]
+- [x] [Review][Patch] Retain a candidate-job incident until successful terminal completion [packages/database/src/youtube-discovery/index.ts:263]
+- [x] [Review][Patch] Expose candidate-job identities and bounded terminal diagnostics through the Health incident contract [packages/contracts/src/youtube-discovery/index.ts:168]
+
 ## Dev Notes
 
 ### Scope and sequencing
@@ -111,6 +117,7 @@ gpu4ai/gpt-5.6-terra
 - The guide replaces query-level downstream retries with immutable-appearance candidate jobs, preserving query run history and all Discovery/Knowledge/manual-capture safety boundaries.
 - Implemented the fenced candidate-job queue, forward migration/backfill, candidate-first finite polling, appearance-scoped enrichment, candidate-job retries/audits/incidents, backpressure, and strict safe operational projections.
 - Verification passed: focused unit 341 tests; serial Discovery integrations candidates 14, execution 37, enrichment 8, triage 8, Health 19, and Action Queue 10; `pnpm typecheck`, `pnpm build`, and `git diff --check`. `pnpm lint` had 56 warnings and no errors.
+- Code-review repairs: copied legacy candidate metadata to appearance rows before candidate-job backfill; retained job incidents through an active retry and cleared them only on successful completion; and made Health incident details execution-kind-aware with `candidateJobId`, safe stage, and safe terminal error data. Verification passed: focused Health incident integration regression, `pnpm test:unit -- tests/admin-youtube-discovery-contract.test.ts` (341 tests), `pnpm typecheck`, `pnpm lint` (56 pre-existing warnings, no errors), `pnpm build`, and `git diff --check`.
 
 ### File List
 

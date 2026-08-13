@@ -214,15 +214,15 @@ export function createPostgresAdminYoutubeDiscoveryPort(captureEligibility: Yout
       if (!admitted) return null;
       const category = groupId.slice(groupId.lastIndexOf(":") + 1) as "provider_rate_limited" | "triage_schema_invalid" | "execution_terminal";
       const job = admitted[0]!.kind === "candidate_job";
-      const active = job ? and(eq(youtubeDiscoveryCandidateJobs.id, admitted[0]!.runId), eq(youtubeDiscoveryCandidateJobs.incidentCategory, category), sql`${youtubeDiscoveryCandidateJobs.terminalAt} is not null or ${youtubeDiscoveryCandidateJobs.state} = 'retrying'`) : and(eq(youtubeDiscoveryRuns.id, admitted[0]!.runId), eq(youtubeDiscoveryRuns.incidentCategory, category), sql`${youtubeDiscoveryRuns.terminalAt} is not null or ${youtubeDiscoveryRuns.state} = 'retrying'`);
+      const active = job ? and(eq(youtubeDiscoveryCandidateJobs.id, admitted[0]!.runId), eq(youtubeDiscoveryCandidateJobs.incidentCategory, category), sql`${youtubeDiscoveryCandidateJobs.terminalAt} is not null or ${youtubeDiscoveryCandidateJobs.state} in ('retrying', 'running')`) : and(eq(youtubeDiscoveryRuns.id, admitted[0]!.runId), eq(youtubeDiscoveryRuns.incidentCategory, category), sql`${youtubeDiscoveryRuns.terminalAt} is not null or ${youtubeDiscoveryRuns.state} = 'retrying'`);
       const source = job ? youtubeDiscoveryCandidateJobs : youtubeDiscoveryRuns;
       const healthIncidentAtCursorKey = sql<string>`to_char(coalesce(${source.terminalAt}, ${source.nextRunAt}) at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`;
-      const cursorAfter = cursor ? or(lt(healthIncidentAtCursorKey, cursor.at), and(eq(healthIncidentAtCursorKey, cursor.at), lt(source.id, cursor.runId))) : undefined;
-      if (cursor) { const [anchor] = await db.select({ id: source.id }).from(source).where(and(active, eq(source.id, cursor.runId), eq(healthIncidentAtCursorKey, cursor.at))).limit(1); if (!anchor) throw new YoutubeDiscoveryHealthCursorValidationError("Invalid YouTube Discovery Health cursor."); }
-      const relevant = await db.select({ runId: source.id, state: source.state, terminalAt: source.terminalAt, retryAt: source.nextRunAt, retryCount: source.attemptCount, cursorAt: healthIncidentAtCursorKey }).from(source).where(and(active, cursorAfter)).orderBy(desc(healthIncidentAtCursorKey), desc(source.id)).limit(adminYoutubeDiscoveryHealthIncidentPageSize + 1);
-      const items = relevant.slice(0, adminYoutubeDiscoveryHealthIncidentPageSize).map((row) => ({ runId: row.runId, state: row.state as "retrying" | "failed" | "completed", stage: "unavailable" as const, phase: row.state === "retrying" ? "retrying" as const : row.state === "completed" ? "completed" as const : "terminal" as const, at: (row.terminalAt ?? row.retryAt).toISOString(), nextRunAt: row.state === "retrying" ? row.retryAt.toISOString() : null, retryCount: row.retryCount, category })); const last = items.at(-1);
+      const cursorAfter = cursor ? or(lt(healthIncidentAtCursorKey, cursor.at), and(eq(healthIncidentAtCursorKey, cursor.at), lt(source.id, cursor.executionId))) : undefined;
+      if (cursor) { const [anchor] = await db.select({ id: source.id }).from(source).where(and(active, eq(source.id, cursor.executionId), eq(healthIncidentAtCursorKey, cursor.at))).limit(1); if (!anchor) throw new YoutubeDiscoveryHealthCursorValidationError("Invalid YouTube Discovery Health cursor."); }
+      const relevant = await db.select({ executionId: source.id, state: source.state, terminalAt: source.terminalAt, retryAt: source.nextRunAt, retryCount: source.attemptCount, safeErrorCode: job ? youtubeDiscoveryCandidateJobs.safeErrorCode : youtubeDiscoveryRuns.safeErrorCode, lastSafeStage: job ? youtubeDiscoveryCandidateJobs.lastSafeStage : sql<null>`null`, cursorAt: healthIncidentAtCursorKey }).from(source).where(and(active, cursorAfter)).orderBy(desc(healthIncidentAtCursorKey), desc(source.id)).limit(adminYoutubeDiscoveryHealthIncidentPageSize + 1);
+      const items = relevant.slice(0, adminYoutubeDiscoveryHealthIncidentPageSize).map((row) => job ? row.state === "running" ? { executionKind: "candidate_job" as const, candidateJobId: row.executionId, state: "running" as const, stage: null, safeErrorCode: null, phase: "running" as const, at: row.retryAt.toISOString(), nextRunAt: null, retryCount: row.retryCount, category } : { executionKind: "candidate_job" as const, candidateJobId: row.executionId, state: row.state as "retrying" | "failed", stage: row.lastSafeStage as "enrichment" | "triage" | "eligibility" | "recommendation" | null, safeErrorCode: row.safeErrorCode as "stage_transient" | "enrichment_transient" | "triage_transient" | "triage_timeout" | "eligibility_unavailable" | "recommendation_transient" | "persistence_contended" | "retry_exhausted" | "lease_retry_exhausted", phase: row.state === "retrying" ? "retrying" as const : "terminal" as const, at: (row.terminalAt ?? row.retryAt).toISOString(), nextRunAt: row.state === "retrying" ? row.retryAt.toISOString() : null, retryCount: row.retryCount, category } : { executionKind: "query_run" as const, runId: row.executionId, state: row.state as "retrying" | "failed" | "completed", stage: "unavailable" as const, safeErrorCode: null, phase: row.state === "retrying" ? "retrying" as const : row.state === "completed" ? "completed" as const : "terminal" as const, at: (row.terminalAt ?? row.retryAt).toISOString(), nextRunAt: row.state === "retrying" ? row.retryAt.toISOString() : null, retryCount: row.retryCount, category }); const last = items.at(-1);
       const lastRow = relevant[adminYoutubeDiscoveryHealthIncidentPageSize - 1];
-      return { groupId, category, items, nextCursor: relevant.length > items.length && last && lastRow ? encodeAdminYoutubeDiscoveryHealthIncidentCursor({ version: 1, groupId, at: lastRow.cursorAt, runId: last.runId }) : null } as AdminYoutubeDiscoveryHealthIncidentDetail;
+      return { groupId, category, items, nextCursor: relevant.length > items.length && last && lastRow ? encodeAdminYoutubeDiscoveryHealthIncidentCursor({ version: 1, groupId, at: lastRow.cursorAt, executionId: last.executionKind === "candidate_job" ? last.candidateJobId : last.runId }) : null } as AdminYoutubeDiscoveryHealthIncidentDetail;
     },
   };
 }
@@ -351,7 +351,7 @@ function freshnessAt(at: Date, cadenceMinutes: number, now: Date) { return now.g
 function latestDate(dates: Array<Date | null>) { return dates.reduce<Date | null>((latest, value) => value && (!latest || value > latest) ? value : latest, null); }
 function dateOrNull(value: Date | string | null) { return value === null ? null : value instanceof Date ? value : new Date(value); }
 function validHealthGroup(value: string) { return /^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}:(provider_rate_limited|triage_schema_invalid|execution_terminal)$/.test(value); }
-function validHealthCursor(cursor: AdminYoutubeDiscoveryHealthIncidentCursor) { return cursor.version === 1 && validHealthGroup(cursor.groupId) && validId(cursor.runId) && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}Z$/.test(cursor.at) && new Date(`${cursor.at.slice(0, 23)}Z`).toISOString() === `${cursor.at.slice(0, 23)}Z`; }
+function validHealthCursor(cursor: AdminYoutubeDiscoveryHealthIncidentCursor) { return cursor.version === 1 && validHealthGroup(cursor.groupId) && validId(cursor.executionId) && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}Z$/.test(cursor.at) && new Date(`${cursor.at.slice(0, 23)}Z`).toISOString() === `${cursor.at.slice(0, 23)}Z`; }
 function groupedIncidents(rows: IncidentRow[], now: number): Array<AdminYoutubeDiscoveryActionRequiredItem & { urgency: number }> {
   const admitted = admittedIncidentRows(rows, now);
   const items: Array<AdminYoutubeDiscoveryActionRequiredItem & { urgency: number }> = [];
@@ -367,7 +367,7 @@ function groupedIncidents(rows: IncidentRow[], now: number): Array<AdminYoutubeD
 function incidentOccurredAt(row: IncidentRow) { return row.terminalAt ?? row.retryAt; }
 function admittedIncidentRows(rows: IncidentRow[], now: number) {
   const groups = new Map<string, IncidentRow[]>();
-  for (const row of rows) if (row.category && (row.state === "failed" || row.state === "retrying" && row.category === "provider_rate_limited")) groups.set(`${row.runId}:${row.category}`, [row]);
+  for (const row of rows) if (row.category && (row.state === "failed" || row.state === "retrying" && row.category === "provider_rate_limited" || row.kind === "candidate_job" && row.state === "running" && row.category === "provider_rate_limited")) groups.set(`${row.runId}:${row.category}`, [row]);
   const admitted = new Map<string, IncidentRow[]>();
   for (const [groupId, group] of groups) {
     const latest = group[0]!;
@@ -426,7 +426,7 @@ async function incidentActionFrontier(db: AdminYoutubeDiscoveryDatabase, cursor:
       join youtube_discovery_query_proposals proposal on proposal.id = run.query_proposal_id
       join youtube_discovery_policy_versions policy on policy.id = job.policy_version_id
       where run.query_proposal_id is not null and job.incident_category is not null
-        and (job.state = 'failed' or (job.state = 'retrying' and job.incident_category = 'provider_rate_limited'))
+        and (job.state = 'failed' or (job.state in ('retrying', 'running') and job.incident_category = 'provider_rate_limited'))
     ), items as (
       select 0 as urgency, priority,
         to_char(date_trunc('milliseconds', at) at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') as occurred_at,
