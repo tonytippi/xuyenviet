@@ -56,6 +56,9 @@ export type AiAskCommandStatus = (typeof aiAskCommandStatusValues)[number];
 export const domainOutboxStatusValues = ["pending", "processing", "completed", "failed"] as const;
 export type DomainOutboxStatus = (typeof domainOutboxStatusValues)[number];
 
+export const planningContextCatalogKinds = ["profile", "policy", "value_schema"] as const;
+export type PlanningContextCatalogKind = (typeof planningContextCatalogKinds)[number];
+
 export const aiAskDomainOutboxEventTypeValues = ["ai_ask.context_extraction.v1", "ai_ask.answer_annotation.v1", "ai_ask.trip_proposal_draft.v1"] as const;
 export type AiAskDomainOutboxEventType = (typeof aiAskDomainOutboxEventTypeValues)[number];
 
@@ -989,6 +992,19 @@ export const referralAttributions = pgTable(
     ),
   ],
 );
+
+// Retrieval-owned reusable records only. Conversation and traveler state belongs to later stories.
+export const planningContextProfileVersions = pgTable("planning_context_profile_versions", {
+  id: text("id").primaryKey(), version: integer("version").notNull(), definition: jsonb("definition").$type<Record<string, unknown>>().notNull(), digest: text("digest").notNull(), createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
+}, (row) => [uniqueIndex("planning_context_profile_versions_version_idx").on(row.version), uniqueIndex("planning_context_profile_versions_digest_idx").on(row.digest), check("planning_context_profile_versions_version_check", sql`${row.version} >= 1`), check("planning_context_profile_versions_digest_check", sql`${row.digest} ~ '^[a-f0-9]{64}$'`), check("planning_context_profile_versions_definition_check", sql`jsonb_typeof(${row.definition}) = 'object' and octet_length(${row.definition}::text) <= 65536`)]);
+
+export const planningContextPolicyVersions = pgTable("planning_context_policy_versions", {
+  id: text("id").primaryKey(), version: integer("version").notNull(), definition: jsonb("definition").$type<Record<string, unknown>>().notNull(), digest: text("digest").notNull(), createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
+}, (row) => [uniqueIndex("planning_context_policy_versions_version_idx").on(row.version), uniqueIndex("planning_context_policy_versions_digest_idx").on(row.digest), check("planning_context_policy_versions_version_check", sql`${row.version} >= 1`), check("planning_context_policy_versions_digest_check", sql`${row.digest} ~ '^[a-f0-9]{64}$'`), check("planning_context_policy_versions_definition_check", sql`jsonb_typeof(${row.definition}) = 'object' and octet_length(${row.definition}::text) <= 65536`)]);
+
+export const planningContextValueSchemaVersions = pgTable("planning_context_value_schema_versions", {
+  id: text("id").primaryKey(), key: text("key").notNull(), version: integer("version").notNull(), definition: jsonb("definition").$type<Record<string, unknown>>().notNull(), digest: text("digest").notNull(), createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
+}, (row) => [uniqueIndex("planning_context_value_schema_versions_key_version_idx").on(row.key, row.version), uniqueIndex("planning_context_value_schema_versions_digest_idx").on(row.digest), check("planning_context_value_schema_versions_key_check", sql`${row.key} ~ '^[a-z][a-z0-9_.-]{0,63}$'`), check("planning_context_value_schema_versions_version_check", sql`${row.version} >= 1`), check("planning_context_value_schema_versions_digest_check", sql`${row.digest} ~ '^[a-f0-9]{64}$'`), check("planning_context_value_schema_versions_definition_check", sql`jsonb_typeof(${row.definition}) = 'object' and octet_length(${row.definition}::text) <= 65536`)]);
 
 export const tripProjects = pgTable(
   "trip_projects",
