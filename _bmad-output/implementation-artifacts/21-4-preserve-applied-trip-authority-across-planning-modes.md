@@ -1,6 +1,6 @@
 # Story 21.4: Preserve Applied Trip Authority Across Planning Modes
 
-Status: ready-for-dev
+Status: backlog
 
 ## Story
 
@@ -36,6 +36,10 @@ As a traveler, I want XuyenViet to distinguish my current plan from ideas and pe
 - [Source: _bmad-output/planning-artifacts/architecture/architecture-xuyenviet-2026-07-04/retrieval-trip-aware/contracts.md#Planning-Mode-Authority]
 - [Source: _bmad-output/planning-artifacts/architecture/architecture-xuyenviet-2026-07-04/retrieval-trip-aware/fixtures.md#Planning-Modes]
 - [Source: _bmad-output/planning-artifacts/ux-designs/ux-xuyenviet-2026-07-05/EXPERIENCE.md#v6.2-Trip-Aware-Planning-Addendum]
+
+## Canonical Acceptance-Criteria Mapping
+
+`epics.md#Story-21.4` is normative. Guide AC 1-4 map one-to-one to the four canonical criteria. Completion must satisfy both documents.
 
 ## Dev Agent Record
 

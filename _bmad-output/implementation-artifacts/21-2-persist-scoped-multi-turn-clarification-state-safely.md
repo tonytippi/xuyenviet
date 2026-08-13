@@ -1,6 +1,6 @@
 # Story 21.2: Persist Scoped Multi-Turn Clarification State Safely
 
-Status: ready-for-dev
+Status: backlog
 
 ## Story
 
@@ -35,6 +35,10 @@ As a traveler, I want valid answers to accumulate across clarification turns, so
 - [Source: _bmad-output/planning-artifacts/architecture/architecture-xuyenviet-2026-07-04/retrieval-trip-aware/fixtures.md#Clarification]
 - [Source: tests/trip-recommendations.integration.test.ts]
 - [Source: _bmad-output/planning-artifacts/ux-designs/ux-xuyenviet-2026-07-05/EXPERIENCE.md#v6.2-Trip-Aware-Planning-Addendum]
+
+## Canonical Acceptance-Criteria Mapping
+
+`epics.md#Story-21.2` is normative. Guide AC 1-4 map one-to-one to the four canonical criteria. Completion must satisfy both documents.
 
 ## Dev Agent Record
 

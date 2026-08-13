@@ -1,6 +1,6 @@
 # Story 21.5: Preserve Canonical Trip Paths And Supported Route Coverage
 
-Status: ready-for-dev
+Status: backlog
 
 ## Story
 
@@ -36,6 +36,10 @@ As a traveler, I want route advice to reflect my selected path or real product c
 - [Source: _bmad-output/planning-artifacts/architecture/architecture-xuyenviet-2026-07-04/retrieval-trip-aware/contracts.md#Canonical-Paths-And-Route-Coverage]
 - [Source: _bmad-output/planning-artifacts/architecture/architecture-xuyenviet-2026-07-04/retrieval-trip-aware/fixtures.md#Route-Paths]
 - [Source: _bmad-output/planning-artifacts/ux-designs/ux-xuyenviet-2026-07-05/EXPERIENCE.md#v6.2-Trip-Aware-Planning-Addendum]
+
+## Canonical Acceptance-Criteria Mapping
+
+`epics.md#Story-21.5` is normative. Guide AC 1-4 map one-to-one to the four canonical criteria. Completion must satisfy both documents.
 
 ## Dev Agent Record
 

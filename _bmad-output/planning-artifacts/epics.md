@@ -3171,6 +3171,7 @@ So that a detailed answer reflects my trip instead of making a convenient but us
 **Given** a dependent deliverable remains blocked after extraction
 **When** the turn finalizes
 **Then** one transaction persists the reduced clarification state, concise Vietnamese follow-up, extraction Usage, and replayable AI Ask success
+**And** it returns any profile-permitted useful invariant guidance that does not depend on an unresolved material field
 **And** it creates no Retrieval run, web call, selection manifest, prompt-render manifest, answer provenance, or main-answer model usage.
 
 **Given** every hard-required field for an instance is resolved or an explicitly permitted bounded assumption is accepted
@@ -3255,7 +3256,17 @@ So that missing route, safety, family, vehicle, stop, or constraint guidance rem
 **Given** a ready planning execution enters Retrieval
 **When** the intent profile expands its needs
 **Then** it creates deterministic versioned requirement keys with exact facet, importance, scope/leg, constraint, and freshness identity before candidate generation
-**And** candidate generation, selection, rendering, provenance, and evaluation consume the same immutable key/contribution vocabulary.
+**And** it validates current owner-row eligibility, resolves canonical geographic/facet authority, and persists a deterministic scope-first allowlist with stable order and bounded candidate inputs before lexical retrieval.
+
+**Given** a deterministic scope-first allowlist exists
+**When** the versioned field-aware lexical stage generates candidates
+**Then** it searches only that allowlist using title, type, canonical route/location, summary, tags, and policy-allowlisted practical-detail fields
+**And** source labels, URLs, publishers, capture/provenance/evidence/provider metadata, and other source metadata cannot create or improve lexical relevance.
+
+**Given** the G0 deployed PostgreSQL/provider/Vietnamese lexical spike result is recorded
+**When** Retrieval selects its v6 lexical implementation
+**Then** PostgreSQL FTS activates only after deployability, candidate-recall, and critical false-exclusion gates pass
+**And** otherwise `v6_active` uses the deterministic indexed field-aware lexical implementation and keeps FTS inactive.
 
 **Given** candidate evidence contains mixed facts, different legs, duplicate coverage, or an off-scope high-prestige source
 **When** eligibility and contribution decisions run
@@ -3270,7 +3281,7 @@ So that missing route, safety, family, vehicle, stop, or constraint guidance rem
 **Given** one exact contribution covers the only required need or three cards leave a required need uncovered
 **When** final coverage is recomputed from the prompt-render manifest
 **Then** the first request is sufficient without count-only web fallback and the second keeps the gap despite its card count
-**And** `RN-01` through `RN-07`, FR-61..62, SC-8, SC-10, and AC-31 pass, including literal-zero hard-off-route and unrelated-need satisfaction.
+**And** `RN-01` through `RN-07`, lexical allowlist/source-metadata/order/bound/fallback fixtures, FR-61..62, SC-8, SC-10, and AC-31 pass, including literal-zero hard-off-route, unrelated-need satisfaction, source-metadata leakage, and critical hard-filter/cap false exclusion.
 
 ### Story 21.7: Verify Fresh External Facts Through Replayable Web Scope
 
@@ -3300,11 +3311,11 @@ So that an old or unrelated warning is not presented as live route authority.
 **Then** unchanged dependencies reproduce the same decision while changed dependencies create a new immutable projection
 **And** `WS-01` through `WS-07`, FR-35, FR-65, SC-11, and AC-32 pass with complete query-to-fact-to-render provenance.
 
-### Story 21.8: Finalize And Delete Planning Evidence Atomically
+### Story 21.8: Finalize Planning Evidence Atomically
 
 As a traveler,
-I want completed answers to remain internally consistent and deleted planning data to stop influencing the system,
-So that retries, failures, or deletion cannot leave partial or reconstructable state behind.
+I want completed answers to remain internally consistent,
+So that retries or failures cannot leave partial or competing terminal state behind.
 
 **Acceptance Criteria:**
 
@@ -3318,15 +3329,10 @@ So that retries, failures, or deletion cannot leave partial or reconstructable s
 **Then** one PostgreSQL transaction coordinates Chat/Trips message writes, Retrieval run sealing, Usage append, and AI Orchestration prompt/provenance writes through owner ports
 **And** failure records no completed message, while duplicate retry cannot create a second terminal outcome.
 
-**Given** an ordinary conversation, primary conversation, or Trip is deleted
-**When** Chat/Trips coordinates deletion
-**Then** every owning module invalidates reconstructable clarification sessions/graphs/claims, Trip snapshots, route choices, retrieval executions/runs, web decisions, manifests, derived context, embeddings, and production-evaluation membership in the same transaction
-**And** an unrelated Trip remains unchanged and no user-visible success occurs before all invalidations commit.
-
-**Given** retained audit or aggregate evaluation remains after deletion
-**When** it is inspected
-**Then** it contains only non-content identity, actor/operation class, timestamp, or approved aggregate metrics and cannot reconstruct the question, answer, Trip state, route, source text, or context
-**And** `DEL-01` through `DEL-04`, FR-15, PCR-09, and AC-33 pass in serial integration tests.
+**Given** finalization fences change or a retry races an existing terminal command
+**When** `finalizeAiAnswer(...)` attempts terminalization
+**Then** it discards stale output or returns the existing terminal result without partial writes
+**And** prepared/finalized state remains unavailable as traveler content until the owning finalization transaction commits.
 
 ### Story 21.9: Keep A Current Chat-To-Trip Opportunity Available
 
@@ -3354,7 +3360,7 @@ So that I can continue refining the plan and convert it when I am ready.
 **Given** the opportunity UI is rendered on desktop, mobile, or another active tab
 **When** eligibility, pending-turn, suspension, dismissal, or refreshed-manifest state changes
 **Then** it uses the server projection, remains keyboard/touch accessible, refetches after terminal AI Ask events, and never infers eligibility solely from local streaming state
-**And** `TC-01` through `TC-05`, `TC-11`, `TC-12`, `TC-14` through `TC-16`, `TC-19`, and `TC-20` pass for FR-16J..L, PJ-01, and RTA-13.
+**And** `TC-01` through `TC-05`, `TC-11` through `TC-16`, `TC-19`, and `TC-20` pass for FR-16J..L, PJ-01, and RTA-13.
 
 ### Story 21.10: Convert The Latest Eligible Context Into A Reviewable Trip
 
@@ -3384,11 +3390,11 @@ So that nothing is copied or applied until I explicitly approve the structured c
 **Then** the existing recommendation aggregate and accept/decline endpoints evolve from `decisionId` to `opportunityId`, share the existing proposal operation parser/validator/serializer, refetch after terminal AI Ask events, and add no parallel endpoint, Worker, service, cache, dependency, model purpose, or environment flag
 **And** `TC-06` through `TC-10`, `TC-13`, `TC-17`, and `TC-18` pass for FR-16J..L, PJ-01, and RTA-13.
 
-### Story 21.11: Prove V6 Retrieval In Shadow And Cut Over Safely
+### Story 21.11: Establish V6 Retrieval Qualification Infrastructure
 
 As a product owner,
-I want comparable evidence before required-need retrieval becomes authoritative,
-So that improved planning coverage does not weaken route, context, provenance, privacy, or operational safety.
+I want qualification and read-policy infrastructure before evidence collection,
+So that later evidence and activation cannot weaken route, context, provenance, privacy, or operational safety.
 
 **Acceptance Criteria:**
 
@@ -3407,21 +3413,77 @@ So that improved planning coverage does not weaken route, context, provenance, p
 **Then** exactly one immutable execution contains one authoritative legacy run and at most one shadow run, and only the authoritative role may select/persist a traveler answer or write provider, prompt, provenance, or usage effects
 **And** shadow stores only bounded `would-render` evaluation data and performs no web/model call or traveler mutation.
 
-**Given** G0 and G1 prerequisites plus the complete G2 evidence window pass
-**When** the Product Owner approves the exact recorded report and `activateRetrievalReadPolicy(...)` performs a compare-and-swap cutover
-**Then** `v6_active` becomes authoritative with a qualified runnable rollback target and every production run pins the committed PostgreSQL policy
-**And** failed safety, quality, deletion, latency, call-rate, cost, or stale-projection gates block cutover without deployment configuration overriding the row.
+**Given** qualification infrastructure is used to prepare a cutover decision
+**When** a report or policy is invalid, incomplete, or missing a qualified target
+**Then** it cannot activate `v6_active`
+**And** `GATE-01` through `GATE-05` and `COMP-03` through `COMP-05` remain reproducible before Story 21.14 evidence collection and Story 21.15 cutover.
 
-**Given** a critical regression occurs after cutover
-**When** authorized rollback runs
-**Then** the CAS uses the failing report/incident and a previously qualified runnable target without waiting for a new passing report
-**And** `GATE-01` through `GATE-05`, `COMP-03` through `COMP-05`, SC-8..12, AC-28..33, and PJ-01..06 remain reproducible.
+### Story 21.13: Invalidate Planning Evidence On Conversation And Trip Deletion
 
-### Story 21.12: Retire The Legacy Card-Count Trigger Without Losing Rollback
+As a traveler,
+I want deleted planning data to stop influencing the system,
+So that a deleted conversation or Trip cannot leave reconstructable state behind.
+
+**Acceptance Criteria:**
+
+**Given** an ordinary conversation, primary conversation, or Trip is deleted
+**When** Chat/Trips coordinates owner invalidator ports
+**Then** every reconstructable clarification graph/session/claim/value, plan/extract attempt and payload, task digest, query plan, retrieval execution/run, web decision, manifest, conversion opportunity/manifest/nonterminal replay state, derived context, embedding, diagnostic, Trip snapshot, canonical route choice, Trip proposal, and production-evaluation membership is invalidated in one transaction
+**And** ordinary-chat deletion leaves an unrelated Trip unchanged, while primary-conversation deletion replaces the primary conversation or deletes the Trip without orphaning it.
+
+**Given** audit or aggregate evaluation remains after deletion
+**When** it is inspected
+**Then** it contains only approved non-content identity, actor/operation class, timestamp, or aggregate metrics
+**And** it cannot reconstruct the question, answer, Trip state, route, source text, or planning context.
+
+**Given** deletion races finalization, conversion, or evaluation work
+**When** the transaction fences execute
+**Then** stale work cannot restore or mutate deleted state
+**And** `DEL-01` through `DEL-04`, `CLAR-10`, `CLAR-27`, FR-15, PCR-09, and AC-33 pass in serial integration tests.
+
+### Story 21.14: Collect And Approve V6 Shadow Qualification Evidence
+
+As a product owner,
+I want a reviewed comparable shadow-evidence report,
+So that activation is based on one exact qualified window rather than local test success.
+
+**Acceptance Criteria:**
+
+**Given** Story 21.11 qualification infrastructure and all G0 prerequisites are complete
+**When** a shadow evidence window is collected
+**Then** one persisted report records its exact dependency tuple, cohorts, metric/threshold versions, failures, exclusions, deletion evidence, and qualified runnable rollback target/procedure
+**And** a changed tuple member restarts the window rather than mixing incompatible observations.
+
+**Given** the report has a passing complete evidence window
+**When** Feedback/Eval and the Product Owner review it
+**Then** their exact sign-off/decision is persisted against that report
+**And** approval grants no direct cutover authority.
+
+### Story 21.15: Cut Over V6 Retrieval Through Qualified Read Policy
+
+As a product owner,
+I want required-need retrieval activated only through a qualified read-policy decision,
+So that a failed gate or incident can safely retain or restore a known-safe authority.
+
+**Acceptance Criteria:**
+
+**Given** Story 21.14 provides a passing Product Owner-approved report with a runnable qualified rollback target
+**When** `activateRetrievalReadPolicy(...)` performs its Retrieval-owned compare-and-swap cutover
+**Then** `v6_active` becomes authoritative and every production run pins the committed PostgreSQL policy
+**And** deployment configuration cannot override the row.
+
+**Given** a safety, quality, deletion, latency, call-rate, cost, or stale-projection gate fails after cutover
+**When** an authorized rollback runs
+**Then** the CAS uses the incident/failing evidence and a previously qualified runnable target without waiting for a new passing report
+**And** no traveler output is selected by the shadow path.
+
+### Story 21.12: Retire The Legacy Card-Count Trigger Behaviorally
 
 As a traveler,
 I want web verification to respond to missing or changing planning needs rather than an arbitrary number of cards,
 So that one exact answer is not over-searched and several irrelevant cards cannot hide an important gap.
+
+**Dependency:** Complete Story 21.15's Product Owner-approved cutover first. Behavioral retirement records that qualified cutover; it does not independently collect evidence or activate `v6_active`.
 
 **Acceptance Criteria:**
 
@@ -3435,17 +3497,35 @@ So that one exact answer is not over-searched and several irrelevant cards canno
 **Then** its fewer-than-three trigger is explicitly subordinate compatibility behavior with RTA-10/AD-38 ownership
 **And** no active epic, runtime policy, test, config, schema default, or operator procedure treats it as permanent v6 product behavior.
 
-**Given** the exact shadow evidence window and broad-query/missing-need cohorts pass
+**Given** Story 21.15 has activated `v6_active` from Story 21.14's passing Product Owner-approved evidence report
 **When** Product approves behavioral retirement
 **Then** the cutover record names the retired policy and current rollback mode while required-need coverage becomes the sole v6 authority
 **And** `COMP-01`, `COMP-02`, and non-regression evidence remain attached to the recorded decision.
 
 **Given** physical target-count cleanup is requested
 **When** G3 evaluates rollback safety
-**Then** cleanup waits for the profile-owned rollback window, `COMP-06`, a passing cleanup report, Product approval, and a retained known-safe `v6_active` rollback target
-**And** removed legacy code/schema/config is no longer named executable, while failure preserves the still-runnable compatibility path.
+**Then** cleanup remains blocked for Story 21.16 until the profile-owned rollback window, `COMP-06`, a passing cleanup report, Product approval, and a retained known-safe `v6_active` rollback target exist
+**And** behavioral retirement preserves the still-runnable compatibility path until that later cleanup completes.
 
 **Given** Epic 21 is complete
 **When** focused unit tests, serial PostgreSQL integration tests, immutable fixture/evaluation checks, `pnpm lint`, `pnpm typecheck`, and `pnpm build` run
 **Then** every RTA-1..RTA-13, PCR-01..PCR-10, FR-61..65, SC-8..12, AC-28..33, and PJ-01..06 mapping has executable evidence
 **And** any environmental blocker is recorded exactly rather than weakening or skipping a gate.
+
+### Story 21.16: Physically Remove Expired Legacy Card-Count Compatibility
+
+As a product owner,
+I want legacy card-count compatibility removed only after rollback safety expires,
+So that cleanup cannot strand the product without a known-safe recovery path.
+
+**Acceptance Criteria:**
+
+**Given** Story 21.12 behavioral retirement is complete
+**When** physical cleanup is requested
+**Then** it waits for rollback-window expiry, `COMP-06`, a passing Feedback/Eval cleanup report, no unresolved rollback incident, Product Owner approval, and a changed qualified known-safe `v6_active` rollback target
+**And** failure preserves runnable compatibility behavior.
+
+**Given** all physical-cleanup gates pass
+**When** Retrieval performs the approved CAS cleanup
+**Then** a repository-wide executable-reference check finds no active legacy card-count branch, schema default, config, runtime policy, test, or operator procedure
+**And** only the retained qualified v6 target remains runnable.

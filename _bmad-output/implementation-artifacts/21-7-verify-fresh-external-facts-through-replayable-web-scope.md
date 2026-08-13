@@ -1,6 +1,6 @@
 # Story 21.7: Verify Fresh External Facts Through Replayable Web Scope
 
-Status: ready-for-dev
+Status: backlog
 
 ## Story
 
@@ -35,6 +35,10 @@ As a traveler, I want changing external information checked for the exact place,
 - [Source: _bmad-output/planning-artifacts/architecture/architecture-xuyenviet-2026-07-04/retrieval-trip-aware/contracts.md#Replayable-Web-Scope]
 - [Source: _bmad-output/planning-artifacts/architecture/architecture-xuyenviet-2026-07-04/retrieval-trip-aware/fixtures.md#Web-Scope]
 - [Source: _bmad-output/planning-artifacts/ux-designs/ux-xuyenviet-2026-07-05/EXPERIENCE.md#v6.2-Trip-Aware-Planning-Addendum]
+
+## Canonical Acceptance-Criteria Mapping
+
+`epics.md#Story-21.7` is normative. Guide AC 1-4 map one-to-one to the four canonical criteria. Completion must satisfy both documents.
 
 ## Dev Agent Record
 

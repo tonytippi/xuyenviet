@@ -1,6 +1,6 @@
 # Story 21.3: Run Bounded Preflight Clarification Before Main Answers
 
-Status: ready-for-dev
+Status: backlog
 
 ## Story
 
@@ -9,7 +9,7 @@ As a traveler, I want XuyenViet to ask follow-up questions until the relevant re
 ## Acceptance Criteria
 
 1. A profiled AI Ask makes at most one versioned `clarification_plan` and one `clarification_extract` attempt; Retrieval validates and Chat/Trips alone persists readiness.
-2. A blocked turn atomically persists reduced state, concise Vietnamese follow-up, extraction Usage, and replayable success, with no retrieval/web/selection/prompt/provenance/main-answer usage artifacts.
+2. A blocked turn atomically persists reduced state, concise Vietnamese follow-up, extraction Usage, replayable success, and any profile-permitted useful invariant guidance independent of unresolved material fields, with no retrieval/web/selection/prompt/provenance/main-answer usage artifacts.
 3. A ready claim pins ready instances, session/content/profile/scope versions, Trip/proposal fences, and disclosed assumptions; stale claims never become visible answers.
 4. Missing/timeout/invalid/racing extraction fails closed, records Usage and safe retry guidance, and never falls through. `CLAR-01` through `06`, `15` through `20`, and `27` pass.
 
@@ -36,6 +36,10 @@ As a traveler, I want XuyenViet to ask follow-up questions until the relevant re
 - [Source: _bmad-output/planning-artifacts/architecture/architecture-xuyenviet-2026-07-04/retrieval-trip-aware/fixtures.md#Clarification]
 - [Source: tests/ai-ask-stream-execution.test.ts]
 - [Source: _bmad-output/planning-artifacts/ux-designs/ux-xuyenviet-2026-07-05/EXPERIENCE.md#v6.2-Trip-Aware-Planning-Addendum]
+
+## Canonical Acceptance-Criteria Mapping
+
+`epics.md#Story-21.3` is normative. Guide AC 1 maps to canonical AC 1, guide AC 2 maps to canonical AC 2 including invariant useful guidance, guide AC 3 maps to canonical AC 3, and guide AC 4 maps to canonical AC 4. Completion must satisfy both documents.
 
 ## Dev Agent Record
 

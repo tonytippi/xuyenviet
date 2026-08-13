@@ -1,6 +1,6 @@
 # Story 21.1: Define Versioned Planning Context Profiles And Scope Rules
 
-Status: ready-for-dev
+Status: backlog
 
 ## Story
 
@@ -40,6 +40,10 @@ As a traveler, I want XuyenViet to recognize the details material to each part o
 - [Source: _bmad-output/planning-artifacts/architecture/architecture-xuyenviet-2026-07-04/retrieval-trip-aware/contracts.md#Multi-Turn-Clarification-And-Scoped-Context]
 - [Source: _bmad-output/planning-artifacts/architecture/architecture-xuyenviet-2026-07-04/retrieval-trip-aware/fixtures.md#CLAR]
 - [Source: _bmad-output/planning-artifacts/ux-designs/ux-xuyenviet-2026-07-05/EXPERIENCE.md#v6.2-Trip-Aware-Planning-Addendum]
+
+## Canonical Acceptance-Criteria Mapping
+
+`epics.md#Story-21.1` is normative. Guide AC 1-4 map one-to-one to the four canonical criteria. Completion must satisfy both documents.
 
 ## Dev Agent Record
 

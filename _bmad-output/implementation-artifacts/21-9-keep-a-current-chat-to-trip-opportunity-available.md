@@ -1,6 +1,6 @@
 # Story 21.9: Keep A Current Chat-To-Trip Opportunity Available
 
-Status: ready-for-dev
+Status: backlog
 
 ## Story
 
@@ -18,7 +18,7 @@ As a traveler, I want a persistent `Chuyển thành chuyến đi` action when ch
 - [ ] Evolve the existing `trip-recommendations.ts` aggregate and recommendation schema in place to opportunity/manifest state (AC: 1-3).
 - [ ] Migrate contracts, domain ports, existing accept/decline controller/OpenAPI routes, direct API client, and composer from `decisionId` to `opportunityId`; no parallel endpoint (AC: 1-4).
 - [ ] Refresh synchronously in existing AI Ask terminalization and render server-projected CTA state (AC: 1, 4).
-- [ ] Validate `TripConversionProjectionPolicy` before eligibility and reject empty, over-limit, duplicate, conflicting, unknown-field, and schema-incompatible mappings; add `TC-13` coverage or block release qualification on Story 21.11's explicit validation evidence (AC: 1-3).
+- [ ] Validate `TripConversionProjectionPolicy` before eligibility and reject empty, over-limit, duplicate, conflicting, unknown-field, and schema-incompatible mappings; `TC-13` coverage is mandatory before this story can complete (AC: 1-3).
 - [ ] Add DB-free projection/policy/presentation tests with `pnpm test:unit`, and serial PostgreSQL manifest/CAS/ownership/deletion plus API contract tests with local `resetTestDatabase()` where clean tables are required (AC: 1-4).
 
 ## Dev Notes
@@ -37,6 +37,10 @@ As a traveler, I want a persistent `Chuyển thành chuyến đi` action when ch
 - [Source: _bmad-output/planning-artifacts/architecture/architecture-xuyenviet-2026-07-04/retrieval-trip-aware/fixtures.md#Persistent-Chat-To-Trip-Conversion]
 - [Source: _bmad-output/planning-artifacts/architecture/architecture-xuyenviet-2026-07-04/retrieval-trip-aware-solution-design.md#Persistent-Chat-To-Trip-Conversion]
 - [Source: _bmad-output/planning-artifacts/ux-designs/ux-xuyenviet-2026-07-05/EXPERIENCE.md#v6.2-Trip-Aware-Planning-Addendum]
+
+## Canonical Acceptance-Criteria Mapping
+
+`epics.md#Story-21.9` is normative. Guide AC 1-4 map one-to-one to its four canonical criteria. `TC-13` is required before completion and before Story 21.10 starts.
 
 ## Dev Agent Record
 

@@ -334,9 +334,9 @@ Failure: A source link is unavailable. The detail panel keeps the practical veri
 1. Hanh continues a chat about a family trip.
 2. Assistant refers to her child as 6 years old.
 3. Hanh types: `Con mình 8 tuổi, không phải 6 tuổi.`
-4. The system treats it as a correction and updates the relevant chat or selected trip project context.
-5. Assistant confirms briefly: `Mình đã cập nhật: bé 8 tuổi.`
-6. Future answer pacing and activity suggestions use the corrected age.
+4. For an ordinary chat, the system updates only chat context. For a selected Trip Project, it drafts a typed Trip Change Proposal and leaves the saved Trip unchanged.
+5. Assistant confirms the understood correction; for a selected Trip it offers `Xem đề xuất và tác động` rather than claiming the plan was updated.
+6. Future current-plan answers use the corrected age only after the owner applies that proposal; exploration can use it only as visibly hypothetical context.
 7. **Climax:** Hanh corrects the plan naturally through chat without opening settings or a profile form.
 
 Failure: The correction is ambiguous. Assistant asks a concise clarification and does not overwrite context.
@@ -404,7 +404,7 @@ Failure: Bao tries to submit an empty prompt. The composer remains focused and s
 1. Trang receives an answer with section chips and inline selectable entities.
 2. She selects `Asia Park` inside the answer.
 3. The right detail panel opens with the selected title, short summary, quick facts, route impact, nearby stay note, driving note, and source chips.
-4. Trang chooses `Dùng trong kế hoạch` if she wants to keep it, or closes the panel to return focus to the answer.
+4. For a selected Trip, Trang chooses `Dùng trong kế hoạch` to draft and review a typed Trip Change Proposal; the panel states that the saved plan changes only after `Áp dụng`. In an ordinary chat, the action may save only a supported chat-local note and never creates or mutates a Trip. Closing the panel returns focus to the answer.
 5. **Climax:** Trang can inspect detail without losing the chat context or opening a separate page.
 
 Failure: Detail data is unavailable. The panel shows a compact unavailable state and preserves the original answer text.

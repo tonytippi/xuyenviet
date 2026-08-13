@@ -1,6 +1,6 @@
 # Story 21.10: Convert The Latest Eligible Context Into A Reviewable Trip
 
-Status: ready-for-dev
+Status: backlog
 
 ## Story
 
@@ -22,7 +22,7 @@ As a traveler, I want current eligible chat context converted into a reviewable 
 
 ## Dev Notes
 
-- Proposal Apply remains the sole Trip-state mutation boundary. Conversion is review-first and must not create a separate conversion endpoint, service, worker, cache, dependency, model purpose, or runtime flag.
+- Depends on completed Story 21.9 including mandatory `TC-13` projection-policy validation. Proposal Apply remains the sole Trip-state mutation boundary. Conversion is review-first and must not create a separate conversion endpoint, service, worker, cache, dependency, model purpose, or runtime flag.
 - Idempotency digest derives from command version, owner, opportunity, and resolved manifest digest. Only committed success reserves the key; deleted destination retains non-content replay information only.
 
 ### References
@@ -35,6 +35,10 @@ As a traveler, I want current eligible chat context converted into a reviewable 
 - [Source: _bmad-output/planning-artifacts/architecture/architecture-xuyenviet-2026-07-04/retrieval-trip-aware/fixtures.md#Persistent-Chat-To-Trip-Conversion]
 - [Source: _bmad-output/planning-artifacts/architecture/architecture-xuyenviet-2026-07-04/retrieval-trip-aware-solution-design.md#Persistent-Chat-To-Trip-Conversion]
 - [Source: _bmad-output/planning-artifacts/ux-designs/ux-xuyenviet-2026-07-05/EXPERIENCE.md#v6.2-Trip-Aware-Planning-Addendum]
+
+## Canonical Acceptance-Criteria Mapping
+
+`epics.md#Story-21.10` is normative. Guide AC 1-4 map one-to-one to its four canonical criteria; `TC-13` is an upstream Story 21.9 prerequisite and `TC-06`-`TC-10`, `TC-17`, and `TC-18` remain this story's proof.
 
 ## Dev Agent Record
 

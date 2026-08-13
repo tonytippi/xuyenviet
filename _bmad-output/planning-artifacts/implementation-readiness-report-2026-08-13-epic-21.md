@@ -22,10 +22,6 @@ documentsIncluded:
     - ux-designs/ux-xuyenviet-2026-07-05/DESIGN.md
 ---
 
-# Implementation Readiness Assessment Report
-
-**Date:** 2026-08-13
-**Project:** xuyenviet
 **Scope:** Epic 21: Context-Complete, Trip-Aware Planning And Conversion
 
 ## Document Discovery
@@ -33,15 +29,15 @@ documentsIncluded:
 ### Selected Source Documents
 
 - PRD: `_bmad-output/planning-artifacts/prds/prd-xuyenviet-2026-07-04/prd.md` and `addendum.md`
-- Architecture: `_bmad-output/planning-artifacts/architecture/architecture-xuyenviet-2026-07-04/ARCHITECTURE-SPINE.md`, the trip-aware solution design, frontend shell notes, and retrieval-trip-aware contracts
+- Architecture: `_bmad-output/planning-artifacts/architecture/architecture-xuyenviet-2026-07-04/README.md`, `ARCHITECTURE-SPINE.md`, the trip-aware solution design, frontend shell notes, and retrieval-trip-aware contracts, fixtures, and release gates
 - Epics and stories: `_bmad-output/planning-artifacts/epics.md`
 - UX: `_bmad-output/planning-artifacts/ux-designs/ux-xuyenviet-2026-07-05/EXPERIENCE.md` and `DESIGN.md`
 
 ### Discovery Notes
 
-- `epics.md` is the authoritative Epic 21 story inventory and contains Stories 21.1 through 21.12.
+ - `epics.md` is the authoritative Epic 21 story inventory and contains Stories 21.1 through 21.16.
 - The current PRD and its approved addendum are the authoritative product-requirement sources.
-- The 2026-08-06 YouTube Discovery architecture and UX bundles are outside Epic 21's scope.
+- The 2026-08-06 YouTube Discovery UX bundle is outside Epic 21's scope.
 - Earlier readiness reports and review artifacts are historical evidence, not competing source documents.
 - No whole-versus-sharded document duplicate requires resolution for this assessment.
 
@@ -110,8 +106,8 @@ The PRD and approved addendum provide complete, testable product outcomes for Ep
 ### Coverage Findings
 
 - The authoritative `FR Coverage Map` assigns FR-16J through FR-16L, FR-16M through FR-16Q, and FR-61 through FR-65 to Epic 21 and identifies their owning stories.
-- The v6.2 per-item coverage table maps every approved PCR, production journey, success criterion, and acceptance criterion to Story 21 ownership plus canonical fixtures and release gates.
-- The initial discovery inventory has been corrected: Epic 21 contains 12 stories, not 10.
+ - The v6.2 per-item coverage table maps every approved PCR, production journey, success criterion, and acceptance criterion to Story 21 ownership plus canonical fixtures and release gates.
+ - The current inventory has 16 stories. Stories 21.13 through 21.16 explicitly separate deletion invalidation, shadow-evidence approval, read-policy cutover, and conditional physical cleanup.
 - Broader PRD FRs outside Epic 21 retain their completed ownership in Epics 1 through 20. No PRD FR is unassigned in the current epic inventory.
 
 ### Missing Requirements
@@ -165,19 +161,23 @@ No UX-to-PRD or UX-to-architecture conflict was found for Epic 21. The existing 
 | 5 | 21.5 Canonical paths and coverage | Extends the existing Trip proposal boundary and provides route authority. |
 | 6 | 21.6 Required-need retrieval | Consumes ready planning context, modes, and route resolution. |
 | 7 | 21.7 Replayable web scope | Consumes requirement keys and route/scope resolution. |
-| 8 | 21.8 Atomic finalization and deletion | Seals execution/deletion paths after new planning artifacts exist. |
+| 8 | 21.8 Atomic finalization | Seals prepared/finalized answer execution after new planning artifacts exist. |
 | 9 | 21.9 Persistent conversion opportunity | Uses canonical clarification claims and terminal finalization. |
 | 10 | 21.10 Reviewable conversion | Converts 21.9's latest manifest through the existing proposal boundary. |
-| 11 | 21.11 Shadow evaluation and cutover | Qualifies the assembled target behavior before authority switches. |
-| 12 | 21.12 Retire card-count trigger | Performs behavioral and eventual physical retirement only after cutover/rollback proof. |
+| 11 | 21.11 Qualification infrastructure | Establishes the profile, shadow execution, and policy guardrails required before evidence collection. |
+| 12 | 21.13 Deletion invalidation | Extends owner deletion to all v6.2 reconstructable planning artifacts. |
+| 13 | 21.14 Shadow-evidence collection and approval | Collects the qualifying window and Product Owner approval using Story 21.11 infrastructure. |
+| 14 | 21.15 Read-policy cutover | Activates `v6_active` only from Story 21.14's approved report and rollback target. |
+| 15 | 21.12 Behavioral legacy-trigger retirement | Records the qualified cutover after Story 21.15 while retaining compatibility until cleanup gates pass. |
+| 16 | 21.16 Physical compatibility cleanup | Removes legacy compatibility only after the rollback-window and cleanup gates pass. |
 
-No forward dependency was found. Each story consumes prior completed story outputs or explicitly identified completed platform baselines.
+**Dependency order:** Pass. Story 21.14 produces the qualified evidence, Story 21.15 performs the approved `v6_active` cutover, Story 21.12 records behavioral retirement, and Story 21.16 remains the final conditional cleanup.
 
 ### Story Quality
 
 - Stories 21.1 through 21.10 are vertical slices with traveler value and bounded database/API/presentation work. Their Given/When/Then criteria specify ownership, valid paths, stale/invalid conditions, no-partial-write behavior, and fixture IDs.
-- Stories 21.11 and 21.12 are release-safety stories rather than direct new UI slices, but they protect a traveler-visible change in retrieval authority and preserve rollback. They have bounded owners, objective gate criteria, and are required to make the target behavior safe to activate and retire.
-- Persistent tables are introduced where first needed: profiles/sessions in 21.1-21.2, canonical paths/registry in 21.5, retrieval and web manifests in 21.6-21.7, conversion artifacts in 21.9-21.10, and evaluation/cutover records in 21.11-21.12. No premature all-schema setup story is present.
+- Stories 21.11 through 21.16 are release-safety stories rather than direct new UI slices, but they protect a traveler-visible change in retrieval authority and preserve rollback. Their boundaries and dependency order are clear.
+ - Persistent tables are introduced where first needed: profiles/sessions in 21.1-21.2, canonical paths/registry in 21.5, retrieval and web manifests in 21.6-21.7, conversion artifacts in 21.9-21.10, qualification records in 21.11, deletion invalidation in 21.13, evidence/cutover records in 21.14-21.15, and physical cleanup in 21.16. No premature all-schema setup story is present.
 - Every story has BDD acceptance criteria and named canonical fixture or verification expectations; error and concurrency paths are explicit across clarification, route, web, deletion, conversion, and cutover boundaries.
 
 ### Findings
@@ -192,16 +192,16 @@ None.
 
 #### Minor Concerns
 
-- Story 21.11 depends on an exact evidence window and Product Owner approval, so it cannot be marked complete solely by code/tests. Sprint planning must treat its external evidence and approval as explicit completion gates.
-- Story 21.12's physical cleanup is intentionally conditional on Story 21.11's qualified rollback evidence and Product approval. It should stay blocked/not-started until those gates pass rather than being scheduled as ordinary implementation work.
+ - Story 21.14 depends on an exact evidence window and Product Owner approval, so it cannot be marked complete solely by code/tests. Sprint planning must treat its external evidence and approval as explicit completion gates.
+ - Story 21.16's physical cleanup is intentionally conditional on Story 21.12 behavioral retirement, the rollback window, `COMP-06`, cleanup evidence, Product approval, and a qualified `v6_active` rollback target. It must remain blocked/not-started until those gates pass.
 
 ## Summary and Recommendations
 
 ### Overall Readiness Status
 
-**READY** for Epic 21 sprint planning and Story 21.1 preparation.
+**READY** for Epic 21 sprint planning.
 
-The authoritative PRD, addendum, UX v6.2 contract, architecture spine, solution design, fixtures/gates, and Epic 21's 12-story sequence are aligned. The delivery plan retains the existing ownership boundaries and has complete traceability from product requirements through executable story acceptance criteria.
+The authoritative PRD, addendum, UX v6.2 contract, architecture spine, solution design, fixtures/gates, and Epic 21's 16-story inventory are aligned. Requirement traceability, ownership, and release-gate delivery order are complete.
 
 ### Critical Issues Requiring Immediate Action
 
@@ -210,18 +210,18 @@ None.
 ### Required Execution Gates
 
 1. Every Epic 21 story must cite the v6.2 Trip-Aware Planning Addendum in `EXPERIENCE.md` and confirm it remains current when the story is created.
-2. Story 21.11 completion requires the documented gate profile, exact evidence window, and Product Owner approval; source code and local test success alone are insufficient.
-3. Story 21.12 remains conditional: behavioral and physical retirement require the qualified rollback target, required compatibility evidence, and Product approval specified in its acceptance criteria.
+2. Story 21.14 completion requires the documented gate profile, exact evidence window, and Product Owner approval; source code and local test success alone are insufficient.
+3. Story 21.15 requires Story 21.14's approved report and runnable qualified rollback target. Story 21.12 follows that cutover/approval boundary; Story 21.16 remains separately conditional on its cleanup gates.
 
 ### Recommended Next Steps
 
-1. Run `bmad-sprint-planning` to add Epic 21 and all 12 stories to `sprint-status.yaml`, preserving Story 21.11 and Story 21.12's gate conditions.
-2. Run `bmad-create-story` for Story 21.1, including citations to the UX v6.2 addendum, architecture AD-39/AD-40 boundary, fixture references, and the project unit/integration test split.
-3. Run `bmad-create-story` with `validate` for Story 21.1 before `bmad-dev-story` begins implementation.
+1. Run `bmad-sprint-planning` for the confirmed Epic 21 sequence.
+2. Create and validate Story 21.1 before development.
+3. Treat Stories 21.14 through 21.16 as explicit evidence, approval, cutover, and cleanup gates rather than ordinary code-only completion.
 
 ### Final Note
 
-This assessment found no blocking issue across document currency, FR coverage, UX/architecture alignment, or story quality. It recorded two non-blocking execution-gate concerns: the externally evidenced cutover in Story 21.11 and the conditional retirement in Story 21.12. The Epic 21 plan is ready to enter implementation planning.
+This reassessment found no document-currency, FR-coverage, UX, architecture, or story-order conflict. Story 21.12 follows the evidence and cutover it depends on, and Story 21.16 remains the final conditional cleanup.
 
 **Assessor:** BMad Implementation Readiness workflow
 **Completed:** 2026-08-13
