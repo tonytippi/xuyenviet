@@ -462,7 +462,7 @@ development_status:
   # 21.14 evidence, 21.15 cutover, and 21.16 G3 cleanup.
   epic-21: in-progress
   21-1-define-versioned-planning-context-profiles-and-scope-rules: done
-  21-2-persist-scoped-multi-turn-clarification-state-safely: backlog
+  21-2-persist-scoped-multi-turn-clarification-state-safely: in-progress
   21-3-run-bounded-preflight-clarification-before-main-answers: backlog
   21-4-preserve-applied-trip-authority-across-planning-modes: backlog
   21-5-preserve-canonical-trip-paths-and-supported-route-coverage: backlog
