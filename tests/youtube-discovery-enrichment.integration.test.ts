@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, test } from "vitest";
 import { and, eq } from "drizzle-orm";
 import postgres from "postgres";
 
-import { auditEvents, claimNextYoutubeDiscoveryRun, createSystemAuditActor, createUserAuditActor, createYoutubeDiscoveryPolicyVersion, createYoutubeDiscoveryQueryProposal, createYoutubeDiscoveryRun, persistYoutubeDiscoveryCandidates, persistYoutubeDiscoveryEnrichment, retainYoutubeDiscoveryRecords, sources, youtubeDiscoveryAppearances, youtubeDiscoveryCandidates, youtubeDiscoveryCommentSignals, youtubeDiscoveryRankingHistory, youtubeDiscoveryRuns } from "@xuyenviet/database";
+import { auditEvents, claimNextYoutubeDiscoveryCandidateJob, claimNextYoutubeDiscoveryRun, createSystemAuditActor, createUserAuditActor, createYoutubeDiscoveryPolicyVersion, createYoutubeDiscoveryQueryProposal, createYoutubeDiscoveryRun, finishYoutubeDiscoveryCandidateJob, finishYoutubeDiscoveryRun, persistYoutubeDiscoveryCandidates, persistYoutubeDiscoveryEnrichment, retainYoutubeDiscoveryRecords, sources, youtubeDiscoveryAppearances, youtubeDiscoveryCandidates, youtubeDiscoveryCommentSignals, youtubeDiscoveryRankingHistory, youtubeDiscoveryRuns } from "@xuyenviet/database";
 import { resetTestDatabase, seedTestOperator, testDb } from "./helpers/db";
 
 const videoId = "abcDEF12345";
@@ -48,13 +48,14 @@ describe.sequential("YouTube Discovery enrichment and retention", () => {
     await persistCandidateAndEnrichment(claim);
 
     const [stored] = await testDb.select().from(youtubeDiscoveryCandidates);
-    expect(stored).toMatchObject({ videoId, title: enrichment.title, description: enrichment.description, channelId: enrichment.channelId, durationSeconds: enrichment.durationSeconds, tags: enrichment.tags, viewCount: 100, thumbnailUrl: enrichment.thumbnailUrl });
+    const [appearance] = await testDb.select().from(youtubeDiscoveryAppearances).where(eq(youtubeDiscoveryAppearances.runId, run.id));
+    expect(stored).toMatchObject({ videoId, title: null, description: null, channelId: null, durationSeconds: null, tags: null, viewCount: null, thumbnailUrl: null });
+    expect(appearance).toMatchObject({ title: enrichment.title, description: enrichment.description, channelId: enrichment.channelId, durationSeconds: enrichment.durationSeconds, tags: enrichment.tags, viewCount: 100, thumbnailUrl: enrichment.thumbnailUrl });
     const signals = await testDb.select().from(youtubeDiscoveryCommentSignals);
     expect(signals).toMatchObject([{ candidateId: stored!.id, runId: run.id, policyVersionId: policy.id, signal: "practical_question_demand", count: 2, score: 20, derivedAt: expect.any(Date), expiresAt: expect.any(Date) }]);
     expect(signals[0]!.expiresAt.getTime() - signals[0]!.derivedAt.getTime()).toBeGreaterThanOrEqual(29 * 24 * 60 * 60 * 1000);
     expect(signals[0]!.expiresAt.getTime() - signals[0]!.derivedAt.getTime()).toBeLessThanOrEqual(31 * 24 * 60 * 60 * 1000);
     const [history] = await testDb.select().from(youtubeDiscoveryRankingHistory).where(eq(youtubeDiscoveryRankingHistory.stage, "enriched"));
-    const [appearance] = await testDb.select().from(youtubeDiscoveryAppearances).where(eq(youtubeDiscoveryAppearances.runId, run.id));
     expect(history).toMatchObject({ candidateId: stored!.id, appearanceId: appearance!.id, runId: run.id, policyVersionId: policy.id, stage: "enriched" });
 
     for (let index = 0; index < 19; index += 1) {
@@ -88,6 +89,29 @@ describe.sequential("YouTube Discovery enrichment and retention", () => {
     expect(histories.every((history) => history.appearanceId !== null)).toBe(true);
   });
 
+  test("candidate-job enrichment rejects a mismatched video and retries without deleting sibling signals", async () => {
+    const first = await claimedRun(1, { maxConcurrentRuns: 2 });
+    expect(await persistYoutubeDiscoveryCandidates(first.claim, [candidate], testDb)).toBe("completed");
+    expect(await finishYoutubeDiscoveryRun(first.claim, testDb)).toBe("completed");
+    const laterRun = await createYoutubeDiscoveryRun({ policyVersionId: first.policy.id, queryProposalId: first.proposal.id }, testDb);
+    const laterClaim = (await claimNextYoutubeDiscoveryRun({ workerId: "sibling-search" }, testDb)).claim!;
+    expect(await persistYoutubeDiscoveryCandidates(laterClaim, [candidate], testDb)).toBe("completed");
+    expect(await finishYoutubeDiscoveryRun(laterClaim, testDb)).toBe("completed");
+    const firstJob = (await claimNextYoutubeDiscoveryCandidateJob({ workerId: "sibling-first" }, testDb)).claim!;
+    expect(await persistYoutubeDiscoveryEnrichment(firstJob, enrichment, testDb)).toBe("completed");
+    expect(await finishYoutubeDiscoveryCandidateJob(firstJob, testDb)).toBe("completed");
+    const secondJob = (await claimNextYoutubeDiscoveryCandidateJob({ workerId: "sibling-second" }, testDb)).claim!;
+    expect(await persistYoutubeDiscoveryEnrichment(secondJob, { ...enrichment, videoId: "zyxWV987654" }, testDb)).toBe("contended");
+    expect(await persistYoutubeDiscoveryEnrichment(secondJob, { ...enrichment, signals: [{ signal: "commercial_risk", count: 1, score: 10 }] }, testDb)).toBe("completed");
+    expect(await persistYoutubeDiscoveryEnrichment(secondJob, { ...enrichment, signals: [{ signal: "commercial_risk", count: 1, score: 10 }] }, testDb)).toBe("completed");
+    const signals = await testDb.select().from(youtubeDiscoveryCommentSignals).where(eq(youtubeDiscoveryCommentSignals.candidateId, secondJob.candidateId));
+    expect(signals).toHaveLength(2);
+    expect(signals.map((signal) => signal.runId).sort()).toEqual([first.run.id, laterRun.id].sort());
+    const appearances = await testDb.select().from(youtubeDiscoveryAppearances).where(eq(youtubeDiscoveryAppearances.candidateId, secondJob.candidateId));
+    expect(appearances.map((appearance) => appearance.title).sort()).toEqual([enrichment.title, enrichment.title]);
+    expect(await testDb.select({ title: youtubeDiscoveryCandidates.title }).from(youtubeDiscoveryCandidates)).toEqual([{ title: null }]);
+  });
+
   test("discards provider-returned enrichment after revocation and records one terminal audit", async () => {
     const { policy, run, claim } = await claimedRun();
     expect(await persistYoutubeDiscoveryCandidates(claim, [candidate], testDb)).toBe("completed");
@@ -105,6 +129,8 @@ describe.sequential("YouTube Discovery enrichment and retention", () => {
   test("expires signals before candidate and audit retention, then removes only Discovery records", async () => {
     const { policy, run, claim } = await claimedRun(1, { retentionDays: 2, commentSignalTtlDays: 1 });
     await persistCandidateAndEnrichment(claim);
+    const candidateJob = (await claimNextYoutubeDiscoveryCandidateJob({ workerId: "enrichment-retention" }, testDb)).claim!;
+    expect(await finishYoutubeDiscoveryCandidateJob(candidateJob, testDb)).toBe("completed");
     await testDb.insert(sources).values({ id: "unrelated-source", url: "https://example.com", canonicalUrl: "https://example.com", kind: "url", sourceType: "community", label: "Unrelated", submittedByUserId: "operator" });
     await testDb.insert(auditEvents).values({ id: "unrelated-audit", actorClass: "system", actorSystem: "system-test", operation: "update", targetType: "unrelated", targetId: "unrelated" });
     expect(await retainYoutubeDiscoveryRecords(testDb)).toBe(0);
@@ -128,6 +154,8 @@ describe.sequential("YouTube Discovery enrichment and retention", () => {
   test("is idempotent and honors singleton and disabled-policy retention fences", async () => {
     const { claim: firstClaim } = await claimedRun(1, { retentionDays: 2, commentSignalTtlDays: 1 });
     await persistCandidateAndEnrichment(firstClaim);
+    const firstCandidateJob = (await claimNextYoutubeDiscoveryCandidateJob({ workerId: "enrichment-retention-first" }, testDb)).claim!;
+    expect(await finishYoutubeDiscoveryCandidateJob(firstCandidateJob, testDb)).toBe("completed");
     await testDb.update(youtubeDiscoveryCandidates).set({ updatedAt: new Date(0) });
     expect(await retainYoutubeDiscoveryRecords(testDb)).toBe(1);
     expect(await retainYoutubeDiscoveryRecords(testDb)).toBe(0);

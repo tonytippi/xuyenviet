@@ -49,7 +49,7 @@ const actionableTelemetrySink: OperationalTelemetrySink = {
 
 function writeDiscoveryDiagnostic(observation: WorkerPollObservation) {
   if (observation.capability !== "youtube.discovery" || !observation.durableId || !observation.diagnosticCode || !observation.diagnosticStage) return;
-  const event = { capability: observation.capability, runId: observation.durableId, resultCode: observation.resultCode, safeErrorCode: observation.diagnosticCode, lastStage: observation.diagnosticStage, retryCount: observation.retryCount ?? 0, leaseRecovery: observation.leaseRecovery ?? "none" };
+  const event = { capability: observation.capability, executionKind: observation.executionKind ?? "query_run", durableId: observation.durableId, resultCode: observation.resultCode, safeErrorCode: observation.diagnosticCode, lastStage: observation.diagnosticStage, retryCount: observation.retryCount ?? 0, leaseRecovery: observation.leaseRecovery ?? "none" };
   process.stderr.write(`youtube_discovery_diagnostic ${JSON.stringify(event)}\n`);
 }
 

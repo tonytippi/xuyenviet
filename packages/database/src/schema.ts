@@ -45,6 +45,11 @@ export type YoutubeDiscoveryRunIncidentCategory = (typeof youtubeDiscoveryRunInc
 export const youtubeDiscoveryRunTerminalOutcomeValues = ["completed", "failed", "cancelled"] as const;
 export type YoutubeDiscoveryRunTerminalOutcome = (typeof youtubeDiscoveryRunTerminalOutcomeValues)[number];
 
+export const youtubeDiscoveryCandidateJobStateValues = ["queued", "running", "retrying", "completed", "failed", "cancelled"] as const;
+export type YoutubeDiscoveryCandidateJobState = (typeof youtubeDiscoveryCandidateJobStateValues)[number];
+export const youtubeDiscoveryCandidateJobSafeErrorCodeValues = ["stage_transient", "enrichment_transient", "triage_transient", "triage_timeout", "eligibility_unavailable", "recommendation_transient", "persistence_contended", "retry_exhausted", "lease_retry_exhausted", "policy_revoked"] as const;
+export type YoutubeDiscoveryCandidateJobSafeErrorCode = (typeof youtubeDiscoveryCandidateJobSafeErrorCodeValues)[number];
+
 export const aiAskCommandStatusValues = ["pending", "completed", "failed", "aborted", "discarded"] as const;
 export type AiAskCommandStatus = (typeof aiAskCommandStatusValues)[number];
 
@@ -386,6 +391,7 @@ export const youtubeDiscoveryPolicyVersions = pgTable(
     maxConcurrentRuns: integer("max_concurrent_runs").notNull(),
     maxRetryAttempts: integer("max_retry_attempts").notNull(),
     retryDelayMinutes: integer("retry_delay_minutes").notNull(),
+    candidateBacklogThreshold: integer("candidate_backlog_threshold").notNull(),
     actionQueueHighPriorityMaximum: integer("action_queue_high_priority_maximum").notNull(),
     actionQueueMaximumOperatorReviewAgeHours: integer("action_queue_maximum_operator_review_age_hours").notNull(),
     actionQueueMaximumMissionStallHours: integer("action_queue_maximum_mission_stall_hours").notNull(),
@@ -401,7 +407,7 @@ export const youtubeDiscoveryPolicyVersions = pgTable(
     check("youtube_discovery_policy_versions_ranking_check", sql`${policy.relevanceWeight} between 0 and 1 and ${policy.expectedValueWeight} between 0 and 1 and ${policy.freshnessFitWeight} between 0 and 1 and ${policy.commercialRiskWeight} between 0 and 1 and ${policy.duplicateRiskWeight} between 0 and 1 and ${policy.relevanceWeight} + ${policy.expectedValueWeight} + ${policy.freshnessFitWeight} + ${policy.commercialRiskWeight} + ${policy.duplicateRiskWeight} = 1.000000 and ${policy.deferMinimum} >= 0 and ${policy.deferMinimum} < ${policy.considerMinimum} and ${policy.considerMinimum} <= 1`),
     check("youtube_discovery_policy_versions_cadence_check", sql`${policy.cadenceMinutes} between 15 and 10080`),
     check("youtube_discovery_policy_versions_retention_check", sql`${policy.retentionDays} between 1 and 365 and ${policy.commentSignalTtlDays} between 1 and ${policy.retentionDays} - 1`),
-    check("youtube_discovery_policy_versions_execution_check", sql`${policy.maxConcurrentRuns} between 1 and 20 and ${policy.maxRetryAttempts} between 0 and 10 and ${policy.retryDelayMinutes} between 1 and 1440`),
+    check("youtube_discovery_policy_versions_execution_check", sql`${policy.maxConcurrentRuns} between 1 and 20 and ${policy.maxRetryAttempts} between 0 and 10 and ${policy.retryDelayMinutes} between 1 and 1440 and ${policy.candidateBacklogThreshold} between 1 and 10000`),
     check("youtube_discovery_policy_versions_action_queue_check", sql`${policy.actionQueueHighPriorityMaximum} between 1 and 100 and ${policy.actionQueueMaximumOperatorReviewAgeHours} between 1 and 720 and ${policy.actionQueueMaximumMissionStallHours} between 1 and 720 and ${policy.actionQueuePersistentIncidentFailureCount} between 2 and 10 and ${policy.actionQueuePersistentIncidentWindowHours} between 1 and 168`),
   ],
 );
@@ -525,9 +531,27 @@ export const youtubeDiscoveryCommentSignals = pgTable(
 
 export const youtubeDiscoveryAppearances = pgTable(
   "youtube_discovery_appearances",
-  { id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()), candidateId: text("candidate_id").notNull().references(() => youtubeDiscoveryCandidates.id, { onDelete: "restrict" }), runId: text("run_id").notNull().references(() => youtubeDiscoveryRuns.id, { onDelete: "restrict" }), resultOrdinal: integer("result_ordinal").notNull(), discoveredAt: timestamp("discovered_at", { mode: "date" }).defaultNow().notNull() },
+  { id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()), candidateId: text("candidate_id").notNull().references(() => youtubeDiscoveryCandidates.id, { onDelete: "restrict" }), runId: text("run_id").notNull().references(() => youtubeDiscoveryRuns.id, { onDelete: "restrict" }), resultOrdinal: integer("result_ordinal").notNull(), title: text("title"), description: text("description"), channelId: text("channel_id"), channelName: text("channel_name"), publishedAt: timestamp("published_at", { mode: "date" }), durationSeconds: integer("duration_seconds"), categoryId: text("category_id"), tags: text("tags").array(), viewCount: integer("view_count"), likeCount: integer("like_count"), commentCount: integer("comment_count"), channelSubscriberCount: integer("channel_subscriber_count"), thumbnailUrl: text("thumbnail_url"), discoveredAt: timestamp("discovered_at", { mode: "date" }).defaultNow().notNull() },
   (appearance) => [uniqueIndex("youtube_discovery_appearances_run_candidate_idx").on(appearance.runId, appearance.candidateId), uniqueIndex("youtube_discovery_appearances_id_candidate_run_idx").on(appearance.id, appearance.candidateId, appearance.runId), index("youtube_discovery_appearances_candidate_idx").on(appearance.candidateId), check("youtube_discovery_appearances_ordinal_check", sql`${appearance.resultOrdinal} between 0 and 49`)],
 );
+
+export const youtubeDiscoveryCandidateJobs = pgTable("youtube_discovery_candidate_jobs", {
+  id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+  candidateId: text("candidate_id").notNull().references(() => youtubeDiscoveryCandidates.id, { onDelete: "restrict" }),
+  appearanceId: text("appearance_id").notNull().references(() => youtubeDiscoveryAppearances.id, { onDelete: "restrict" }),
+  runId: text("run_id").notNull().references(() => youtubeDiscoveryRuns.id, { onDelete: "restrict" }),
+  policyVersionId: text("policy_version_id").notNull().references(() => youtubeDiscoveryPolicyVersions.id, { onDelete: "restrict" }),
+  state: text("state").$type<YoutubeDiscoveryCandidateJobState>().default("queued").notNull(),
+  nextRunAt: timestamp("next_run_at", { mode: "date" }).defaultNow().notNull(),
+  claimedBy: text("claimed_by"), claimedAt: timestamp("claimed_at", { mode: "date" }), leaseExpiresAt: timestamp("lease_expires_at", { mode: "date" }), fencingToken: text("fencing_token"),
+  attemptCount: integer("attempt_count").default(0).notNull(), maxRetryAttempts: integer("max_retry_attempts").notNull(), retryDelayMinutes: integer("retry_delay_minutes").notNull(), maxConcurrentJobs: integer("max_concurrent_jobs").notNull(),
+  terminalAt: timestamp("terminal_at", { mode: "date" }), terminalOutcome: text("terminal_outcome").$type<YoutubeDiscoveryRunTerminalOutcome>(), safeErrorCode: text("safe_error_code").$type<YoutubeDiscoveryCandidateJobSafeErrorCode>(), incidentCategory: text("incident_category").$type<YoutubeDiscoveryRunIncidentCategory>(), lastSafeStage: text("last_safe_stage").$type<"enrichment" | "triage" | "eligibility" | "recommendation">(),
+  createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
+}, (job) => [
+  uniqueIndex("youtube_discovery_candidate_jobs_appearance_idx").on(job.appearanceId), index("youtube_discovery_candidate_jobs_claim_queue_idx").on(job.state, job.nextRunAt, job.createdAt), index("youtube_discovery_candidate_jobs_lease_expiry_idx").on(job.leaseExpiresAt).where(sql`${job.leaseExpiresAt} is not null`),
+  foreignKey({ columns: [job.appearanceId, job.candidateId, job.runId], foreignColumns: [youtubeDiscoveryAppearances.id, youtubeDiscoveryAppearances.candidateId, youtubeDiscoveryAppearances.runId], name: "youtube_discovery_candidate_jobs_appearance_provenance_fk" }).onDelete("restrict"), foreignKey({ columns: [job.runId, job.policyVersionId], foreignColumns: [youtubeDiscoveryRuns.id, youtubeDiscoveryRuns.policyVersionId], name: "youtube_discovery_candidate_jobs_run_policy_fk" }).onDelete("restrict"),
+  check("youtube_discovery_candidate_jobs_state_check", sql`${job.state} in ('queued','running','retrying','completed','failed','cancelled')`), check("youtube_discovery_candidate_jobs_snapshot_check", sql`${job.attemptCount} between 0 and ${job.maxRetryAttempts} + 1 and ${job.maxRetryAttempts} between 0 and 10 and ${job.retryDelayMinutes} between 1 and 1440 and ${job.maxConcurrentJobs} between 1 and 20`), check("youtube_discovery_candidate_jobs_error_check", sql`${job.safeErrorCode} is null or ${job.safeErrorCode} in ('stage_transient','enrichment_transient','triage_transient','triage_timeout','eligibility_unavailable','recommendation_transient','persistence_contended','retry_exhausted','lease_retry_exhausted','policy_revoked')`), check("youtube_discovery_candidate_jobs_claim_check", sql`(${job.claimedBy} is null and ${job.claimedAt} is null and ${job.leaseExpiresAt} is null and ${job.fencingToken} is null) or (${job.claimedBy} is not null and length(btrim(${job.claimedBy})) between 1 and 160 and ${job.claimedAt} is not null and ${job.leaseExpiresAt} > ${job.claimedAt} and ${job.fencingToken} ~ '^[a-f0-9]{64}$')`), check("youtube_discovery_candidate_jobs_state_shape_check", sql`(${job.state} = 'queued' and ${job.claimedBy} is null and ${job.terminalAt} is null and ${job.terminalOutcome} is null and ${job.safeErrorCode} is null and ${job.lastSafeStage} is null) or (${job.state} = 'running' and ${job.claimedBy} is not null and ${job.terminalAt} is null and ${job.terminalOutcome} is null and ${job.safeErrorCode} is null and ${job.lastSafeStage} is null) or (${job.state} = 'retrying' and ${job.claimedBy} is null and ${job.nextRunAt} > ${job.createdAt} and ${job.terminalAt} is null and ${job.terminalOutcome} is null and ${job.safeErrorCode} in ('stage_transient','enrichment_transient','triage_transient','triage_timeout','eligibility_unavailable','recommendation_transient','persistence_contended') and ${job.lastSafeStage} in ('enrichment','triage','eligibility','recommendation')) or (${job.state} = 'completed' and ${job.claimedBy} is null and ${job.terminalAt} is not null and ${job.terminalOutcome} = 'completed' and ${job.safeErrorCode} is null) or (${job.state} = 'failed' and ${job.claimedBy} is null and ${job.terminalAt} is not null and ${job.terminalOutcome} = 'failed' and ((${job.safeErrorCode} = 'lease_retry_exhausted' and ${job.lastSafeStage} is null) or (${job.safeErrorCode} in ('stage_transient','enrichment_transient','triage_transient','triage_timeout','eligibility_unavailable','recommendation_transient','persistence_contended','retry_exhausted') and ${job.lastSafeStage} in ('enrichment','triage','eligibility','recommendation')))) or (${job.state} = 'cancelled' and ${job.claimedBy} is null and ${job.terminalAt} is not null and ${job.terminalOutcome} = 'cancelled' and ${job.safeErrorCode} = 'policy_revoked'))`),
+]);
 
 export const youtubeDiscoveryRankingHistory = pgTable(
   "youtube_discovery_ranking_history",

@@ -8,7 +8,7 @@ describe("YouTube Discovery worker adapter", () => {
     const events: unknown[] = [];
     await runWorkerAdapter(["discovery", "--once", "--worker-id=discovery-test"], {
       telemetry: { emit(event) { events.push(event); } },
-      runPoll: async () => ({ capability: "youtube.discovery", resultCode: "no_work", leaseRecovery: "none" }),
+      runPoll: async () => ({ capability: "youtube.discovery", executionKind: "query_run", resultCode: "no_work", leaseRecovery: "none" }),
     });
     expect(events).toEqual([expect.objectContaining({ capability: "youtube.discovery", resultCode: "no_work", principalClass: "system", leaseRecovery: "none" })]);
     expect(events.every(isOperationalTelemetryEvent)).toBe(true);

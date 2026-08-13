@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, test } from "vitest";
-import { aiUsageEvents, createPostgresAdminYoutubeDiscoveryPort, createSystemAuditActor, createUserAuditActor, createYoutubeDiscoveryPolicyVersion, createYoutubeDiscoveryQueryProposal, createYoutubeDiscoveryRun, claimNextYoutubeDiscoveryRun, finishYoutubeDiscoveryRun, retryYoutubeDiscoveryRun, youtubeDiscoveryCandidateReviewStates, youtubeDiscoveryCandidates, youtubeDiscoveryQueryProposals, youtubeDiscoveryRankingHistory, youtubeDiscoveryRuns } from "@xuyenviet/database";
-import { parseAdminYoutubeDiscoveryHealthOverview } from "@xuyenviet/contracts";
+import { aiUsageEvents, claimNextYoutubeDiscoveryCandidateJob, createPostgresAdminYoutubeDiscoveryPort, createSystemAuditActor, createUserAuditActor, createYoutubeDiscoveryPolicyVersion, createYoutubeDiscoveryQueryProposal, createYoutubeDiscoveryRun, claimNextYoutubeDiscoveryRun, finishYoutubeDiscoveryRun, persistYoutubeDiscoveryCandidates, retryYoutubeDiscoveryCandidateJob, retryYoutubeDiscoveryRun, youtubeDiscoveryCandidateJobs, youtubeDiscoveryCandidateReviewStates, youtubeDiscoveryCandidates, youtubeDiscoveryPolicyVersions, youtubeDiscoveryQueryProposals, youtubeDiscoveryRankingHistory, youtubeDiscoveryRuns } from "@xuyenviet/database";
+import { parseAdminYoutubeDiscoveryHealthOverview, type RequestPrincipal } from "@xuyenviet/contracts";
 import { eq, sql } from "drizzle-orm";
 import { resetTestDatabase, seedTestOperator, testDb } from "./helpers/db";
 
@@ -19,7 +19,7 @@ describe.sequential("YouTube Discovery Health projections", () => {
     const port = createPostgresAdminYoutubeDiscoveryPort(undefined, testDb);
 
     const overview = await port.healthOverview();
-    const groupId = `${proposal.id}:provider_rate_limited`;
+    const groupId = `${run.id}:provider_rate_limited`;
     const detail = await port.getHealthIncident(groupId, null);
 
     expect(overview).toMatchObject({ lastUpdatedAt: expect.any(String), policy: { enabled: true }, planning: { freshness: "unavailable", lastUpdatedAt: null }, latestQueryRun: { at: expect.any(String), lastUpdatedAt: expect.any(String), freshness: "current" }, querySchedule: { lastUpdatedAt: expect.any(String), freshness: "current" } });
@@ -91,6 +91,56 @@ describe.sequential("YouTube Discovery Health projections", () => {
     const overview = await createPostgresAdminYoutubeDiscoveryPort(undefined, testDb).healthOverview();
 
     expect(overview.throughput).toMatchObject({ discovered: 0, enriched: 0, triaged: 0, recommended: 0, lastUpdatedAt: expect.any(String), freshness: "stale" });
+  });
+
+  test("separates candidate job states from review backlog", async () => {
+    await seedTestOperator();
+    const policy = await createYoutubeDiscoveryPolicyVersion({ version: 1, isCurrent: true, policy: { maxRetryAttempts: 1 }, actor: createSystemAuditActor("system-youtube-discovery") }, testDb);
+    const proposal = await createYoutubeDiscoveryQueryProposal({ origin: "operator", reason: "operator_request", priority: 10, queryText: "Da Lat route", cadenceMinutes: 15, actor: createUserAuditActor({ userId: "operator", email: "operator@example.com" }) }, testDb);
+    const run = await createYoutubeDiscoveryRun({ policyVersionId: policy.id, queryProposalId: proposal.id }, testDb);
+    const claim = (await claimNextYoutubeDiscoveryRun({ workerId: "candidate-backlog" }, testDb)).claim;
+    if (!claim) throw new Error("expected run claim");
+    expect(await persistYoutubeDiscoveryCandidates(claim, [{ videoId: "abcDEF12345", canonicalUrl: "https://www.youtube.com/watch?v=abcDEF12345", resultOrdinal: 0 }], testDb)).toBe("completed");
+    const candidate = (await claimNextYoutubeDiscoveryCandidateJob({ workerId: "candidate-backlog" }, testDb)).claim;
+    if (!candidate) throw new Error("expected candidate claim");
+    expect(await retryYoutubeDiscoveryCandidateJob(candidate, "triage_transient", "triage", testDb)).toBe("retrying");
+    const overview = await createPostgresAdminYoutubeDiscoveryPort(undefined, testDb).healthOverview();
+    expect(overview.backlog).toMatchObject({ pending: 0, deferred: 0, candidateQueued: 0, candidateRetrying: 1, candidateRunning: 0 });
+    expect(run.id).toEqual(expect.any(String));
+  });
+
+  test("surfaces and clears a candidate-job incident by its opaque job identity", async () => {
+    await seedTestOperator();
+    const policy = await createYoutubeDiscoveryPolicyVersion({ version: 1, isCurrent: true, policy: { maxRetryAttempts: 1 }, actor: createSystemAuditActor("system-youtube-discovery") }, testDb);
+    const proposal = await createYoutubeDiscoveryQueryProposal({ origin: "operator", reason: "operator_request", priority: 10, queryText: "Da Lat route", cadenceMinutes: 15, actor: createUserAuditActor({ userId: "operator", email: "operator@example.com" }) }, testDb);
+    const run = await createYoutubeDiscoveryRun({ policyVersionId: policy.id, queryProposalId: proposal.id }, testDb);
+    const claim = (await claimNextYoutubeDiscoveryRun({ workerId: "candidate-incident-search" }, testDb)).claim!;
+    expect(await persistYoutubeDiscoveryCandidates(claim, [{ videoId: "abcDEF12345", canonicalUrl: "https://www.youtube.com/watch?v=abcDEF12345", resultOrdinal: 0 }], testDb)).toBe("completed");
+    expect(await finishYoutubeDiscoveryRun(claim, testDb)).toBe("completed");
+    const job = (await claimNextYoutubeDiscoveryCandidateJob({ workerId: "candidate-incident" }, testDb)).claim!;
+    expect(await retryYoutubeDiscoveryCandidateJob(job, "triage_transient", "triage", testDb, "triage_schema_invalid")).toBe("retrying");
+    await testDb.update(youtubeDiscoveryCandidateJobs).set({ nextRunAt: sql`clock_timestamp()` }).where(eq(youtubeDiscoveryCandidateJobs.id, job.id));
+    const retryJob = (await claimNextYoutubeDiscoveryCandidateJob({ workerId: "candidate-incident-retry" }, testDb)).claim!;
+    expect(await retryYoutubeDiscoveryCandidateJob(retryJob, "triage_transient", "triage", testDb, "triage_schema_invalid")).toBe("failed");
+    const port = createPostgresAdminYoutubeDiscoveryPort(undefined, testDb);
+    const groupId = `${job.id}:triage_schema_invalid`;
+    expect((await port.healthOverview()).incidents).toEqual(expect.arrayContaining([expect.objectContaining({ actionId: groupId, reason: "triage_schema_invalid" })]));
+    expect((await port.listActionRequired({ userId: "operator", email: "operator@example.com", roles: ["operator"], sessionId: "candidate-incident", authorizationVersion: 1 }, null)).items).toEqual(expect.arrayContaining([expect.objectContaining({ actionId: groupId, reason: "triage_schema_invalid" })]));
+    expect((await port.getHealthIncident(groupId, null))?.items).toEqual([expect.objectContaining({ runId: job.id, state: "failed", category: "triage_schema_invalid" })]);
+    await testDb.update(youtubeDiscoveryCandidateJobs).set({ state: "completed", terminalAt: new Date(), terminalOutcome: "completed", safeErrorCode: null, incidentCategory: null, claimedBy: null, claimedAt: null, leaseExpiresAt: null, fencingToken: null }).where(eq(youtubeDiscoveryCandidateJobs.id, job.id));
+    expect((await port.healthOverview()).incidents.some((item) => item.actionId === groupId)).toBe(false);
+    expect(run.id).toEqual(expect.any(String));
+  });
+
+  test("retains the candidate backlog threshold when toggling policy enablement", async () => {
+    await seedTestOperator();
+    await createYoutubeDiscoveryPolicyVersion({ version: 1, isCurrent: true, policy: { candidateBacklogThreshold: 17 }, actor: createSystemAuditActor("system-youtube-discovery") }, testDb);
+    const principal: RequestPrincipal = { userId: "operator", email: "operator@example.com", roles: ["operator"], sessionId: "health-policy", authorizationVersion: 1 };
+    const port = createPostgresAdminYoutubeDiscoveryPort(undefined, testDb);
+    await port.setEnabled(principal, false);
+    await port.setEnabled(principal, true);
+    const [current] = await testDb.select({ threshold: youtubeDiscoveryPolicyVersions.candidateBacklogThreshold, enabled: youtubeDiscoveryPolicyVersions.enabled }).from(youtubeDiscoveryPolicyVersions).where(eq(youtubeDiscoveryPolicyVersions.isCurrent, true));
+    expect(current).toEqual({ threshold: 17, enabled: true });
   });
 
   test("reports the schedule disabled when all query proposals are operator-paused", async () => {
@@ -206,7 +256,7 @@ describe.sequential("YouTube Discovery Health projections", () => {
 
     const port = createPostgresAdminYoutubeDiscoveryPort(undefined, testDb);
     const overview = await port.healthOverview();
-    const detail = await port.getHealthIncident(`${proposal.id}:provider_rate_limited`, null);
+    const detail = await port.getHealthIncident(`${run.id}:provider_rate_limited`, null);
 
     expect(overview.latestQueryRun).toMatchObject({ state: "retrying", nextRunAt: expect.any(String), lastUpdatedAt: expect.any(String), freshness: "current" });
     expect(detail?.items).toEqual([expect.objectContaining({ runId: run.id, state: "retrying", stage: "unavailable", phase: "retrying", nextRunAt: expect.any(String) })]);
@@ -214,7 +264,7 @@ describe.sequential("YouTube Discovery Health projections", () => {
 
   test.each(["triage_schema_invalid", "execution_terminal"] as const)("limits %s detail to the currently admitted incident episode", async (category) => {
     await seedTestOperator();
-    const policy = await createYoutubeDiscoveryPolicyVersion({ version: 1, isCurrent: true, policy: { maxRetryAttempts: 0 }, actor: createSystemAuditActor("system-youtube-discovery") }, testDb);
+    const policy = await createYoutubeDiscoveryPolicyVersion({ version: 1, isCurrent: true, policy: { maxRetryAttempts: 1 }, actor: createSystemAuditActor("system-youtube-discovery") }, testDb);
     const proposal = await createYoutubeDiscoveryQueryProposal({ origin: "operator", reason: "operator_request", priority: 10, queryText: "Da Lat route", cadenceMinutes: 15, actor: createUserAuditActor({ userId: "operator", email: "operator@example.com" }) }, testDb);
     const stale = await createYoutubeDiscoveryRun({ policyVersionId: policy.id, queryProposalId: proposal.id }, testDb);
     const staleClaim = (await claimNextYoutubeDiscoveryRun({ workerId: `stale-${category}` }, testDb)).claim;
@@ -227,15 +277,19 @@ describe.sequential("YouTube Discovery Health projections", () => {
     const currentIds: string[] = [];
     for (let index = 0; index < 2; index += 1) {
       const run = await createYoutubeDiscoveryRun({ policyVersionId: policy.id, queryProposalId: proposal.id }, testDb);
-      const claim = (await claimNextYoutubeDiscoveryRun({ workerId: `current-${category}-${index}` }, testDb)).claim;
+      let claim = (await claimNextYoutubeDiscoveryRun({ workerId: `current-${category}-${index}` }, testDb)).claim;
       if (!claim) throw new Error("expected current claim");
+      expect(await retryYoutubeDiscoveryRun(claim, category === "execution_terminal" ? undefined : category, testDb)).toBe("retrying");
+      await testDb.update(youtubeDiscoveryRuns).set({ nextRunAt: sql`clock_timestamp()` }).where(eq(youtubeDiscoveryRuns.id, claim.id));
+      claim = (await claimNextYoutubeDiscoveryRun({ workerId: `current-retry-${category}-${index}` }, testDb)).claim;
+      if (!claim) throw new Error("expected retry claim");
       expect(await retryYoutubeDiscoveryRun(claim, category === "execution_terminal" ? undefined : category, testDb)).toBe("failed");
       currentIds.push(run.id);
     }
 
-    const detail = await createPostgresAdminYoutubeDiscoveryPort(undefined, testDb).getHealthIncident(`${proposal.id}:${category}`, null);
+    const detail = await createPostgresAdminYoutubeDiscoveryPort(undefined, testDb).getHealthIncident(`${currentIds[0]!}:${category}`, null);
 
-    expect(detail?.items.map((item) => item.runId).sort()).toEqual(currentIds.sort());
+    expect(detail?.items.map((item) => item.runId)).toEqual([currentIds[0]]);
     expect(detail?.items).toEqual(expect.arrayContaining([expect.objectContaining({ state: "failed", stage: "unavailable", phase: "terminal", category })]));
   });
 

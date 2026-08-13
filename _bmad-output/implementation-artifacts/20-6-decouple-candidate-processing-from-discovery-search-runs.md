@@ -1,6 +1,6 @@
 ---
 story_id: 20-6
-status: ready-for-dev
+status: done
 created: 2026-08-13
 epic: 20
 ---
@@ -109,7 +109,28 @@ gpu4ai/gpt-5.6-terra
 
 - Created and validated from the approved 2026-08-13 course correction. No implementation, migration, database reset, test execution, or commit was performed while creating this guide.
 - The guide replaces query-level downstream retries with immutable-appearance candidate jobs, preserving query run history and all Discovery/Knowledge/manual-capture safety boundaries.
+- Implemented the fenced candidate-job queue, forward migration/backfill, candidate-first finite polling, appearance-scoped enrichment, candidate-job retries/audits/incidents, backpressure, and strict safe operational projections.
+- Verification passed: focused unit 341 tests; serial Discovery integrations candidates 14, execution 37, enrichment 8, triage 8, Health 19, and Action Queue 10; `pnpm typecheck`, `pnpm build`, and `git diff --check`. `pnpm lint` had 56 warnings and no errors.
 
 ### File List
 
 - _bmad-output/implementation-artifacts/20-6-decouple-candidate-processing-from-discovery-search-runs.md
+- apps/worker/src/adapters.ts
+- drizzle/migrations/0066_discovery_candidate_jobs.sql
+- drizzle/migrations/meta/_journal.json
+- packages/contracts/src/index.ts
+- packages/contracts/src/youtube-discovery/index.ts
+- packages/database/src/admin-youtube-discovery.ts
+- packages/database/src/schema.ts
+- packages/database/src/youtube-discovery/index.ts
+- packages/domain/src/youtube-discovery/policy.ts
+- packages/worker-domain/src/adapters.ts
+- packages/worker-domain/src/features/youtube-discovery/execution.ts
+- tests/admin-youtube-discovery-api.integration.test.ts
+- tests/admin-youtube-discovery-contract.test.ts
+- tests/youtube-discovery-action-required.integration.test.ts
+- tests/youtube-discovery-candidates.integration.test.ts
+- tests/youtube-discovery-enrichment.integration.test.ts
+- tests/youtube-discovery-execution.integration.test.ts
+- tests/youtube-discovery-health.integration.test.ts
+- tests/youtube-discovery-triage.integration.test.ts

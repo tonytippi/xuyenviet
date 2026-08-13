@@ -445,10 +445,11 @@ export type OperationalTelemetryEvent = {
   leaseRecovery?: "none" | "recovered" | "contended";
   leaseRecoveryCount?: number;
   providerRequestId?: string;
+  executionKind?: "query_run" | "candidate_job";
 };
 export type OperationalTelemetrySink = { emit(event: OperationalTelemetryEvent): void | Promise<void> };
 
-export type WorkerPollObservation = {
+type WorkerPollObservationBase = {
   capability: "knowledge.extraction" | "knowledge.ingestion" | "knowledge.indexing" | "knowledge.sampling" | "ai_ask.outbox" | "youtube.discovery";
   resultCode: "success" | "no_work" | "retry" | "failure" | "contended";
   durableId?: string;
@@ -459,6 +460,7 @@ export type WorkerPollObservation = {
   leaseRecovery?: "none" | "recovered" | "contended";
   leaseRecoveryCount?: number;
 };
+export type WorkerPollObservation = WorkerPollObservationBase & ({ capability: "youtube.discovery"; executionKind: "query_run" | "candidate_job" } | { capability: Exclude<WorkerPollObservationBase["capability"], "youtube.discovery">; executionKind?: never });
 
 const telemetryCapabilities = new Set(["ai_ask.stream", "ai_ask.provider", "knowledge.extraction", "knowledge.ingestion", "knowledge.indexing", "knowledge.sampling", "ai_ask.outbox", "youtube.discovery", "worker.startup", "worker.schema", "worker.drain", "worker.restart"]);
 const telemetryResultCodes = new Set(["success", "failure", "no_work", "retry", "draining", "restarted", "recovered", "contended"]);
@@ -478,7 +480,7 @@ export function isOperationalTelemetryEvent(event: unknown): event is Operationa
 function normalizeOperationalTelemetryEvent(event: unknown): OperationalTelemetryEvent | null {
   if (!event || typeof event !== "object") return null;
   const descriptors = Object.getOwnPropertyDescriptors(event);
-  const allowedKeys = new Set(["correlationId", "capability", "principalClass", "resultCode", "latencyMs", "durableId", "jobLagMs", "retryCount", "leaseRecovery", "leaseRecoveryCount", "providerRequestId"]);
+  const allowedKeys = new Set(["correlationId", "capability", "principalClass", "resultCode", "latencyMs", "durableId", "jobLagMs", "retryCount", "leaseRecovery", "leaseRecoveryCount", "providerRequestId", "executionKind"]);
   if (!Object.keys(descriptors).every((key) => allowedKeys.has(key))) return null;
   const values = Object.assign(Object.create(null), ...Object.entries(descriptors).map(([key, descriptor]) => ({ [key]: "value" in descriptor ? descriptor.value : undefined })));
   const candidateCorrelationId = values.correlationId;
@@ -492,6 +494,7 @@ function normalizeOperationalTelemetryEvent(event: unknown): OperationalTelemetr
   const leaseRecovery = values.leaseRecovery;
   const leaseRecoveryCount = values.leaseRecoveryCount;
   const providerRequestId = values.providerRequestId;
+  const executionKind = values.executionKind;
   const userCapability = capability === "ai_ask.stream" || capability === "ai_ask.provider";
   const valid = Object.values(descriptors).every((descriptor) => "value" in descriptor)
     && isTelemetryText(candidateCorrelationId)
@@ -505,13 +508,14 @@ function normalizeOperationalTelemetryEvent(event: unknown): OperationalTelemetr
     && (leaseRecovery === undefined || ["none", "recovered", "contended"].includes(leaseRecovery))
     && (leaseRecoveryCount === undefined || Number.isInteger(leaseRecoveryCount) && leaseRecoveryCount >= 0 && leaseRecoveryCount <= 10_000)
     && (leaseRecoveryCount === undefined || leaseRecovery === "recovered")
-    && (providerRequestId === undefined || isTelemetryText(providerRequestId));
+    && (providerRequestId === undefined || isTelemetryText(providerRequestId))
+    && (executionKind === undefined || executionKind === "query_run" || executionKind === "candidate_job");
   if (!valid) return null;
   // Do not pass caller-owned objects to a sink. A prototype toJSON or later
   // mutation must not influence the bounded object that is serialized.
   return Object.assign(Object.create(null), { correlationId: candidateCorrelationId, capability, principalClass, resultCode, latencyMs },
     durableId === undefined ? {} : { durableId }, jobLagMs === undefined ? {} : { jobLagMs }, retryCount === undefined ? {} : { retryCount },
-    leaseRecovery === undefined ? {} : { leaseRecovery }, leaseRecoveryCount === undefined ? {} : { leaseRecoveryCount }, providerRequestId === undefined ? {} : { providerRequestId },
+    leaseRecovery === undefined ? {} : { leaseRecovery }, leaseRecoveryCount === undefined ? {} : { leaseRecoveryCount }, providerRequestId === undefined ? {} : { providerRequestId }, executionKind === undefined ? {} : { executionKind },
   ) as OperationalTelemetryEvent;
 }
 

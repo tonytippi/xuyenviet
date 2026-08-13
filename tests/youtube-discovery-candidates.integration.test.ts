@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, test } from "vitest";
 import { and, eq, sql } from "drizzle-orm";
 
-import { auditEvents, claimNextYoutubeDiscoveryRun, createSystemAuditActor, createYoutubeDiscoveryPolicyVersion, createYoutubeDiscoveryQueryProposal, createYoutubeDiscoveryRun, createYoutubeCaptureEligibilityPort, persistYoutubeDiscoveryCandidates, sourceCaptureVersions, sources, youtubeDiscoveryAppearances, youtubeDiscoveryCandidates, youtubeDiscoveryRankingHistory, youtubeDiscoveryRuns } from "@xuyenviet/database";
+import { auditEvents, claimNextYoutubeDiscoveryCandidateJob, claimNextYoutubeDiscoveryRun, createSystemAuditActor, createYoutubeDiscoveryPolicyVersion, createYoutubeDiscoveryQueryProposal, createYoutubeDiscoveryRun, createYoutubeCaptureEligibilityPort, finishYoutubeDiscoveryCandidateJob, finishYoutubeDiscoveryRun, persistYoutubeDiscoveryCandidates, recoverExpiredYoutubeDiscoveryCandidateJobs, retainYoutubeDiscoveryRecords, sourceCaptureVersions, sources, youtubeDiscoveryAppearances, youtubeDiscoveryCandidateJobs, youtubeDiscoveryCandidates, youtubeDiscoveryRankingHistory, youtubeDiscoveryRuns } from "@xuyenviet/database";
 import { createUserAuditActor } from "@xuyenviet/database";
 import { youtubeCaptureCompatibilityForMediaResolution } from "@xuyenviet/domain";
 import { resetTestDatabase, seedTestOperator, testDb } from "./helpers/db";
@@ -27,6 +27,7 @@ describe.sequential("YouTube Discovery candidate persistence", () => {
     expect(await persistYoutubeDiscoveryCandidates(claim, results, testDb)).toBe("completed");
     await expect(testDb.select().from(youtubeDiscoveryCandidates)).resolves.toHaveLength(25);
     await expect(testDb.select().from(youtubeDiscoveryAppearances)).resolves.toHaveLength(25);
+    await expect(testDb.select().from(youtubeDiscoveryCandidateJobs)).resolves.toHaveLength(25);
     await expect(testDb.select().from(youtubeDiscoveryRankingHistory)).resolves.toHaveLength(25);
   });
 
@@ -38,7 +39,45 @@ describe.sequential("YouTube Discovery candidate persistence", () => {
     expect(await Promise.all([persistYoutubeDiscoveryCandidates(first.claim, [candidate("abcDEF12345")], testDb), persistYoutubeDiscoveryCandidates(secondClaim, [candidate("abcDEF12345")], testDb)])).toEqual(["completed", "completed"]);
     await expect(testDb.select().from(youtubeDiscoveryCandidates)).resolves.toHaveLength(1);
     await expect(testDb.select().from(youtubeDiscoveryAppearances)).resolves.toHaveLength(2);
+    await expect(testDb.select().from(youtubeDiscoveryCandidateJobs)).resolves.toHaveLength(2);
     await expect(testDb.select().from(youtubeDiscoveryRankingHistory)).resolves.toHaveLength(2);
+  });
+
+  test("retains candidates only after their terminal jobs are removed", async () => {
+    const { claim } = await claimedRun();
+    expect(await persistYoutubeDiscoveryCandidates(claim, [candidate("abcDEF12345")], testDb)).toBe("completed");
+    const [stored] = await testDb.select({ id: youtubeDiscoveryCandidates.id }).from(youtubeDiscoveryCandidates);
+    await testDb.update(youtubeDiscoveryCandidates).set({ updatedAt: new Date(0) }).where(eq(youtubeDiscoveryCandidates.id, stored!.id));
+
+    expect(await retainYoutubeDiscoveryRecords(testDb)).toBe(0);
+    await expect(testDb.select().from(youtubeDiscoveryCandidates)).resolves.toHaveLength(1);
+
+    const candidateClaim = (await claimNextYoutubeDiscoveryCandidateJob({ workerId: "retention-worker" }, testDb)).claim;
+    expect(candidateClaim).not.toBeNull();
+    expect(await finishYoutubeDiscoveryCandidateJob(candidateClaim!, testDb)).toBe("completed");
+
+    expect(await retainYoutubeDiscoveryRecords(testDb)).toBe(1);
+    await expect(testDb.select().from(youtubeDiscoveryCandidateJobs)).resolves.toEqual([]);
+    await expect(testDb.select().from(youtubeDiscoveryAppearances)).resolves.toEqual([]);
+    await expect(testDb.select().from(youtubeDiscoveryCandidates)).resolves.toEqual([]);
+  });
+
+  test("honors candidate-job concurrency after policy admission", async () => {
+    await seedTestOperator();
+    const policy = await createYoutubeDiscoveryPolicyVersion({ version: 1, isCurrent: true, policy: { maxConcurrentRuns: 1 }, actor: createSystemAuditActor("system-youtube-discovery") }, testDb);
+    const proposal = await createYoutubeDiscoveryQueryProposal({ origin: "operator", reason: "operator_request", priority: 50, queryText: "Da Lat route", cadenceMinutes: 15, actor: createUserAuditActor({ userId: "operator", email: "operator@example.com" }) }, testDb);
+    const run = await createYoutubeDiscoveryRun({ policyVersionId: policy.id, queryProposalId: proposal.id }, testDb);
+    const claim = (await claimNextYoutubeDiscoveryRun({ workerId: "candidate-concurrency-first" }, testDb)).claim!;
+    expect(await persistYoutubeDiscoveryCandidates(claim, [candidate("abcDEF12345")], testDb)).toBe("completed");
+    expect(await finishYoutubeDiscoveryRun(claim, testDb)).toBe("completed");
+    await createYoutubeDiscoveryRun({ policyVersionId: policy.id, queryProposalId: proposal.id }, testDb);
+    const secondClaim = (await claimNextYoutubeDiscoveryRun({ workerId: "candidate-concurrency-run" }, testDb)).claim!;
+    expect(await persistYoutubeDiscoveryCandidates(secondClaim, [candidate("zyxWV987654")], testDb)).toBe("completed");
+
+    const first = await claimNextYoutubeDiscoveryCandidateJob({ workerId: "candidate-concurrency-a" }, testDb);
+    expect(first.claim).not.toBeNull();
+    expect((await claimNextYoutubeDiscoveryCandidateJob({ workerId: "candidate-concurrency-b" }, testDb)).claim).toBeNull();
+    expect(run.id).toBeTruthy();
   });
 
   test("fences a revoked claimant after provider work without graph writes and records one terminal audit", async () => {
@@ -50,6 +89,18 @@ describe.sequential("YouTube Discovery candidate persistence", () => {
     await expect(testDb.select().from(youtubeDiscoveryRankingHistory)).resolves.toEqual([]);
     await expect(testDb.select().from(auditEvents).where(and(eq(auditEvents.targetType, "youtube_discovery_run_terminal"), eq(auditEvents.targetId, run.id)))).resolves.toHaveLength(1);
     expect(policy.id).toBeTruthy();
+  });
+
+  test("recovers an expired candidate lease as terminal without an execution stage", async () => {
+    const { claim } = await claimedRun();
+    expect(await persistYoutubeDiscoveryCandidates(claim, [candidate("abcDEF12345")], testDb)).toBe("completed");
+    await testDb.update(youtubeDiscoveryCandidateJobs).set({ maxRetryAttempts: 0 });
+    const job = (await claimNextYoutubeDiscoveryCandidateJob({ workerId: "expired-candidate" }, testDb)).claim;
+    expect(job).not.toBeNull();
+    await testDb.update(youtubeDiscoveryCandidateJobs).set({ claimedAt: new Date(0), leaseExpiresAt: new Date(1) }).where(eq(youtubeDiscoveryCandidateJobs.id, job!.id));
+
+    expect(await recoverExpiredYoutubeDiscoveryCandidateJobs(testDb)).toMatchObject({ count: 1, terminalCount: 1, contended: false });
+    await expect(testDb.select({ state: youtubeDiscoveryCandidateJobs.state, terminalOutcome: youtubeDiscoveryCandidateJobs.terminalOutcome, safeErrorCode: youtubeDiscoveryCandidateJobs.safeErrorCode, lastSafeStage: youtubeDiscoveryCandidateJobs.lastSafeStage }).from(youtubeDiscoveryCandidateJobs).where(eq(youtubeDiscoveryCandidateJobs.id, job!.id))).resolves.toEqual([{ state: "failed", terminalOutcome: "failed", safeErrorCode: "lease_retry_exhausted", lastSafeStage: null }]);
   });
 
   test("rolls back graph writes when the lease expires after the first candidate write", async () => {

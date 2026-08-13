@@ -452,7 +452,7 @@ development_status:
   20-3-deliver-automation-health-and-safe-incident-detail: done
   20-4-control-discovery-enablement-safely: done
   20-5-verify-control-tower-accessibility-and-operational-boundaries: done
-  20-6-decouple-candidate-processing-from-discovery-search-runs: ready-for-dev
+  20-6-decouple-candidate-processing-from-discovery-search-runs: done
   epic-20-retrospective: optional
 
   # 2026-08-13: Canonical dispatch lives at _bmad-output/specs/spec-epic-21.

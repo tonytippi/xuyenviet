@@ -25,7 +25,7 @@ export async function runWorkerAdapter(argv: string[], options: { telemetry?: Op
     for (const item of Array.isArray(observation) ? observation : [observation]) emitPoll(options.telemetry, item, startedAt);
     return Array.isArray(observation) ? observation.at(-1)! : observation;
   } catch (error) {
-    emitPoll(options.telemetry, { capability: capabilityFor(kind), resultCode: "failure" }, startedAt);
+    emitPoll(options.telemetry, kind === "discovery" ? { capability: "youtube.discovery", executionKind: "query_run", resultCode: "failure" } : { capability: capabilityFor(kind) as Exclude<WorkerPollObservation["capability"], "youtube.discovery">, resultCode: "failure" }, startedAt);
     throw error;
   }
 }
@@ -38,6 +38,7 @@ function emitPoll(sink: OperationalTelemetrySink | undefined, observation: Worke
     ...(observation.jobLagMs === undefined ? {} : { jobLagMs: Math.min(Math.max(0, Math.trunc(observation.jobLagMs)), 31_536_000_000) }), ...(observation.retryCount === undefined ? {} : { retryCount: observation.retryCount }),
     ...(observation.leaseRecovery ? { leaseRecovery: observation.leaseRecovery } : {}),
     ...(observation.leaseRecoveryCount === undefined ? {} : { leaseRecoveryCount: observation.leaseRecoveryCount }),
+    ...(observation.executionKind ? { executionKind: observation.executionKind } : {}),
   };
   if (!isOperationalTelemetryEvent(event)) return;
   emitOperationalTelemetry(sink, event);

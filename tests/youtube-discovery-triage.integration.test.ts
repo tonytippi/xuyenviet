@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, test } from "vitest";
 import { eq } from "drizzle-orm";
 
-import { aiGatewayModels, aiUsageEvents, claimNextYoutubeDiscoveryRun, createSystemAuditActor, createUserAuditActor, createYoutubeDiscoveryPolicyVersion, createYoutubeDiscoveryQueryProposal, createYoutubeDiscoveryRun, getYoutubeDiscoveryTriageBundle, persistYoutubeDiscoveryCandidates, persistYoutubeDiscoveryEnrichment, persistYoutubeDiscoveryTriage, retainYoutubeDiscoveryRecords, selectYoutubeDiscoveryTriageModel, youtubeDiscoveryCandidates, youtubeDiscoveryCommentSignals, youtubeDiscoveryRuns, youtubeDiscoveryTriages } from "@xuyenviet/database";
+import { aiGatewayModels, aiUsageEvents, claimNextYoutubeDiscoveryCandidateJob, claimNextYoutubeDiscoveryRun, createSystemAuditActor, createUserAuditActor, createYoutubeDiscoveryPolicyVersion, createYoutubeDiscoveryQueryProposal, createYoutubeDiscoveryRun, finishYoutubeDiscoveryCandidateJob, getYoutubeDiscoveryTriageBundle, persistYoutubeDiscoveryCandidates, persistYoutubeDiscoveryEnrichment, persistYoutubeDiscoveryTriage, retainYoutubeDiscoveryRecords, selectYoutubeDiscoveryTriageModel, youtubeDiscoveryCandidates, youtubeDiscoveryCommentSignals, youtubeDiscoveryRuns, youtubeDiscoveryTriages } from "@xuyenviet/database";
 import { resetTestDatabase, seedTestOperator, testDb } from "./helpers/db";
 
 const videoId = "abcDEF12345";
@@ -100,6 +100,8 @@ describe.sequential("YouTube Discovery metadata triage persistence", () => {
     const model = await insertModel();
     expect(await persistYoutubeDiscoveryTriage(claim, { candidateId, status: "succeeded", assessment: { ...assessment, signals: [...assessment.signals] }, model, provider: "ai_gateway", modelName: model.gatewayModelName, latencyMs: 12 }, testDb)).toBe("completed");
     await testDb.update(youtubeDiscoveryCandidates).set({ updatedAt: new Date(0) }).where(eq(youtubeDiscoveryCandidates.id, candidateId));
+    const candidateClaim = (await claimNextYoutubeDiscoveryCandidateJob({ workerId: "triage-retention" }, testDb)).claim!;
+    expect(await finishYoutubeDiscoveryCandidateJob(candidateClaim, testDb)).toBe("completed");
     expect(await retainYoutubeDiscoveryRecords(testDb)).toBe(1);
     await expect(testDb.select().from(youtubeDiscoveryTriages)).resolves.toEqual([]);
     await expect(testDb.select().from(youtubeDiscoveryCandidates)).resolves.toEqual([]);

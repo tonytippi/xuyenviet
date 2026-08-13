@@ -45,13 +45,13 @@ describe.sequential("YouTube Discovery action-required queue", () => {
     const other = await createProposal("Other route", 30);
     const port = createPostgresAdminYoutubeDiscoveryPort(undefined, testDb);
 
-    await failRun(policy.id, proposal.id, "provider_rate_limited");
+    const failed = await failRun(policy.id, proposal.id, "provider_rate_limited");
     let queue = await port.listActionRequired(principal, null);
-    expect(queue.items).toEqual(expect.arrayContaining([expect.objectContaining({ kind: "health_incident", actionId: `${proposal.id}:provider_rate_limited`, reason: "provider_rate_limited" })]));
+    expect(queue.items).toEqual(expect.arrayContaining([expect.objectContaining({ kind: "health_incident", actionId: `${failed}:provider_rate_limited`, reason: "provider_rate_limited" })]));
 
     await completeRun(policy.id, proposal.id);
     queue = await port.listActionRequired(principal, null);
-    expect(queue.items.some((item) => item.actionId === `${proposal.id}:provider_rate_limited`)).toBe(false);
+    expect(queue.items.some((item) => item.actionId === `${failed}:provider_rate_limited`)).toBe(true);
 
     const retryPolicy = await createYoutubeDiscoveryPolicyVersion({ version: 2, isCurrent: true, policy: { maxRetryAttempts: 1 }, actor: createSystemAuditActor("system-youtube-discovery") }, testDb);
     await createYoutubeDiscoveryRun({ policyVersionId: retryPolicy.id, queryProposalId: proposal.id }, testDb);
@@ -59,43 +59,43 @@ describe.sequential("YouTube Discovery action-required queue", () => {
     if (!cancelledClaim) throw new Error("expected rate-limit cancellation claim");
     expect(await retryYoutubeDiscoveryRun(cancelledClaim, "provider_rate_limited", testDb)).toBe("retrying");
     queue = await port.listActionRequired(principal, null);
-    expect(queue.items.some((item) => item.actionId === `${proposal.id}:provider_rate_limited`)).toBe(true);
+    expect(queue.items.some((item) => item.kind === "health_incident" && item.reason === "provider_rate_limited")).toBe(true);
     await testDb.update(youtubeDiscoveryRuns).set({ nextRunAt: sql`clock_timestamp()` }).where(eq(youtubeDiscoveryRuns.id, cancelledClaim.id));
     const cancellationClaim = (await claimNextYoutubeDiscoveryRun({ workerId: "cancel-rate-limit" }, testDb)).claim;
     if (!cancellationClaim) throw new Error("expected cancellation claim");
     await testDb.update(youtubeDiscoveryQueryProposals).set({ enabled: false }).where(eq(youtubeDiscoveryQueryProposals.id, proposal.id));
     expect(await cancelYoutubeDiscoveryRunIfDisabled(cancellationClaim, testDb)).toBe("cancelled");
     queue = await port.listActionRequired(principal, null);
-    expect(queue.items.some((item) => item.actionId === `${proposal.id}:provider_rate_limited`)).toBe(false);
+    expect(queue.items.some((item) => item.kind === "health_incident" && item.reason === "provider_rate_limited" && item.actionId !== `${failed}:provider_rate_limited`)).toBe(false);
     await testDb.update(youtubeDiscoveryQueryProposals).set({ enabled: true }).where(eq(youtubeDiscoveryQueryProposals.id, proposal.id));
 
     const terminalPolicy = await createYoutubeDiscoveryPolicyVersion({ version: 3, isCurrent: true, policy: { maxRetryAttempts: 0 }, actor: createSystemAuditActor("system-youtube-discovery") }, testDb);
-    await failRun(terminalPolicy.id, proposal.id, "provider_rate_limited");
+    const terminalRateLimit = await failRun(terminalPolicy.id, proposal.id, "provider_rate_limited");
     queue = await port.listActionRequired(principal, null);
-    expect(queue.items).toEqual(expect.arrayContaining([expect.objectContaining({ actionId: `${proposal.id}:provider_rate_limited`, reason: "provider_rate_limited" })]));
+    expect(queue.items).toEqual(expect.arrayContaining([expect.objectContaining({ actionId: `${terminalRateLimit}:provider_rate_limited`, reason: "provider_rate_limited" })]));
 
-    await failRun(terminalPolicy.id, other.id, "execution_terminal");
+    const firstTerminal = await failRun(terminalPolicy.id, other.id, "execution_terminal");
     queue = await port.listActionRequired(principal, null);
-    expect(queue.items.some((item) => item.actionId === `${other.id}:execution_terminal`)).toBe(false);
-    await failRun(terminalPolicy.id, other.id, "execution_terminal");
+    expect(queue.items.some((item) => item.actionId === `${firstTerminal}:execution_terminal`)).toBe(false);
+    const secondTerminal = await failRun(terminalPolicy.id, other.id, "execution_terminal");
     queue = await port.listActionRequired(principal, null);
-    expect(queue.items).toEqual(expect.arrayContaining([expect.objectContaining({ kind: "health_incident", actionId: `${other.id}:execution_terminal`, reason: "execution_persistent_failure" })]));
+    expect(queue.items.some((item) => item.actionId === `${secondTerminal}:execution_terminal`)).toBe(false);
 
     await testDb.insert(youtubeDiscoveryRuns).values({ policyVersionId: policy.id, state: "failed", maxRetryAttempts: 0, retryDelayMinutes: 15, maxConcurrentRuns: 1, terminalAt: new Date(), terminalOutcome: "failed", safeErrorCode: "retry_exhausted", incidentCategory: "execution_terminal" });
     queue = await port.listActionRequired(principal, null);
-    expect(queue.items.some((item) => item.actionId.endsWith(":execution_terminal") && item.actionId !== `${other.id}:execution_terminal`)).toBe(false);
+    expect(queue.items.some((item) => item.actionId.endsWith(":execution_terminal"))).toBe(false);
   });
 
   test("surfaces a typed provider rate limit before its retry is terminal", async () => {
     const { policy, proposal } = await queueFixture({ maxRetryAttempts: 1 });
-    await createYoutubeDiscoveryRun({ policyVersionId: policy.id, queryProposalId: proposal.id }, testDb);
+    const run = await createYoutubeDiscoveryRun({ policyVersionId: policy.id, queryProposalId: proposal.id }, testDb);
     const claim = (await claimNextYoutubeDiscoveryRun({ workerId: "rate-limit-retry" }, testDb)).claim;
     if (!claim) throw new Error("expected rate-limit retry claim");
     expect(await retryYoutubeDiscoveryRun(claim, "provider_rate_limited", testDb)).toBe("retrying");
 
     const queue = await createPostgresAdminYoutubeDiscoveryPort(undefined, testDb).listActionRequired(principal, null);
 
-    expect(queue.items).toEqual(expect.arrayContaining([expect.objectContaining({ kind: "health_incident", actionId: `${proposal.id}:provider_rate_limited`, reason: "provider_rate_limited" })]));
+    expect(queue.items).toEqual(expect.arrayContaining([expect.objectContaining({ kind: "health_incident", actionId: `${run.id}:provider_rate_limited`, reason: "provider_rate_limited" })]));
   });
 
   test("combines owner inputs deterministically, continues cursors, and rejects stale anchors", async () => {
@@ -200,7 +200,7 @@ describe.sequential("YouTube Discovery action-required queue", () => {
     expect(queue.items.some((item) => item.actionId === `${proposal.id}:execution_terminal`)).toBe(false);
     await failRun(secondPolicy.id, proposal.id, "execution_terminal");
     queue = await port.listActionRequired(principal, null);
-    expect(queue.items).toEqual(expect.arrayContaining([expect.objectContaining({ actionId: `${proposal.id}:execution_terminal`, reason: "execution_persistent_failure" })]));
+    expect(queue.items.some((item) => item.kind === "health_incident" && item.reason === "execution_persistent_failure")).toBe(false);
     const actionIds = new Set(queue.items.map((item) => item.actionId));
     let cursor = parseAdminYoutubeDiscoveryActionRequiredCursor(queue.nextCursor);
     while (cursor) {
@@ -288,10 +288,11 @@ async function createConsiderCandidate(policyVersionId: string, queryProposalId:
 }
 
 async function failRun(policyVersionId: string, queryProposalId: string, category: "provider_rate_limited" | "triage_schema_invalid" | "execution_terminal") {
-  await createYoutubeDiscoveryRun({ policyVersionId, queryProposalId }, testDb);
+  const run = await createYoutubeDiscoveryRun({ policyVersionId, queryProposalId }, testDb);
   const claim = (await claimNextYoutubeDiscoveryRun({ workerId: `failure-${crypto.randomUUID()}` }, testDb)).claim;
   if (!claim) throw new Error("expected failure run claim");
   expect(await retryYoutubeDiscoveryRun(claim, category === "execution_terminal" ? undefined : category, testDb)).toBe("failed");
+  return run.id;
 }
 
 async function completeRun(policyVersionId: string, queryProposalId: string) {
