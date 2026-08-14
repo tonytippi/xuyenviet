@@ -8,6 +8,7 @@ _bmad/
 !.agents/skills/chief-of-staff/SKILL.md
 .opencode/
 opencode.jsonc
+.worker-telemetry-*/
 
 node_modules/
 .next/
