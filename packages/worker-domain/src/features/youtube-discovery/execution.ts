@@ -1,4 +1,4 @@
-import { cancelYoutubeDiscoveryCandidateJobIfDisabled, cancelYoutubeDiscoveryRunIfDisabled, claimNextYoutubeDiscoveryCandidateJob, claimNextYoutubeDiscoveryRun, claimYoutubeDiscoveryPlanning, completeYoutubeDiscoveryTriage, finishYoutubeDiscoveryCandidateJob, finishYoutubeDiscoveryRun, getYoutubeDiscoveryRecommendationBundle, getYoutubeDiscoveryRunQuery, getYoutubeDiscoveryTriageBundle, parseYoutubeDiscoveryTriageAssessment, persistYoutubeDiscoveryCandidates, persistYoutubeDiscoveryEnrichment, persistYoutubeDiscoveryRecommendation, persistYoutubeDiscoveryTriage, refreshYoutubeDiscoverySystemProposals, retainYoutubeDiscoveryRecords, retryYoutubeDiscoveryCandidateJob, retryYoutubeDiscoveryRun, scheduleYoutubeDiscoveryDueRuns, selectYoutubeDiscoveryTriageModel, type YoutubeDiscoveryCandidateJobSafeErrorCode, type YoutubeDiscoveryRunSafeErrorCode } from "@xuyenviet/database";
+import { cancelYoutubeDiscoveryCandidateJobIfDisabled, cancelYoutubeDiscoveryRunIfDisabled, claimNextYoutubeDiscoveryCandidateJob, claimNextYoutubeDiscoveryRun, claimYoutubeDiscoveryPlanning, completeYoutubeDiscoveryTriage, finishYoutubeDiscoveryCandidateJob, finishYoutubeDiscoveryRun, getYoutubeDiscoveryRecommendationBundle, getYoutubeDiscoveryRunQuery, getYoutubeDiscoveryTriageBundle, parseYoutubeDiscoveryTriageAssessment, persistYoutubeDiscoveryCandidates, persistYoutubeDiscoveryEnrichment, persistYoutubeDiscoveryRecommendation, persistYoutubeDiscoveryTriage, refreshYoutubeDiscoverySystemProposals, retainYoutubeDiscoveryRecords, retryYoutubeDiscoveryCandidateJob, retryYoutubeDiscoveryRun, scheduleYoutubeDiscoveryDueRuns, selectYoutubeDiscoveryTriageModel, YoutubeDiscoveryTriageBundleReadError, type YoutubeDiscoveryCandidateJobSafeErrorCode, type YoutubeDiscoveryRunSafeErrorCode } from "@xuyenviet/database";
 import type { WorkerPollObservation } from "@xuyenviet/contracts";
 import { createUnavailableAiAskDiscoveryQuerySignalPort, createUnavailableKnowledgeDiscoveryQuerySignalPort, type AiAskDiscoveryQuerySignalPort, type DiscoveryQuerySignalPortResult, type KnowledgeDiscoveryQuerySignalPort, type YoutubeCaptureEligibilityPort } from "@xuyenviet/domain";
 import { searchYoutubeVideos } from "./youtube-search";
@@ -18,6 +18,7 @@ let youtubeCaptureEligibilityPort: YoutubeCaptureEligibilityPort | undefined;
 let youtubeSearch: typeof searchYoutubeVideos = searchYoutubeVideos;
 let youtubeEnrichment: typeof enrichYoutubeVideo = enrichYoutubeVideo;
 let youtubeTriageCompletion: typeof completeYoutubeDiscoveryTriage = completeYoutubeDiscoveryTriage;
+let youtubeTriagePersistence: typeof persistYoutubeDiscoveryTriage = persistYoutubeDiscoveryTriage;
 let youtubeDataApiKey: string | undefined;
 
 export async function runYoutubeDiscoveryPoll(workerId: string): Promise<WorkerPollObservation> {
@@ -84,8 +85,8 @@ async function executeCandidateJob(claim: NonNullable<Awaited<ReturnType<typeof 
     if (await persistYoutubeDiscoveryEnrichment(claim, enrichment) !== "completed") throw new Error("persistence_contended");
     stage = "triage";
     const triage = await runCandidateTriage(claim, controller, deadlineAt);
-    if (triage === "cancelled") return finishCandidateObservation(claim, await finishYoutubeDiscoveryCandidateJob(claim));
-    if (triage !== "completed") throw new Error(triage);
+    if (triage.outcome === "cancelled") return finishCandidateObservation(claim, await finishYoutubeDiscoveryCandidateJob(claim));
+    if (triage.outcome !== "completed") throw new CandidateStageError(triage.outcome, triage.failurePoint);
     stage = "eligibility";
     const bundle = await getYoutubeDiscoveryRecommendationBundle(claim, claim.videoId);
     if (bundle === "completed") return finishCandidateObservation(claim, await finishYoutubeDiscoveryCandidateJob(claim));
@@ -108,34 +109,44 @@ async function executeCandidateJob(claim: NonNullable<Awaited<ReturnType<typeof 
     if (message === "candidate_cancelled") return observationFor("candidate_job", claim, "success");
     code = candidateRetryCode(message);
     const disposition = await retryYoutubeDiscoveryCandidateJob(claim, code, stage, undefined, message === "rate_limited" ? "provider_rate_limited" : message === "schema_invalid" ? "triage_schema_invalid" : null);
-    return finishCandidateObservation(claim, disposition, code, stage);
+    return finishCandidateObservation(claim, disposition, code, stage, error instanceof CandidateStageError ? error.failurePoint : stage === "triage" ? "triage_unclassified" : undefined, error instanceof CandidateStageError ? error.failureDetail : undefined);
   }
 }
 
 async function requireCandidateActive(claim: NonNullable<Awaited<ReturnType<typeof claimNextYoutubeDiscoveryCandidateJob>>["claim"]>) { const active = await cancelYoutubeDiscoveryCandidateJobIfDisabled(claim); if (active === "cancelled") throw new Error("candidate_cancelled"); if (active !== "active") throw new Error("persistence_contended"); }
 function candidateRetryCode(error: string): Exclude<YoutubeDiscoveryCandidateJobSafeErrorCode, "retry_exhausted" | "lease_retry_exhausted" | "policy_revoked"> { if (error === "enrichment_transient") return "enrichment_transient"; if (error === "triage_timeout") return "triage_timeout"; if (error === "triage_transient" || error === "schema_invalid" || error === "rate_limited") return "triage_transient"; if (error === "eligibility_unavailable") return "eligibility_unavailable"; if (error === "recommendation_transient") return "recommendation_transient"; if (error === "persistence_contended") return "persistence_contended"; return "stage_transient"; }
-function finishCandidateObservation(claim: NonNullable<Awaited<ReturnType<typeof claimNextYoutubeDiscoveryCandidateJob>>["claim"]>, disposition: Awaited<ReturnType<typeof finishYoutubeDiscoveryCandidateJob>> | Awaited<ReturnType<typeof retryYoutubeDiscoveryCandidateJob>>, code?: YoutubeDiscoveryCandidateJobSafeErrorCode, stage?: CandidateDiagnosticStage) { return observationFor("candidate_job", claim, disposition === "completed" || disposition === "cancelled" ? "success" : disposition === "retrying" ? "retry" : disposition === "failed" ? "failure" : "contended", disposition === "retrying" || disposition === "failed" ? code : undefined, stage); }
+function finishCandidateObservation(claim: NonNullable<Awaited<ReturnType<typeof claimNextYoutubeDiscoveryCandidateJob>>["claim"]>, disposition: Awaited<ReturnType<typeof finishYoutubeDiscoveryCandidateJob>> | Awaited<ReturnType<typeof retryYoutubeDiscoveryCandidateJob>>, code?: YoutubeDiscoveryCandidateJobSafeErrorCode, stage?: CandidateDiagnosticStage, failurePoint?: string, failureDetail?: string) { return observationFor("candidate_job", claim, disposition === "completed" || disposition === "cancelled" ? "success" : disposition === "retrying" ? "retry" : disposition === "failed" ? "failure" : "contended", disposition === "retrying" || disposition === "failed" ? code : undefined, stage, failurePoint, failureDetail); }
 
-async function runCandidateTriage(claim: NonNullable<Awaited<ReturnType<typeof claimNextYoutubeDiscoveryCandidateJob>>["claim"]>, controller: AbortController, deadlineAt: number): Promise<"completed" | "cancelled" | "contended" | "triage_timeout" | "triage_transient" | "schema_invalid" | "rate_limited"> {
-  await requireCandidateActive(claim);
-  const bundle = await getYoutubeDiscoveryTriageBundle(claim, claim.videoId);
-  if (bundle === "succeeded") return "completed";
-  if (bundle === "cancelled" || bundle === "contended") return bundle;
-  const model = await selectYoutubeDiscoveryTriageModel();
-  if (!model) return (await persistYoutubeDiscoveryTriage(claim, { candidateId: bundle.candidateId, status: "no_eligible_model", model: null, provider: "unavailable", modelName: "unavailable", latencyMs: null, errorCode: "no_eligible_model" })) === "completed" ? "triage_transient" : "contended";
-  await requireCandidateActive(claim);
-  if (deadlineAt - Date.now() < triageTimeoutMs) return "triage_timeout";
+type CandidateTriageFailurePoint = "triage_guard_before_bundle" | "triage_bundle_read" | "triage_bundle_guard" | "triage_bundle_candidate_lookup" | "triage_bundle_existing_lookup" | "triage_bundle_signals_lookup" | "triage_bundle_serialize" | "triage_model_select" | "triage_guard_before_gateway" | "triage_gateway_call" | "triage_guard_after_gateway" | "triage_persist_write" | "triage_response" | "triage_unclassified";
+type CandidateTriageResult = { outcome: "completed" | "cancelled" | "contended" | "persistence_contended" | "triage_timeout" | "triage_transient" | "schema_invalid" | "rate_limited"; failurePoint?: CandidateTriageFailurePoint };
+class CandidateStageError extends Error { constructor(message: string, readonly failurePoint?: CandidateTriageResult["failurePoint"], readonly failureDetail?: string) { super(message); } }
+
+async function runCandidateTriage(claim: NonNullable<Awaited<ReturnType<typeof claimNextYoutubeDiscoveryCandidateJob>>["claim"]>, controller: AbortController, deadlineAt: number): Promise<CandidateTriageResult> {
+  await triageStep("triage_guard_before_bundle", () => requireCandidateActive(claim));
+  const bundle = await triageStep("triage_bundle_read", () => getYoutubeDiscoveryTriageBundle(claim, claim.videoId));
+  if (bundle === "succeeded") return { outcome: "completed" };
+  if (bundle === "cancelled") return { outcome: "cancelled" };
+  if (bundle === "contended") return { outcome: "contended", failurePoint: "triage_bundle_read" };
+  const model = await triageStep("triage_model_select", () => selectYoutubeDiscoveryTriageModel());
+  if (!model) return (await triageStep("triage_persist_write", () => youtubeTriagePersistence(claim, { candidateId: bundle.candidateId, status: "no_eligible_model", model: null, provider: "unavailable", modelName: "unavailable", latencyMs: null, errorCode: "no_eligible_model" }))) === "completed" ? { outcome: "triage_transient", failurePoint: "triage_model_select" } : { outcome: "persistence_contended", failurePoint: "triage_persist_write" };
+  await triageStep("triage_guard_before_gateway", () => requireCandidateActive(claim));
+  if (deadlineAt - Date.now() < triageTimeoutMs) return { outcome: "triage_timeout", failurePoint: "triage_gateway_call" };
   const startedAt = Date.now();
-  const response = await raceWithDeadline(youtubeTriageCompletion({ model: model.gatewayModelName, abortSignal: controller.signal, messages: [{ role: "system", content: "Return strict JSON only with exactly relevanceScore, expectedValueScore, freshnessFitScore, commercialRiskScore, duplicateRiskScore, signals. Scores are finite 0..1. signals may contain only supplied signal codes, without duplicates. Do not include explanation, recommendation, or any other key." }, { role: "user", content: JSON.stringify({ query: bundle.queryText, candidate: bundle.candidate, signals: bundle.signals }) }] }), controller, Math.min(deadlineAt, startedAt + triageTimeoutMs), "triage_timeout");
-  await requireCandidateActive(claim);
+  const response = await triageStep("triage_gateway_call", () => raceWithDeadline(youtubeTriageCompletion({ model: model.gatewayModelName, abortSignal: controller.signal, messages: [{ role: "system", content: "Return strict JSON only with exactly relevanceScore, expectedValueScore, freshnessFitScore, commercialRiskScore, duplicateRiskScore, signals. Scores are finite 0..1. signals may contain only supplied signal codes, without duplicates. Do not include explanation, recommendation, or any other key." }, { role: "user", content: JSON.stringify({ query: bundle.queryText, candidate: bundle.candidate, signals: bundle.signals }) }] }), controller, Math.min(deadlineAt, startedAt + triageTimeoutMs), "triage_timeout"));
+  await triageStep("triage_guard_after_gateway", () => requireCandidateActive(claim));
   if (!response.ok) {
-    const persisted = await persistYoutubeDiscoveryTriage(claim, { candidateId: bundle.candidateId, status: "gateway_failed", model, provider: response.provider, modelName: response.model, latencyMs: response.latencyMs, errorCode: response.errorCode, providerRequestId: response.requestMetadata.providerRequestId });
-    return persisted === "completed" ? response.failureKind === "rate_limited" ? "rate_limited" : "triage_transient" : persisted;
+    const persisted = await triageStep("triage_persist_write", () => youtubeTriagePersistence(claim, { candidateId: bundle.candidateId, status: "gateway_failed", model, provider: response.provider, modelName: response.model, latencyMs: response.latencyMs, errorCode: response.errorCode, providerRequestId: response.requestMetadata.providerRequestId }));
+    return persisted === "completed" ? response.failureKind === "rate_limited" ? { outcome: "rate_limited", failurePoint: "triage_gateway_call" } : { outcome: "triage_transient", failurePoint: "triage_gateway_call" } : { outcome: "persistence_contended", failurePoint: "triage_persist_write" };
   }
   let parsed: unknown = null; try { parsed = JSON.parse(response.content); } catch { /* Invalid provider output is retained as a safe failure. */ }
   const assessment = parseYoutubeDiscoveryTriageAssessment(parsed, bundle.signals.map((signal) => signal.signal));
-  const persisted = await persistYoutubeDiscoveryTriage(claim, assessment ? { candidateId: bundle.candidateId, status: "succeeded", assessment, model, provider: response.provider, modelName: response.model, latencyMs: response.latencyMs, ...response.usage, providerRequestId: response.requestMetadata.providerRequestId } : { candidateId: bundle.candidateId, status: "invalid_output", model, provider: response.provider, modelName: response.model, latencyMs: response.latencyMs, errorCode: "invalid_output", ...response.usage, providerRequestId: response.requestMetadata.providerRequestId });
-  return persisted !== "completed" ? persisted : assessment ? "completed" : "schema_invalid";
+  const persisted = await triageStep("triage_persist_write", () => youtubeTriagePersistence(claim, assessment ? { candidateId: bundle.candidateId, status: "succeeded", assessment, model, provider: response.provider, modelName: response.model, latencyMs: response.latencyMs, ...response.usage, providerRequestId: response.requestMetadata.providerRequestId } : { candidateId: bundle.candidateId, status: "invalid_output", model, provider: response.provider, modelName: response.model, latencyMs: response.latencyMs, errorCode: "invalid_output", ...response.usage, providerRequestId: response.requestMetadata.providerRequestId }));
+  return persisted !== "completed" ? { outcome: "persistence_contended", failurePoint: "triage_persist_write" } : assessment ? { outcome: "completed" } : { outcome: "schema_invalid", failurePoint: "triage_response" };
+}
+
+async function triageStep<T>(failurePoint: CandidateTriageFailurePoint, operation: () => Promise<T>): Promise<T> {
+  try { return await operation(); }
+  catch (error) { if (error instanceof CandidateStageError) throw error; if (error instanceof YoutubeDiscoveryTriageBundleReadError) throw new CandidateStageError("stage_transient", error.failurePoint, error.failureDetail); throw new CandidateStageError(error instanceof Error ? error.message : "stage_transient", failurePoint); }
 }
 
 async function raceWithDeadline<T>(operation: Promise<T>, controller: AbortController, deadlineAt: number, errorCode: string): Promise<T> {
@@ -146,8 +157,8 @@ async function raceWithDeadline<T>(operation: Promise<T>, controller: AbortContr
   finally { if (timeout) clearTimeout(timeout); }
 }
 
-function observationFor(kind: "query_run" | "candidate_job", claim: { id: string; attemptCount: number; claimedAt: Date; nextRunAt: Date; recoveredCount: number }, resultCode: WorkerPollObservation["resultCode"], diagnosticCode?: YoutubeDiscoveryRunSafeErrorCode | YoutubeDiscoveryCandidateJobSafeErrorCode, diagnosticStage?: QueryDiagnosticStage | CandidateDiagnosticStage): WorkerPollObservation {
-  return { capability: "youtube.discovery", resultCode, durableId: claim.id, executionKind: kind, retryCount: claim.attemptCount, ...(diagnosticCode ? { diagnosticCode } : {}), ...(diagnosticStage ? { diagnosticStage } : {}), jobLagMs: Math.max(0, claim.claimedAt.getTime() - claim.nextRunAt.getTime()), leaseRecovery: claim.recoveredCount ? "recovered" : "none", ...(claim.recoveredCount ? { leaseRecoveryCount: claim.recoveredCount } : {}) };
+function observationFor(kind: "query_run" | "candidate_job", claim: { id: string; attemptCount: number; claimedAt: Date; nextRunAt: Date; recoveredCount: number }, resultCode: WorkerPollObservation["resultCode"], diagnosticCode?: YoutubeDiscoveryRunSafeErrorCode | YoutubeDiscoveryCandidateJobSafeErrorCode, diagnosticStage?: QueryDiagnosticStage | CandidateDiagnosticStage, diagnosticFailurePoint?: string, diagnosticFailureDetail?: string): WorkerPollObservation {
+  return { capability: "youtube.discovery", resultCode, durableId: claim.id, executionKind: kind, retryCount: claim.attemptCount, ...(diagnosticCode ? { diagnosticCode } : {}), ...(diagnosticStage ? { diagnosticStage } : {}), ...(diagnosticFailurePoint ? { diagnosticFailurePoint } : {}), ...(diagnosticFailureDetail ? { diagnosticFailureDetail } : {}), jobLagMs: Math.max(0, claim.claimedAt.getTime() - claim.nextRunAt.getTime()), leaseRecovery: claim.recoveredCount ? "recovered" : "none", ...(claim.recoveredCount ? { leaseRecoveryCount: claim.recoveredCount } : {}) };
 }
 
 async function readPlanningPort(port: KnowledgeDiscoveryQuerySignalPort | AiAskDiscoveryQuerySignalPort): Promise<DiscoveryQuerySignalPortResult> { let timeout: ReturnType<typeof setTimeout> | undefined; const controller = new AbortController(); try { return await Promise.race([Promise.resolve().then(() => port.readSignals(controller.signal)).catch(() => ({ status: "unavailable", code: "source_unavailable" } as const)), new Promise<DiscoveryQuerySignalPortResult>((resolve) => { timeout = setTimeout(() => { controller.abort(); resolve({ status: "unavailable", code: "source_timeout" }); }, planningPortTimeoutMs); })]); } finally { if (timeout) clearTimeout(timeout); } }
@@ -158,3 +169,4 @@ export function bindYoutubeDiscoveryExecutionPorts(eligibility: YoutubeCaptureEl
 export function setYoutubeDiscoveryPlanningPortsForTest(knowledge: ((signal?: AbortSignal) => Promise<DiscoveryQuerySignalPortResult>) | undefined, aiAsk: ((signal?: AbortSignal) => Promise<DiscoveryQuerySignalPortResult>) | undefined) { bindYoutubeDiscoveryPlanningPorts(knowledge ? { readSignals: knowledge } : createUnavailableKnowledgeDiscoveryQuerySignalPort(), aiAsk ? { readSignals: aiAsk } : createUnavailableAiAskDiscoveryQuerySignalPort()); }
 export function setYoutubeDiscoveryEnrichmentForTest(enrichment: typeof enrichYoutubeVideo | undefined) { youtubeEnrichment = enrichment ?? enrichYoutubeVideo; }
 export function setYoutubeDiscoveryTriageCompletionForTest(completion: typeof completeYoutubeDiscoveryTriage | undefined) { youtubeTriageCompletion = completion ?? completeYoutubeDiscoveryTriage; }
+export function setYoutubeDiscoveryTriagePersistenceForTest(persistence: typeof persistYoutubeDiscoveryTriage | undefined) { youtubeTriagePersistence = persistence ?? persistYoutubeDiscoveryTriage; }

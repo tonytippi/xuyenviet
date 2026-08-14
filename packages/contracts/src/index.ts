@@ -455,6 +455,8 @@ type WorkerPollObservationBase = {
   durableId?: string;
   diagnosticCode?: string;
   diagnosticStage?: string;
+  diagnosticFailurePoint?: string;
+  diagnosticFailureDetail?: string;
   jobLagMs?: number;
   retryCount?: number;
   leaseRecovery?: "none" | "recovered" | "contended";

@@ -29,6 +29,9 @@ export type YoutubeDiscoveryEnrichment = Readonly<{ videoId: string; title?: str
 export type YoutubeDiscoveryTriageAssessment = Readonly<{ relevanceScore: number; expectedValueScore: number; freshnessFitScore: number; commercialRiskScore: number; duplicateRiskScore: number; signals: YoutubeDiscoveryCommentSignal[] }>;
 export type YoutubeDiscoveryTriageBundle = Readonly<{ candidateId: string; queryText: string; candidate: Readonly<{ videoId: string; title: string | null; channelName: string | null; publishedAt: string | null; durationSeconds: number | null; categoryId: string | null; viewCount: number | null; likeCount: number | null; commentCount: number | null; channelSubscriberCount: number | null }>; signals: ReadonlyArray<Readonly<{ signal: YoutubeDiscoveryCommentSignal; count: number; score: number }>> }>;
 export type YoutubeDiscoveryRecommendationBundle = Readonly<{ candidateId: string; appearanceId: string; triageId: string; canonical: boolean; currentRunEnriched: boolean; triage: YoutubeDiscoveryTriageAssessment; policy: ReturnType<typeof parseYoutubeDiscoveryPolicy> }>;
+export type YoutubeDiscoveryTriageBundleFailurePoint = "triage_bundle_guard" | "triage_bundle_candidate_lookup" | "triage_bundle_existing_lookup" | "triage_bundle_signals_lookup" | "triage_bundle_serialize";
+export type YoutubeDiscoveryTriageBundleFailureDetail = "database_serialization" | "database_deadlock" | "database_lock_timeout" | "database_statement_timeout" | "database_other";
+export class YoutubeDiscoveryTriageBundleReadError extends Error { constructor(readonly failurePoint: YoutubeDiscoveryTriageBundleFailurePoint, readonly failureDetail: YoutubeDiscoveryTriageBundleFailureDetail) { super(failurePoint); } }
 
 class PlanningLeaseLostError extends Error {}
 class RecommendationDeadlineExceeded extends Error {}
@@ -459,16 +462,36 @@ export function parseYoutubeDiscoveryTriageAssessment(value: unknown, allowedSig
 }
 
 export async function getYoutubeDiscoveryTriageBundle(claim: YoutubeDiscoveryCandidateWorkClaim, videoId: string, database: DiscoveryWriter = getDb()): Promise<YoutubeDiscoveryTriageBundle | "succeeded" | "cancelled" | "contended"> {
-  return database.transaction(async (transaction) => {
+  let failurePoint: YoutubeDiscoveryTriageBundleFailurePoint = "triage_bundle_guard";
+  try { return await database.transaction(async (transaction) => {
     const guard = await guardYoutubeDiscoveryCandidateWrite(transaction, claim);
     if (typeof guard === "string") return guard;
+    failurePoint = "triage_bundle_candidate_lookup";
     const [row] = await transaction.execute(sql`select candidate.id as "candidateId", appearance.id as "appearanceId", proposal.query_text as "queryText", candidate.video_id as "videoId", appearance.title as title, appearance.channel_name as "channelName", appearance.published_at as "publishedAt", appearance.duration_seconds as "durationSeconds", appearance.category_id as "categoryId", appearance.view_count as "viewCount", appearance.like_count as "likeCount", appearance.comment_count as "commentCount", appearance.channel_subscriber_count as "channelSubscriberCount" from youtube_discovery_candidates candidate join youtube_discovery_appearances appearance on appearance.candidate_id = candidate.id and appearance.run_id = ${workRunId(claim)} join youtube_discovery_runs run on run.id = appearance.run_id join youtube_discovery_query_proposals proposal on proposal.id = run.query_proposal_id where candidate.video_id = ${videoId} and (${isYoutubeDiscoveryCandidateJobClaim(claim) ? sql`appearance.id = ${claim.appearanceId} and candidate.id = ${claim.candidateId}` : sql`true`}) for update`) as Array<{ candidateId: string; appearanceId: string; queryText: string; videoId: string; title: string | null; channelName: string | null; publishedAt: Date | null; durationSeconds: number | null; categoryId: string | null; viewCount: number | null; likeCount: number | null; commentCount: number | null; channelSubscriberCount: number | null }>;
     if (!row) return "contended";
+    failurePoint = "triage_bundle_existing_lookup";
     const [existing] = await transaction.select({ id: youtubeDiscoveryTriages.id }).from(youtubeDiscoveryTriages).where(and(eq(youtubeDiscoveryTriages.candidateId, row.candidateId), eq(youtubeDiscoveryTriages.runId, workRunId(claim)), eq(youtubeDiscoveryTriages.promptVersion, aiUsagePromptVersions.youtubeDiscoveryTriage), eq(youtubeDiscoveryTriages.status, "succeeded"))).limit(1);
     if (existing) return "succeeded";
+    failurePoint = "triage_bundle_signals_lookup";
     const signals = await transaction.select({ signal: youtubeDiscoveryCommentSignals.signal, count: youtubeDiscoveryCommentSignals.count, score: youtubeDiscoveryCommentSignals.score }).from(youtubeDiscoveryCommentSignals).where(and(eq(youtubeDiscoveryCommentSignals.candidateId, row.candidateId), eq(youtubeDiscoveryCommentSignals.runId, workRunId(claim)), sql`${youtubeDiscoveryCommentSignals.expiresAt} > clock_timestamp()`)).orderBy(youtubeDiscoveryCommentSignals.signal).limit(6);
-    return { candidateId: row.candidateId, queryText: row.queryText, candidate: { videoId: row.videoId, title: row.title, channelName: row.channelName, publishedAt: row.publishedAt?.toISOString() ?? null, durationSeconds: row.durationSeconds, categoryId: row.categoryId, viewCount: row.viewCount, likeCount: row.likeCount, commentCount: row.commentCount, channelSubscriberCount: row.channelSubscriberCount }, signals };
-  });
+    failurePoint = "triage_bundle_serialize";
+    return { candidateId: row.candidateId, queryText: row.queryText, candidate: { videoId: row.videoId, title: row.title, channelName: row.channelName, publishedAt: toIsoTimestamp(row.publishedAt), durationSeconds: row.durationSeconds, categoryId: row.categoryId, viewCount: row.viewCount, likeCount: row.likeCount, commentCount: row.commentCount, channelSubscriberCount: row.channelSubscriberCount }, signals };
+  }); } catch (error) { throw new YoutubeDiscoveryTriageBundleReadError(failurePoint, triageBundleFailureDetail(error)); }
+}
+
+function triageBundleFailureDetail(error: unknown): YoutubeDiscoveryTriageBundleFailureDetail {
+  const code = error && typeof error === "object" && "code" in error ? (error as { code?: unknown }).code : undefined;
+  if (code === "40001") return "database_serialization";
+  if (code === "40P01") return "database_deadlock";
+  if (code === "55P03") return "database_lock_timeout";
+  if (code === "57014") return "database_statement_timeout";
+  return "database_other";
+}
+
+function toIsoTimestamp(value: Date | string | null): string | null {
+  if (value === null) return null;
+  const date = value instanceof Date ? value : new Date(`${value}Z`);
+  return Number.isNaN(date.getTime()) ? null : date.toISOString();
 }
 
 export async function selectYoutubeDiscoveryTriageModel(database: DiscoveryWriter = getDb()) {
