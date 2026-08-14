@@ -175,7 +175,7 @@ async function seedReview() {
   await createYoutubeDiscoveryRun({ policyVersionId: policy.id, queryProposalId: proposal.id }, testDb);
   const claim = (await claimNextYoutubeDiscoveryRun({ workerId: "accept-reconciliation" }, testDb)).claim!;
   const videoId = "abcDEF12345";
-  await persistYoutubeDiscoveryCandidates(claim, [{ videoId, canonicalUrl: `https://www.youtube.com/watch?v=${videoId}`, resultOrdinal: 0 }], testDb);
+  await persistYoutubeDiscoveryCandidates(claim, [{ videoId, canonicalUrl: `https://www.youtube.com/watch?v=${videoId}`, resultOrdinal: 0, searchTranche: "medium" }], testDb);
   await persistYoutubeDiscoveryEnrichment(claim, { videoId, signals: [] }, testDb);
   await testDb.insert(aiGatewayModels).values({ id: "accept-model", gatewayModelName: "test/accept", displayLabel: "Accept", purpose: "youtube_discovery_triage", active: true, defaultForPurpose: true, supportsTextInput: true, supportsExtraction: true, pricingUnitTokens: 1_000_000 });
   const model = (await selectYoutubeDiscoveryTriageModel(testDb))!;

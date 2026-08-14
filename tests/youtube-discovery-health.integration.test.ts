@@ -100,7 +100,7 @@ describe.sequential("YouTube Discovery Health projections", () => {
     const run = await createYoutubeDiscoveryRun({ policyVersionId: policy.id, queryProposalId: proposal.id }, testDb);
     const claim = (await claimNextYoutubeDiscoveryRun({ workerId: "candidate-backlog" }, testDb)).claim;
     if (!claim) throw new Error("expected run claim");
-    expect(await persistYoutubeDiscoveryCandidates(claim, [{ videoId: "abcDEF12345", canonicalUrl: "https://www.youtube.com/watch?v=abcDEF12345", resultOrdinal: 0 }], testDb)).toBe("completed");
+    expect(await persistYoutubeDiscoveryCandidates(claim, [{ videoId: "abcDEF12345", canonicalUrl: "https://www.youtube.com/watch?v=abcDEF12345", resultOrdinal: 0, searchTranche: "medium" }], testDb)).toBe("completed");
     const candidate = (await claimNextYoutubeDiscoveryCandidateJob({ workerId: "candidate-backlog" }, testDb)).claim;
     if (!candidate) throw new Error("expected candidate claim");
     expect(await retryYoutubeDiscoveryCandidateJob(candidate, "triage_transient", "triage", testDb)).toBe("retrying");
@@ -115,7 +115,7 @@ describe.sequential("YouTube Discovery Health projections", () => {
     const proposal = await createYoutubeDiscoveryQueryProposal({ origin: "operator", reason: "operator_request", priority: 10, queryText: "Da Lat route", cadenceMinutes: 15, actor: createUserAuditActor({ userId: "operator", email: "operator@example.com" }) }, testDb);
     const run = await createYoutubeDiscoveryRun({ policyVersionId: policy.id, queryProposalId: proposal.id }, testDb);
     const claim = (await claimNextYoutubeDiscoveryRun({ workerId: "candidate-incident-search" }, testDb)).claim!;
-    expect(await persistYoutubeDiscoveryCandidates(claim, [{ videoId: "abcDEF12345", canonicalUrl: "https://www.youtube.com/watch?v=abcDEF12345", resultOrdinal: 0 }], testDb)).toBe("completed");
+    expect(await persistYoutubeDiscoveryCandidates(claim, [{ videoId: "abcDEF12345", canonicalUrl: "https://www.youtube.com/watch?v=abcDEF12345", resultOrdinal: 0, searchTranche: "medium" }], testDb)).toBe("completed");
     expect(await finishYoutubeDiscoveryRun(claim, testDb)).toBe("completed");
     const job = (await claimNextYoutubeDiscoveryCandidateJob({ workerId: "candidate-incident" }, testDb)).claim!;
     expect(await retryYoutubeDiscoveryCandidateJob(job, "triage_transient", "triage", testDb, "provider_rate_limited")).toBe("retrying");

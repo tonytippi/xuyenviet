@@ -21,7 +21,7 @@ describe.sequential("YouTube Discovery review read model", () => {
     await createYoutubeDiscoveryRun({ policyVersionId: policy.id, queryProposalId: query.id }, testDb);
     const claim = (await claimNextYoutubeDiscoveryRun({ workerId: "review-read-model" }, testDb)).claim!;
     const videos = Array.from({ length: 21 }, (_, index) => `rv${String(index).padStart(9, "0")}`);
-    expect(await persistYoutubeDiscoveryCandidates(claim, videos.map((videoId, resultOrdinal) => ({ videoId, canonicalUrl: `https://www.youtube.com/watch?v=${videoId}`, resultOrdinal })), testDb)).toBe("completed");
+    expect(await persistYoutubeDiscoveryCandidates(claim, videos.map((videoId, resultOrdinal) => ({ videoId, canonicalUrl: `https://www.youtube.com/watch?v=${videoId}`, resultOrdinal, searchTranche: "medium" as const })), testDb)).toBe("completed");
     await testDb.insert(aiGatewayModels).values({ id: "review-model", gatewayModelName: "test/review", displayLabel: "Review", purpose: "youtube_discovery_triage", active: true, defaultForPurpose: true, supportsTextInput: true, supportsExtraction: true, pricingUnitTokens: 1_000_000 });
     const model = await selectYoutubeDiscoveryTriageModel(testDb);
     if (!model) throw new Error("expected review triage model");
@@ -48,7 +48,7 @@ describe.sequential("YouTube Discovery review read model", () => {
         await createYoutubeDiscoveryRun({ policyVersionId: policy.id, queryProposalId: query.id }, transaction);
         const historicClaim = (await claimNextYoutubeDiscoveryRun({ workerId }, transaction)).claim;
         if (!historicClaim) throw new Error("expected historic claim");
-        await persistYoutubeDiscoveryCandidates(historicClaim, [{ videoId: historicCandidate.videoId, canonicalUrl: `https://www.youtube.com/watch?v=${historicCandidate.videoId}`, resultOrdinal: 0 }], transaction);
+        await persistYoutubeDiscoveryCandidates(historicClaim, [{ videoId: historicCandidate.videoId, canonicalUrl: `https://www.youtube.com/watch?v=${historicCandidate.videoId}`, resultOrdinal: 0, searchTranche: "medium" }], transaction);
         await persistYoutubeDiscoveryEnrichment(historicClaim, { videoId: historicCandidate.videoId, signals: [] }, transaction);
         await persistYoutubeDiscoveryTriage(historicClaim, { candidateId: historicCandidate.id, status: "succeeded", assessment: { relevanceScore: 1, expectedValueScore: 1, freshnessFitScore: 1, commercialRiskScore: 0, duplicateRiskScore: 0, signals: [] }, model, provider: "ai_gateway", modelName: model.gatewayModelName, latencyMs: 1 }, transaction);
         const bundle = await getYoutubeDiscoveryRecommendationBundle(historicClaim, historicCandidate.videoId, transaction);
@@ -95,7 +95,8 @@ describe.sequential("YouTube Discovery review read model", () => {
        await transaction.update(youtubeDiscoveryCandidateReviewStates).set({ state: "deferred" }).where(eq(youtubeDiscoveryCandidateReviewStates.recommendationId, anchor.recommendationId));
        await expect(port.listReview(principal, anchor)).rejects.toBeInstanceOf(YoutubeDiscoveryReviewCursorValidationError);
 
-       const detail = await port.getReview(principal, first.items[0]!.recommendationId);
+        await transaction.execute(sql`update youtube_discovery_query_proposals set query_text = 'rewritten proposal query' where id = ${query.id}`);
+        const detail = await port.getReview(principal, first.items[0]!.recommendationId);
       expect(detail).toMatchObject({ recommendationId: first.items[0]!.recommendationId, queryText: "Da Lat route", queryReason: "operator_request", priorCaptureOutcome: "unavailable" });
       expect(eligibility.check).toHaveBeenCalledWith(expect.stringMatching(/^rv\d{9}$/));
        expect(detail).not.toHaveProperty("videoId");

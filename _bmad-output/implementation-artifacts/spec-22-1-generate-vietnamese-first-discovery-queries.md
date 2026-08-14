@@ -2,7 +2,7 @@
 title: 'Story 22.1: Tạo truy vấn Discovery ưu tiên tiếng Việt'
 type: 'feature'
 created: '2026-08-14'
-status: 'in-review'
+status: 'done'
 baseline_commit: '45cd2bb9004f26497f8aaa87928a2789900bc06e'
 review_loop_iteration: 0
 context:
@@ -75,3 +75,9 @@ Query text là adapter-facing display intent, không phải normalized identity.
 - `pnpm lint` -- expected: không có ESLint error mới.
 - `pnpm typecheck` -- expected: strict TypeScript pass.
 - `pnpm build` -- expected: production build pass.
+
+### Review Findings
+
+- [x] [Review][Patch] Require `searchTranche` and update existing candidate-persistence callers [packages/database/src/youtube-discovery/index.ts:27] — made the public contract required and updated Discovery tests plus the Story 20.5 fixture to persist `medium` provenance explicitly.
+- [x] [Review][Patch] Validate deterministic merged result ordering at the persistence boundary [packages/database/src/youtube-discovery/index.ts:422] — reject non-contiguous ordinals, a `medium` after any `long`, more than 25 results in either tranche, more than 50 merged results, and duplicate video IDs.
+- [x] [Review][Patch] Project the immutable run query in the operator review [packages/database/src/admin-youtube-discovery.ts:77] — `getReview()` now returns the non-null `youtubeDiscoveryRuns.queryText`; regression rewrites the proposal after admission and verifies the review retains the admitted query.

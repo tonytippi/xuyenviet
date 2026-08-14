@@ -24,7 +24,7 @@ export type YoutubeDiscoveryCandidateJobClaimResult = Readonly<{ claim: YoutubeD
 export type YoutubeDiscoveryCandidateJobDisposition = YoutubeDiscoveryRunDisposition;
 type YoutubeDiscoveryCandidateWorkClaim = YoutubeDiscoveryRunClaim | YoutubeDiscoveryCandidateJobClaim;
 export type YoutubeDiscoveryPlanningClaim = Readonly<{ id: "youtube-discovery-planning"; policyVersionId: string; fencingToken: string }>;
-export type YoutubeDiscoverySearchCandidate = Readonly<{ videoId: string; canonicalUrl: string; resultOrdinal: number; searchTranche?: YoutubeDiscoverySearchTranche }>;
+export type YoutubeDiscoverySearchCandidate = Readonly<{ videoId: string; canonicalUrl: string; resultOrdinal: number; searchTranche: YoutubeDiscoverySearchTranche }>;
 export type YoutubeDiscoveryEnrichment = Readonly<{ videoId: string; title?: string; description?: string; channelId?: string; channelName?: string; publishedAt?: Date; durationSeconds?: number; categoryId?: string; tags?: string[]; viewCount?: number; likeCount?: number; commentCount?: number; channelSubscriberCount?: number; thumbnailUrl?: string; signals: ReadonlyArray<{ signal: YoutubeDiscoveryCommentSignal; count: number; score: number }> }>;
 export type YoutubeDiscoveryTriageAssessment = Readonly<{ relevanceScore: number; expectedValueScore: number; freshnessFitScore: number; commercialRiskScore: number; duplicateRiskScore: number; signals: YoutubeDiscoveryCommentSignal[] }>;
 export type YoutubeDiscoveryTriageBundle = Readonly<{ candidateId: string; queryText: string; candidate: Readonly<{ videoId: string; title: string | null; channelName: string | null; publishedAt: string | null; durationSeconds: number | null; categoryId: string | null; viewCount: number | null; likeCount: number | null; commentCount: number | null; channelSubscriberCount: number | null }>; signals: ReadonlyArray<Readonly<{ signal: YoutubeDiscoveryCommentSignal; count: number; score: number }>> }>;
@@ -421,9 +421,16 @@ export async function persistYoutubeDiscoveryCandidates(claim: YoutubeDiscoveryR
 
 function assertYoutubeDiscoverySearchCandidates(candidates: readonly YoutubeDiscoverySearchCandidate[]) {
   const seen = new Set<string>();
-  for (const candidate of candidates) {
+  let mediumCount = 0;
+  let longCount = 0;
+  let encounteredLong = false;
+  if (candidates.length > 50) throw new Error("Invalid YouTube Discovery search candidates.");
+  for (const [index, candidate] of candidates.entries()) {
     const canonical = canonicalizeYoutubeVideoUrl(candidate.canonicalUrl);
-    if (!canonical || candidate.videoId !== canonical.videoId || !Number.isSafeInteger(candidate.resultOrdinal) || candidate.resultOrdinal < 0 || candidate.resultOrdinal > 49 || (candidate.searchTranche !== "medium" && candidate.searchTranche !== "long") || seen.has(candidate.videoId)) throw new Error("Invalid YouTube Discovery search candidates.");
+    if (!canonical || candidate.videoId !== canonical.videoId || candidate.resultOrdinal !== index || (candidate.searchTranche !== "medium" && candidate.searchTranche !== "long") || seen.has(candidate.videoId)) throw new Error("Invalid YouTube Discovery search candidates.");
+    if (candidate.searchTranche === "long") { encounteredLong = true; longCount += 1; }
+    else { if (encounteredLong) throw new Error("Invalid YouTube Discovery search candidates."); mediumCount += 1; }
+    if (mediumCount > 25 || longCount > 25) throw new Error("Invalid YouTube Discovery search candidates.");
     seen.add(candidate.videoId);
   }
 }

@@ -39,7 +39,7 @@ async function main() {
     await createYoutubeDiscoveryRun({ policyVersionId: policy.id, queryProposalId: missionQuery.id }, db);
     const reviewClaim = (await claimNextYoutubeDiscoveryRun({ workerId: "story-20-5-review" }, db)).claim;
     if (!reviewClaim) throw new Error("Could not claim controlled review run.");
-    await persistYoutubeDiscoveryCandidates(reviewClaim, [{ videoId, canonicalUrl: `https://www.youtube.com/watch?v=${videoId}`, resultOrdinal: 0 }], db);
+    await persistYoutubeDiscoveryCandidates(reviewClaim, [{ videoId, canonicalUrl: `https://www.youtube.com/watch?v=${videoId}`, resultOrdinal: 0, searchTranche: "medium" }], db);
     await persistYoutubeDiscoveryEnrichment(reviewClaim, { videoId, signals: [] }, db);
     await db.insert(aiGatewayModels).values({ id: "story-20-5-triage", gatewayModelName: "test/story-20-5", displayLabel: "Story 20.5", purpose: "youtube_discovery_triage", active: true, defaultForPurpose: true, supportsTextInput: true, supportsExtraction: true, pricingUnitTokens: 1_000_000 }).onConflictDoNothing();
     const model = await selectYoutubeDiscoveryTriageModel(db);

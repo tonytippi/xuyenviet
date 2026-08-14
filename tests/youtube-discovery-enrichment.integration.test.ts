@@ -6,7 +6,7 @@ import { auditEvents, claimNextYoutubeDiscoveryCandidateJob, claimNextYoutubeDis
 import { resetTestDatabase, seedTestOperator, testDb } from "./helpers/db";
 
 const videoId = "abcDEF12345";
-const candidate = { videoId, canonicalUrl: `https://www.youtube.com/watch?v=${videoId}`, resultOrdinal: 0 };
+const candidate = { videoId, canonicalUrl: `https://www.youtube.com/watch?v=${videoId}`, resultOrdinal: 0, searchTranche: "medium" as const };
 const enrichment = {
   videoId,
   title: "Da Lat route",
@@ -184,7 +184,7 @@ describe.sequential("YouTube Discovery enrichment and retention", () => {
 
   test("bounds each expired comment-signal deletion pass", async () => {
     const { claim, policy } = await claimedRun();
-    const candidates = Array.from({ length: 4 }, (_, index) => ({ videoId: `sigtest000${index}`, canonicalUrl: `https://www.youtube.com/watch?v=sigtest000${index}`, resultOrdinal: index }));
+    const candidates = Array.from({ length: 4 }, (_, index) => ({ videoId: `sigtest000${index}`, canonicalUrl: `https://www.youtube.com/watch?v=sigtest000${index}`, resultOrdinal: index, searchTranche: "medium" as const }));
     expect(await persistYoutubeDiscoveryCandidates(claim, candidates, testDb)).toBe("completed");
     const stored = await testDb.select().from(youtubeDiscoveryCandidates);
     const signals = ["recent_discussion", "stale_or_changed_warning", "practical_question_demand", "creator_responsiveness", "commercial_risk", "contradictory_discussion"] as const;

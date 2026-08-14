@@ -271,7 +271,7 @@ async function createConsiderCandidate(policyVersionId: string, queryProposalId:
   await createYoutubeDiscoveryRun({ policyVersionId, queryProposalId }, testDb);
   const claim = (await claimNextYoutubeDiscoveryRun({ workerId: `candidate-${videoId}` }, testDb)).claim;
   if (!claim) throw new Error("expected candidate run claim");
-  await persistYoutubeDiscoveryCandidates(claim, [{ videoId, canonicalUrl: `https://www.youtube.com/watch?v=${videoId}`, resultOrdinal: 0 }], testDb);
+  await persistYoutubeDiscoveryCandidates(claim, [{ videoId, canonicalUrl: `https://www.youtube.com/watch?v=${videoId}`, resultOrdinal: 0, searchTranche: "medium" }], testDb);
   await persistYoutubeDiscoveryEnrichment(claim, { videoId, signals: [] }, testDb);
   await testDb.insert(aiGatewayModels).values({ id: `model-${videoId}`, gatewayModelName: `test/${videoId}`, displayLabel: "Action queue", purpose: "youtube_discovery_triage", active: true, defaultForPurpose: true, supportsTextInput: true, supportsExtraction: true, pricingUnitTokens: 1_000_000 });
   const model = await selectYoutubeDiscoveryTriageModel(testDb);

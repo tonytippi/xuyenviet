@@ -266,7 +266,7 @@ describe.sequential("YouTube Discovery run execution", () => {
     const proposal = await createYoutubeDiscoveryQueryProposal({ origin: "operator", reason: "operator_request", priority: 50, queryText: "Da Lat route", cadenceMinutes: 15, actor: createUserAuditActor({ userId: "operator", email: "operator@example.com" }) }, testDb);
     const run = await createYoutubeDiscoveryRun({ policyVersionId: first.id, queryProposalId: proposal.id }, testDb);
     const searchClaim = (await claimNextYoutubeDiscoveryRun({ workerId: "old-policy-search" }, testDb)).claim!;
-    expect(await persistYoutubeDiscoveryCandidates(searchClaim, [{ videoId: "abcDEF12345", canonicalUrl: "https://www.youtube.com/watch?v=abcDEF12345", resultOrdinal: 0 }], testDb)).toBe("completed");
+    expect(await persistYoutubeDiscoveryCandidates(searchClaim, [{ videoId: "abcDEF12345", canonicalUrl: "https://www.youtube.com/watch?v=abcDEF12345", resultOrdinal: 0, searchTranche: "medium" }], testDb)).toBe("completed");
     expect(await finishYoutubeDiscoveryRun(searchClaim, testDb)).toBe("completed");
     await createYoutubeDiscoveryPolicyVersion({ version: 2, isCurrent: true, policy: { candidateBacklogThreshold: 1 }, actor: createSystemAuditActor("system-youtube-discovery") }, testDb);
     expect(await scheduleYoutubeDiscoveryDueRuns(testDb)).toBe("candidate_backlog_blocked");
@@ -281,7 +281,7 @@ describe.sequential("YouTube Discovery run execution", () => {
     const proposal = await createYoutubeDiscoveryQueryProposal({ origin: "operator", reason: "operator_request", priority: 50, queryText: "Da Lat route", cadenceMinutes: 15, actor: createUserAuditActor({ userId: "operator", email: "operator@example.com" }) }, testDb);
     const run = await createYoutubeDiscoveryRun({ policyVersionId: policy.id, queryProposalId: proposal.id }, testDb);
     const searchClaim = (await claimNextYoutubeDiscoveryRun({ workerId: "running-candidate-search" }, testDb)).claim!;
-    expect(await persistYoutubeDiscoveryCandidates(searchClaim, [{ videoId: "abcDEF12345", canonicalUrl: "https://www.youtube.com/watch?v=abcDEF12345", resultOrdinal: 0 }], testDb)).toBe("completed");
+    expect(await persistYoutubeDiscoveryCandidates(searchClaim, [{ videoId: "abcDEF12345", canonicalUrl: "https://www.youtube.com/watch?v=abcDEF12345", resultOrdinal: 0, searchTranche: "medium" }], testDb)).toBe("completed");
     const candidate = (await claimNextYoutubeDiscoveryCandidateJob({ workerId: "running-candidate" }, testDb)).claim;
     expect(candidate).not.toBeNull();
     expect(await scheduleYoutubeDiscoveryDueRuns(testDb)).not.toBe("candidate_backlog_blocked");
@@ -490,7 +490,7 @@ describe.sequential("YouTube Discovery run execution", () => {
     await completeDuePlanning();
     const claim = (await claimNextYoutubeDiscoveryRun({ workerId: "existing-recommendation-setup" }, testDb)).claim!;
     const videoId = "abcDEF12345";
-    await persistYoutubeDiscoveryCandidates(claim, [{ videoId, canonicalUrl: `https://www.youtube.com/watch?v=${videoId}`, resultOrdinal: 0 }], testDb);
+    await persistYoutubeDiscoveryCandidates(claim, [{ videoId, canonicalUrl: `https://www.youtube.com/watch?v=${videoId}`, resultOrdinal: 0, searchTranche: "medium" }], testDb);
     expect(await finishYoutubeDiscoveryRun(claim, testDb)).toBe("completed");
     const candidateClaim = (await claimNextYoutubeDiscoveryCandidateJob({ workerId: "existing-recommendation-candidate-setup" }, testDb)).claim!;
     await persistYoutubeDiscoveryEnrichment(candidateClaim, { videoId, signals: [] }, testDb);
@@ -519,7 +519,7 @@ describe.sequential("YouTube Discovery run execution", () => {
     await completeDuePlanning();
     const claim = (await claimNextYoutubeDiscoveryRun({ workerId: "recommendation-deadline-setup" }, testDb)).claim!;
     const videoId = "abcDEF12345";
-    await persistYoutubeDiscoveryCandidates(claim, [{ videoId, canonicalUrl: `https://www.youtube.com/watch?v=${videoId}`, resultOrdinal: 0 }], testDb);
+    await persistYoutubeDiscoveryCandidates(claim, [{ videoId, canonicalUrl: `https://www.youtube.com/watch?v=${videoId}`, resultOrdinal: 0, searchTranche: "medium" }], testDb);
     expect(await finishYoutubeDiscoveryRun(claim, testDb)).toBe("completed");
     const candidateClaim = (await claimNextYoutubeDiscoveryCandidateJob({ workerId: "recommendation-deadline-candidate-setup" }, testDb)).claim!;
     await persistYoutubeDiscoveryEnrichment(candidateClaim, { videoId, signals: [] }, testDb);

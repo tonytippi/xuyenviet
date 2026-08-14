@@ -63,10 +63,13 @@ describe.sequential("YouTube Discovery candidate persistence", () => {
     await expect(testDb.select().from(youtubeDiscoveryCandidateJobs)).resolves.toHaveLength(2);
   });
 
-  test("rejects malformed tranche input before any candidate or appearance mutation", async () => {
+  test("rejects malformed or non-deterministic tranche input before any candidate or appearance mutation", async () => {
     const { claim } = await claimedRun();
 
     await expect(persistYoutubeDiscoveryCandidates(claim, [{ ...candidate("abcDEF12345"), searchTranche: "invalid" } as never], testDb)).rejects.toThrow("Invalid YouTube Discovery search candidates");
+    await expect(persistYoutubeDiscoveryCandidates(claim, [{ ...candidate("abcDEF12345"), resultOrdinal: 1 }], testDb)).rejects.toThrow("Invalid YouTube Discovery search candidates");
+    await expect(persistYoutubeDiscoveryCandidates(claim, [{ ...candidate("abcDEF12345"), searchTranche: "long" }, candidate("defGHI67890", 1)], testDb)).rejects.toThrow("Invalid YouTube Discovery search candidates");
+    await expect(persistYoutubeDiscoveryCandidates(claim, Array.from({ length: 26 }, (_, index) => candidate(`medium${String(index).padStart(6, "0")}`, index)), testDb)).rejects.toThrow("Invalid YouTube Discovery search candidates");
     await expect(testDb.select().from(youtubeDiscoveryCandidates)).resolves.toEqual([]);
     await expect(testDb.select().from(youtubeDiscoveryAppearances)).resolves.toEqual([]);
   });
