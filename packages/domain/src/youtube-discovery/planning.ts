@@ -6,9 +6,10 @@ export type SafeDiscoveryQuerySignal = Readonly<{ reason: SafeDiscoveryQueryReas
 export type DiscoveryQuerySignalPortResult = Readonly<{ status: "available"; signals: readonly SafeDiscoveryQuerySignal[] }> | Readonly<{ status: "unavailable"; code: "source_unavailable" | "source_timeout" | "source_invalid" }>;
 export type KnowledgeDiscoveryQuerySignalPort = Readonly<{ readSignals(signal?: AbortSignal): Promise<DiscoveryQuerySignalPortResult> }>;
 export type AiAskDiscoveryQuerySignalPort = Readonly<{ readSignals(signal?: AbortSignal): Promise<DiscoveryQuerySignalPortResult> }>;
-export type DerivedDiscoveryQuery = SafeDiscoveryQuerySignal & Readonly<{ targetDigest: string; queryText: string }>;
+export type DerivedDiscoveryQuery = SafeDiscoveryQuerySignal & Readonly<{ targetDigest: string; queryText: string; queryBuilderVersion: number }>;
 
-const safeText = /^[\p{L}\p{N} -]{1,80}$/u;
+const safeGeography = /^[\p{L}\p{N} -]{1,80}$/u;
+const safeTaxonomy = /^[\p{L}\p{N}_ -]{1,80}$/u;
 
 export function parseDiscoveryQuerySignalPortResult(value: unknown): DiscoveryQuerySignalPortResult | null {
   if (!record(value)) return null;
@@ -21,7 +22,8 @@ export function parseDiscoveryQuerySignalPortResult(value: unknown): DiscoveryQu
   return signals.every((signal): signal is SafeDiscoveryQuerySignal => signal !== null) ? { status: "available", signals } : null;
 }
 
-export function deriveDiscoveryQueries(results: readonly unknown[]): { queries: DerivedDiscoveryQuery[]; unavailableCodes: Array<"source_unavailable" | "source_timeout" | "source_invalid"> } {
+export function deriveDiscoveryQueries(results: readonly unknown[], queryBuilderVersion = 1): { queries: DerivedDiscoveryQuery[]; unavailableCodes: Array<"source_unavailable" | "source_timeout" | "source_invalid"> } {
+  if (queryBuilderVersion !== 1 && queryBuilderVersion !== 2) throw new Error("Unsupported YouTube Discovery query builder version.");
   const merged = new Map<string, SafeDiscoveryQuerySignal>();
   const unavailableCodes: Array<"source_unavailable" | "source_timeout" | "source_invalid"> = [];
   for (const result of results) {
@@ -35,9 +37,42 @@ export function deriveDiscoveryQueries(results: readonly unknown[]): { queries: 
     }
   }
   return {
-    queries: [...merged.values()].sort(compareSignal).map((signal) => ({ ...signal, targetDigest: createHash("sha256").update(`${signal.reason}\u0000${signal.geography}\u0000${signal.taxonomy}\u0000${signal.missionActionId ?? ""}`, "utf8").digest("hex"), queryText: `${signal.geography} ${signal.taxonomy}` })),
+    queries: [...merged.values()].sort(compareSignal).map((signal) => ({ ...signal, targetDigest: createHash("sha256").update(`${signal.reason}\u0000${signal.geography}\u0000${signal.taxonomy}\u0000${signal.missionActionId ?? ""}`, "utf8").digest("hex"), queryText: buildVietnameseDiscoveryQuery(signal, queryBuilderVersion), queryBuilderVersion })),
     unavailableCodes: [...new Set(unavailableCodes)].sort(),
   };
+}
+
+function buildVietnameseDiscoveryQuery(signal: SafeDiscoveryQuerySignal, version: number): string {
+  const topic = vietnameseRoadUserTopic(signal.taxonomy);
+  if (version === 2) return `${signal.geography} ${versionTwoIntent(signal.reason)} ${topic}`;
+  if (signal.reason === "anonymized_demand") return `${signal.geography} ${topic}`;
+  const intent = signal.reason === "freshness_risk" ? "thông tin mới" : signal.reason === "unresolved_conflict" ? "lưu ý thực tế" : "kinh nghiệm";
+  return `${signal.geography} ${intent} ${topic}`;
+}
+
+function versionTwoIntent(reason: SafeDiscoveryQueryReason): string {
+  if (reason === "freshness_risk") return "thông tin hành trình mới";
+  if (reason === "unresolved_conflict") return "lưu ý hành trình thực tế";
+  if (reason === "anonymized_demand") return "kinh nghiệm chuyến đi tự lái";
+  return "kinh nghiệm hành trình";
+}
+
+function vietnameseRoadUserTopic(taxonomy: string): string {
+  const normalized = taxonomy.toLocaleLowerCase("en-US").replaceAll("_", " ").trim();
+  if (normalized === "route" || normalized === "route note") return "cung đường đi ô tô";
+  if (normalized === "cost" || normalized === "cost note") return "chi phí hành trình";
+  if (normalized === "parking") return "điểm đỗ xe trên đường";
+  if (normalized === "ev charging") return "trạm sạc xe điện";
+  if (normalized === "warning") return "lưu ý an toàn trên đường";
+  if (normalized === "place") return "điểm dừng chân";
+  if (normalized === "food") return "điểm ăn uống trên hành trình";
+  if (normalized === "hotel area") return "khu vực lưu trú";
+  if (normalized === "activity") return "điểm trải nghiệm trên hành trình";
+  if (normalized === "service") return "dịch vụ cho chuyến đi";
+  if (normalized === "kid friendly tip") return "kinh nghiệm đi đường cùng trẻ";
+  if (normalized === "discount promotion") return "ưu đãi cho chuyến đi";
+  if (normalized === "general travel tip") return "kinh nghiệm chuyến đi tự lái";
+  return "kinh nghiệm du lịch tự lái";
 }
 
 export function createUnavailableKnowledgeDiscoveryQuerySignalPort(): KnowledgeDiscoveryQuerySignalPort {
@@ -51,7 +86,7 @@ export function createUnavailableAiAskDiscoveryQuerySignalPort(): AiAskDiscovery
 function normalize(value: SafeDiscoveryQuerySignal): SafeDiscoveryQuerySignal | null {
   const geography = value.geography.normalize("NFC").trim();
   const taxonomy = value.taxonomy.normalize("NFC").trim();
-  return isReason(value.reason) && safeText.test(geography) && safeText.test(taxonomy) && Number.isSafeInteger(value.priority) && value.priority >= 1 && value.priority <= 100 && (value.missionActionId === undefined || /^mission-[a-f0-9]{32}$/.test(value.missionActionId)) ? { reason: value.reason, geography, taxonomy, priority: value.priority, ...(value.missionActionId ? { missionActionId: value.missionActionId } : {}) } : null;
+  return isReason(value.reason) && safeGeography.test(geography) && safeTaxonomy.test(taxonomy) && Number.isSafeInteger(value.priority) && value.priority >= 1 && value.priority <= 100 && (value.missionActionId === undefined || /^mission-[a-f0-9]{32}$/.test(value.missionActionId)) ? { reason: value.reason, geography, taxonomy, priority: value.priority, ...(value.missionActionId ? { missionActionId: value.missionActionId } : {}) } : null;
 }
 function isSignal(value: unknown): value is SafeDiscoveryQuerySignal { return record(value) && (exactKeys(value, ["reason", "geography", "taxonomy", "priority"]) || exactKeys(value, ["reason", "geography", "taxonomy", "priority", "missionActionId"])) && isReason(value.reason) && typeof value.geography === "string" && typeof value.taxonomy === "string" && Number.isSafeInteger(value.priority) && (value.missionActionId === undefined || typeof value.missionActionId === "string"); }
 function isReason(value: unknown): value is SafeDiscoveryQueryReason { return safeDiscoveryQueryReasons.includes(value as SafeDiscoveryQueryReason); }

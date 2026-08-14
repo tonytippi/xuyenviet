@@ -1,4 +1,5 @@
 export type YoutubeDiscoveryPolicy = Readonly<{
+  queryBuilderVersion: number;
   enabled: boolean;
   minimumCandidateScore: number;
   priorityScoreWeight: number;
@@ -25,6 +26,7 @@ export type YoutubeDiscoveryPolicy = Readonly<{
 }>;
 
 export const defaultYoutubeDiscoveryPolicy: YoutubeDiscoveryPolicy = Object.freeze({
+  queryBuilderVersion: 1,
   enabled: true,
   minimumCandidateScore: 0.5,
   priorityScoreWeight: 0.6,
@@ -62,7 +64,7 @@ export function parseYoutubeDiscoveryPolicy(input: unknown): YoutubeDiscoveryPol
     throw new YoutubeDiscoveryPolicyValidationError();
   }
   const policy = { ...defaultYoutubeDiscoveryPolicy, ...input };
-  if (typeof policy.enabled !== "boolean" || !score(policy.minimumCandidateScore) || !score(policy.priorityScoreWeight) || !score(policy.freshnessScoreWeight) || !rankingPolicy(policy) || !integerBetween(policy.cadenceMinutes, 15, 10_080) || !integerBetween(policy.retentionDays, 1, 365) || !integerBetween(policy.commentSignalTtlDays, 1, policy.retentionDays - 1) || !integerBetween(policy.maxConcurrentRuns, 1, 20) || !integerBetween(policy.maxRetryAttempts, 0, 10) || !integerBetween(policy.retryDelayMinutes, 1, 1_440) || !integerBetween(policy.candidateBacklogThreshold, 1, 10_000) || !integerBetween(policy.actionQueueHighPriorityMaximum, 1, 100) || !integerBetween(policy.actionQueueMaximumOperatorReviewAgeHours, 1, 720) || !integerBetween(policy.actionQueueMaximumMissionStallHours, 1, 720) || !integerBetween(policy.actionQueuePersistentIncidentFailureCount, 2, 10) || !integerBetween(policy.actionQueuePersistentIncidentWindowHours, 1, 168)) {
+  if (typeof policy.enabled !== "boolean" || !integerBetween(policy.queryBuilderVersion, 1, 2) || !score(policy.minimumCandidateScore) || !score(policy.priorityScoreWeight) || !score(policy.freshnessScoreWeight) || !rankingPolicy(policy) || !integerBetween(policy.cadenceMinutes, 15, 10_080) || !integerBetween(policy.retentionDays, 1, 365) || !integerBetween(policy.commentSignalTtlDays, 1, policy.retentionDays - 1) || !integerBetween(policy.maxConcurrentRuns, 1, 20) || !integerBetween(policy.maxRetryAttempts, 0, 10) || !integerBetween(policy.retryDelayMinutes, 1, 1_440) || !integerBetween(policy.candidateBacklogThreshold, 1, 10_000) || !integerBetween(policy.actionQueueHighPriorityMaximum, 1, 100) || !integerBetween(policy.actionQueueMaximumOperatorReviewAgeHours, 1, 720) || !integerBetween(policy.actionQueueMaximumMissionStallHours, 1, 720) || !integerBetween(policy.actionQueuePersistentIncidentFailureCount, 2, 10) || !integerBetween(policy.actionQueuePersistentIncidentWindowHours, 1, 168)) {
     throw new YoutubeDiscoveryPolicyValidationError();
   }
   return Object.freeze(policy);

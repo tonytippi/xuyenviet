@@ -375,6 +375,7 @@ export const youtubeDiscoveryPolicyVersions = pgTable(
     version: integer("version").notNull(),
     isCurrent: boolean("is_current").default(false).notNull(),
     enabled: boolean("enabled").default(true).notNull(),
+    queryBuilderVersion: integer("query_builder_version").notNull(),
     minimumCandidateScore: real("minimum_candidate_score").notNull(),
     priorityScoreWeight: real("priority_score_weight").notNull(),
     freshnessScoreWeight: real("freshness_score_weight").notNull(),
@@ -403,6 +404,7 @@ export const youtubeDiscoveryPolicyVersions = pgTable(
     uniqueIndex("youtube_discovery_policy_versions_version_idx").on(policy.version),
     uniqueIndex("youtube_discovery_policy_versions_one_current_idx").on(policy.isCurrent).where(sql`${policy.isCurrent}`),
     check("youtube_discovery_policy_versions_version_check", sql`${policy.version} >= 1`),
+    check("youtube_discovery_policy_versions_query_builder_version_check", sql`${policy.queryBuilderVersion} between 1 and 2`),
     check("youtube_discovery_policy_versions_score_check", sql`${policy.minimumCandidateScore} >= 0 and ${policy.minimumCandidateScore} <= 1 and ${policy.priorityScoreWeight} >= 0 and ${policy.priorityScoreWeight} <= 1 and ${policy.freshnessScoreWeight} >= 0 and ${policy.freshnessScoreWeight} <= 1`),
     check("youtube_discovery_policy_versions_ranking_check", sql`${policy.relevanceWeight} between 0 and 1 and ${policy.expectedValueWeight} between 0 and 1 and ${policy.freshnessFitWeight} between 0 and 1 and ${policy.commercialRiskWeight} between 0 and 1 and ${policy.duplicateRiskWeight} between 0 and 1 and ${policy.relevanceWeight} + ${policy.expectedValueWeight} + ${policy.freshnessFitWeight} + ${policy.commercialRiskWeight} + ${policy.duplicateRiskWeight} = 1.000000 and ${policy.deferMinimum} >= 0 and ${policy.deferMinimum} < ${policy.considerMinimum} and ${policy.considerMinimum} <= 1`),
     check("youtube_discovery_policy_versions_cadence_check", sql`${policy.cadenceMinutes} between 15 and 10080`),
@@ -478,6 +480,7 @@ export const youtubeDiscoveryRuns = pgTable(
   {
     id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
     policyVersionId: text("policy_version_id").notNull().references(() => youtubeDiscoveryPolicyVersions.id, { onDelete: "restrict" }),
+    queryText: text("query_text"),
     queryProposalId: text("query_proposal_id").references(() => youtubeDiscoveryQueryProposals.id, { onDelete: "restrict" }),
     scheduleIntervalAt: timestamp("schedule_interval_at", { mode: "date" }),
     state: text("state").$type<YoutubeDiscoveryRunState>().default("queued").notNull(),
@@ -529,10 +532,13 @@ export const youtubeDiscoveryCommentSignals = pgTable(
   (signal) => [index("youtube_discovery_comment_signals_expiry_idx").on(signal.expiresAt), uniqueIndex("youtube_discovery_comment_signals_run_candidate_signal_idx").on(signal.runId, signal.candidateId, signal.signal), check("youtube_discovery_comment_signals_value_check", sql`${signal.signal} in ('recent_discussion', 'stale_or_changed_warning', 'practical_question_demand', 'creator_responsiveness', 'commercial_risk', 'contradictory_discussion') and ${signal.count} between 1 and 100 and ${signal.score} between 1 and 100 and ${signal.expiresAt} > ${signal.derivedAt}`)],
 );
 
+export const youtubeDiscoverySearchTranches = ["medium", "long"] as const;
+export type YoutubeDiscoverySearchTranche = (typeof youtubeDiscoverySearchTranches)[number];
+
 export const youtubeDiscoveryAppearances = pgTable(
   "youtube_discovery_appearances",
-  { id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()), candidateId: text("candidate_id").notNull().references(() => youtubeDiscoveryCandidates.id, { onDelete: "restrict" }), runId: text("run_id").notNull().references(() => youtubeDiscoveryRuns.id, { onDelete: "restrict" }), resultOrdinal: integer("result_ordinal").notNull(), title: text("title"), description: text("description"), channelId: text("channel_id"), channelName: text("channel_name"), publishedAt: timestamp("published_at", { mode: "date" }), durationSeconds: integer("duration_seconds"), categoryId: text("category_id"), tags: text("tags").array(), viewCount: integer("view_count"), likeCount: integer("like_count"), commentCount: integer("comment_count"), channelSubscriberCount: integer("channel_subscriber_count"), thumbnailUrl: text("thumbnail_url"), discoveredAt: timestamp("discovered_at", { mode: "date" }).defaultNow().notNull() },
-  (appearance) => [uniqueIndex("youtube_discovery_appearances_run_candidate_idx").on(appearance.runId, appearance.candidateId), uniqueIndex("youtube_discovery_appearances_id_candidate_run_idx").on(appearance.id, appearance.candidateId, appearance.runId), index("youtube_discovery_appearances_candidate_idx").on(appearance.candidateId), check("youtube_discovery_appearances_ordinal_check", sql`${appearance.resultOrdinal} between 0 and 49`)],
+   { id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()), candidateId: text("candidate_id").notNull().references(() => youtubeDiscoveryCandidates.id, { onDelete: "restrict" }), runId: text("run_id").notNull().references(() => youtubeDiscoveryRuns.id, { onDelete: "restrict" }), resultOrdinal: integer("result_ordinal").notNull(), searchTranche: text("search_tranche").$type<YoutubeDiscoverySearchTranche>(), title: text("title"), description: text("description"), channelId: text("channel_id"), channelName: text("channel_name"), publishedAt: timestamp("published_at", { mode: "date" }), durationSeconds: integer("duration_seconds"), categoryId: text("category_id"), tags: text("tags").array(), viewCount: integer("view_count"), likeCount: integer("like_count"), commentCount: integer("comment_count"), channelSubscriberCount: integer("channel_subscriber_count"), thumbnailUrl: text("thumbnail_url"), discoveredAt: timestamp("discovered_at", { mode: "date" }).defaultNow().notNull() },
+   (appearance) => [uniqueIndex("youtube_discovery_appearances_run_candidate_idx").on(appearance.runId, appearance.candidateId), uniqueIndex("youtube_discovery_appearances_id_candidate_run_idx").on(appearance.id, appearance.candidateId, appearance.runId), index("youtube_discovery_appearances_candidate_idx").on(appearance.candidateId), check("youtube_discovery_appearances_ordinal_check", sql`${appearance.resultOrdinal} between 0 and 49`), check("youtube_discovery_appearances_search_tranche_check", sql`${appearance.searchTranche} is null or ${appearance.searchTranche} in ('medium', 'long')`)],
 );
 
 export const youtubeDiscoveryCandidateJobs = pgTable("youtube_discovery_candidate_jobs", {

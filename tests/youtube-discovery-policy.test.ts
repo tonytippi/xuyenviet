@@ -15,6 +15,9 @@ describe("YouTube Discovery policy", () => {
     { cadenceMinutes: Infinity },
     { maxConcurrentRuns: 21 },
     { maxRetryAttempts: -1 },
+    { queryBuilderVersion: 0 },
+    { queryBuilderVersion: 3 },
+    { queryBuilderVersion: 1.5 },
     { unexpected: true },
   ])("rejects unbounded or invalid policy input %#", (input) => {
     expect(() => parseYoutubeDiscoveryPolicy(input)).toThrow(YoutubeDiscoveryPolicyValidationError);
@@ -53,6 +56,6 @@ describe("YouTube Discovery policy", () => {
     await expect(createYoutubeDiscoveryQueryProposal({ origin: "operator", reason: "coverage_gap", priority: 50, queryText: "Đà Lạt đường đèo", cadenceMinutes: 1440, actor: operator }, database)).rejects.toThrow();
     expect(transactions).toBe(2);
     await expect(createYoutubeDiscoveryQueryProposal({ origin: "system", reason: "coverage_gap", priority: 50, queryText: "Đà Lạt đường đèo", cadenceMinutes: 1440, actor: createSystemAuditActor("system-youtube-discovery"), systemSignal: { reason: "coverage_gap", geography: "Da Lat", taxonomy: "route", priority: 50 } }, database)).rejects.toThrow();
-    expect(transactions).toBe(2);
+    expect(transactions).toBe(3);
   });
 });

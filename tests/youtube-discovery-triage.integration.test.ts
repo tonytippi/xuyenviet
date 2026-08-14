@@ -1,11 +1,11 @@
 import { beforeEach, describe, expect, test } from "vitest";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 
 import { aiGatewayModels, aiUsageEvents, claimNextYoutubeDiscoveryCandidateJob, claimNextYoutubeDiscoveryRun, createSystemAuditActor, createUserAuditActor, createYoutubeDiscoveryPolicyVersion, createYoutubeDiscoveryQueryProposal, createYoutubeDiscoveryRun, finishYoutubeDiscoveryCandidateJob, getYoutubeDiscoveryTriageBundle, persistYoutubeDiscoveryCandidates, persistYoutubeDiscoveryEnrichment, persistYoutubeDiscoveryTriage, retainYoutubeDiscoveryRecords, selectYoutubeDiscoveryTriageModel, youtubeDiscoveryCandidates, youtubeDiscoveryCommentSignals, youtubeDiscoveryRuns, youtubeDiscoveryTriages } from "@xuyenviet/database";
 import { resetTestDatabase, seedTestOperator, testDb } from "./helpers/db";
 
 const videoId = "abcDEF12345";
-const candidate = { videoId, canonicalUrl: `https://www.youtube.com/watch?v=${videoId}`, resultOrdinal: 0 };
+const candidate = { videoId, canonicalUrl: `https://www.youtube.com/watch?v=${videoId}`, resultOrdinal: 0, searchTranche: "medium" as const };
 const enrichment = { videoId, title: "Da Lat route", channelName: "Route channel", signals: [{ signal: "practical_question_demand" as const, count: 2, score: 20 }] };
 
 async function claimedCandidate() {
@@ -58,6 +58,13 @@ describe.sequential("YouTube Discovery metadata triage persistence", () => {
 
     await testDb.update(youtubeDiscoveryCommentSignals).set({ expiresAt: new Date("2030-01-01T00:00:00Z") }).where(eq(youtubeDiscoveryCommentSignals.runId, claim.id));
     await expect(getYoutubeDiscoveryTriageBundle(claim, videoId, testDb)).resolves.toMatchObject({ signals: [{ signal: "practical_question_demand", count: 2, score: 20 }] });
+  });
+
+  test("uses the admitted query snapshot after the proposal text changes", async () => {
+    const { claim, run } = await claimedCandidate();
+    await testDb.execute(sql`update youtube_discovery_query_proposals set query_text = 'rewritten proposal' where id = (select query_proposal_id from youtube_discovery_runs where id = ${run.id})`);
+
+    await expect(getYoutubeDiscoveryTriageBundle(claim, videoId, testDb)).resolves.toMatchObject({ queryText: "Da Lat route" });
   });
 
   test("records no-model and invalid-output failures without assessment values", async () => {

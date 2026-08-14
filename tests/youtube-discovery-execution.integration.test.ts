@@ -374,7 +374,7 @@ describe.sequential("YouTube Discovery run execution", () => {
     const run = await createYoutubeDiscoveryRun({ policyVersionId: policy.id, queryProposalId: proposal.id }, testDb);
     await completeDuePlanning();
     await testDb.insert(aiGatewayModels).values({ id: "deadline-triage-model", gatewayModelName: "test/triage", displayLabel: "Triage", purpose: "youtube_discovery_triage", active: true, defaultForPurpose: true, supportsTextInput: true, supportsExtraction: true, pricingUnitTokens: 1_000_000 });
-    bindYoutubeDiscoveryExecutionPorts({ check: async () => "eligible" }, async () => [{ videoId: "abcDEF12345", canonicalUrl: "https://www.youtube.com/watch?v=abcDEF12345", resultOrdinal: 0 }], "test-key");
+    bindYoutubeDiscoveryExecutionPorts({ check: async () => "eligible" }, async () => [{ videoId: "abcDEF12345", canonicalUrl: "https://www.youtube.com/watch?v=abcDEF12345", resultOrdinal: 0, searchTranche: "medium" }], "test-key");
     setYoutubeDiscoveryEnrichmentForTest(async () => ({ videoId: "abcDEF12345", title: "Da Lat route", signals: [{ signal: "practical_question_demand", count: 1, score: 10 }] }));
     let triageCalls = 0;
     setYoutubeDiscoveryTriageCompletionForTest(async () => { triageCalls += 1; return { ok: true, content: "{}", provider: "ai_gateway", model: "test/triage", latencyMs: 1, usage: { promptTokens: null, completionTokens: null, totalTokens: null, cachedPromptTokens: null, cacheWritePromptTokens: null }, requestMetadata: { providerRequestId: null } }; });
@@ -393,7 +393,7 @@ describe.sequential("YouTube Discovery run execution", () => {
     const run = await createYoutubeDiscoveryRun({ policyVersionId: policy.id, queryProposalId: proposal.id }, testDb);
     await completeDuePlanning();
     await testDb.insert(aiGatewayModels).values({ id: "retry-triage-model", gatewayModelName: "test/triage", displayLabel: "Triage", purpose: "youtube_discovery_triage", active: true, defaultForPurpose: true, supportsTextInput: true, supportsExtraction: true, pricingUnitTokens: 1_000_000 });
-    bindYoutubeDiscoveryExecutionPorts({ check: async () => "eligible" }, async () => [{ videoId: "abcDEF12345", canonicalUrl: "https://www.youtube.com/watch?v=abcDEF12345", resultOrdinal: 0 }], "test-key");
+    bindYoutubeDiscoveryExecutionPorts({ check: async () => "eligible" }, async () => [{ videoId: "abcDEF12345", canonicalUrl: "https://www.youtube.com/watch?v=abcDEF12345", resultOrdinal: 0, searchTranche: "medium" }], "test-key");
     setYoutubeDiscoveryEnrichmentForTest(async () => ({ videoId: "abcDEF12345", title: "Da Lat route", signals: [] }));
     setYoutubeDiscoveryTriageCompletionForTest(async () => ({ ok: false, provider: "ai_gateway", model: "test/triage", latencyMs: 1, errorCode: "gateway_network_error", requestMetadata: { providerRequestId: null } }));
 
@@ -410,7 +410,7 @@ describe.sequential("YouTube Discovery run execution", () => {
     const run = await createYoutubeDiscoveryRun({ policyVersionId: policy.id, queryProposalId: proposal.id }, testDb);
     await completeDuePlanning();
     await testDb.insert(aiGatewayModels).values({ id: "contended-triage-model", gatewayModelName: "test/triage", displayLabel: "Triage", purpose: "youtube_discovery_triage", active: true, defaultForPurpose: true, supportsTextInput: true, supportsExtraction: true, pricingUnitTokens: 1_000_000 });
-    bindYoutubeDiscoveryExecutionPorts({ check: async () => "eligible" }, async () => [{ videoId: "abcDEF12345", canonicalUrl: "https://www.youtube.com/watch?v=abcDEF12345", resultOrdinal: 0 }], "test-key");
+    bindYoutubeDiscoveryExecutionPorts({ check: async () => "eligible" }, async () => [{ videoId: "abcDEF12345", canonicalUrl: "https://www.youtube.com/watch?v=abcDEF12345", resultOrdinal: 0, searchTranche: "medium" }], "test-key");
     setYoutubeDiscoveryEnrichmentForTest(async () => ({ videoId: "abcDEF12345", title: "Da Lat route", signals: [] }));
     setYoutubeDiscoveryTriageCompletionForTest(async () => ({ ok: true, content: JSON.stringify({ relevanceScore: 1, expectedValueScore: 1, freshnessFitScore: 1, commercialRiskScore: 0, duplicateRiskScore: 0, signals: [] }), provider: "ai_gateway", model: "test/triage", latencyMs: 1, usage: { promptTokens: null, completionTokens: null, totalTokens: null, cachedPromptTokens: null, cacheWritePromptTokens: null }, requestMetadata: { providerRequestId: null } }));
     setYoutubeDiscoveryTriagePersistenceForTest(async () => "contended");
@@ -431,7 +431,7 @@ describe.sequential("YouTube Discovery run execution", () => {
     await completeDuePlanning();
     bindYoutubeDiscoveryExecutionPorts({ check: async () => "eligible" }, async () => {
       await createYoutubeDiscoveryPolicyVersion({ version: 2, isCurrent: true, policy: { enabled: false }, actor: createSystemAuditActor("system-youtube-discovery") }, testDb);
-      return [{ videoId: "abcDEF12345", canonicalUrl: "https://www.youtube.com/watch?v=abcDEF12345", resultOrdinal: 0 }];
+      return [{ videoId: "abcDEF12345", canonicalUrl: "https://www.youtube.com/watch?v=abcDEF12345", resultOrdinal: 0, searchTranche: "medium" }];
     }, "test-key");
     await expect(runYoutubeDiscoveryPoll("discovery-cancel-after-provider")).resolves.toMatchObject({ resultCode: "success", durableId: run.id });
     await expect(testDb.select().from(youtubeDiscoveryCandidates)).resolves.toEqual([]);
@@ -447,7 +447,7 @@ describe.sequential("YouTube Discovery run execution", () => {
     const proposal = await createYoutubeDiscoveryQueryProposal({ origin: "operator", reason: "operator_request", priority: 50, queryText: "Da Lat route", cadenceMinutes: 15, actor: createUserAuditActor({ userId: "operator", email: "operator@example.com" }) }, testDb);
     const run = await createYoutubeDiscoveryRun({ policyVersionId: policy.id, queryProposalId: proposal.id }, testDb);
     await completeDuePlanning();
-    bindYoutubeDiscoveryExecutionPorts({ check: async () => "eligible" }, async () => [{ videoId: "abcDEF12345", canonicalUrl: "https://www.youtube.com/watch?v=abcDEF12345", resultOrdinal: 0 }], "test-key");
+    bindYoutubeDiscoveryExecutionPorts({ check: async () => "eligible" }, async () => [{ videoId: "abcDEF12345", canonicalUrl: "https://www.youtube.com/watch?v=abcDEF12345", resultOrdinal: 0, searchTranche: "medium" }], "test-key");
     setYoutubeDiscoveryEnrichmentForTest(async () => { throw new Error("enrichment_transient"); });
 
     await completeSearchEnqueue(run.id, "discovery-enrichment-failure");
@@ -471,8 +471,8 @@ describe.sequential("YouTube Discovery run execution", () => {
       await createYoutubeDiscoveryPolicyVersion({ version: 2, isCurrent: true, policy: { enabled: false }, actor: createSystemAuditActor("system-youtube-discovery") }, testDb);
       return "eligible";
     } }, async () => [
-      { videoId: "abcDEF12345", canonicalUrl: "https://www.youtube.com/watch?v=abcDEF12345", resultOrdinal: 0 },
-      { videoId: "defGHI67890", canonicalUrl: "https://www.youtube.com/watch?v=defGHI67890", resultOrdinal: 1 },
+      { videoId: "abcDEF12345", canonicalUrl: "https://www.youtube.com/watch?v=abcDEF12345", resultOrdinal: 0, searchTranche: "medium" },
+      { videoId: "defGHI67890", canonicalUrl: "https://www.youtube.com/watch?v=defGHI67890", resultOrdinal: 1, searchTranche: "long" },
     ], "test-key");
     await completeSearchEnqueue(run.id, "discovery-cancel-before-eligibility");
     await expect(runYoutubeDiscoveryPoll("discovery-cancel-before-eligibility")).resolves.toMatchObject({ resultCode: "success", executionKind: "candidate_job" });
@@ -504,7 +504,7 @@ describe.sequential("YouTube Discovery run execution", () => {
     expect(await retryYoutubeDiscoveryCandidateJob(candidateClaim, "recommendation_transient", "recommendation", testDb)).toBe("retrying");
     await testDb.execute(sql`update youtube_discovery_candidate_jobs set next_run_at = clock_timestamp() where id = ${candidateClaim.id}`);
     let eligibilityCalls = 0;
-    bindYoutubeDiscoveryExecutionPorts({ check: async () => { eligibilityCalls += 1; return "eligible"; } }, async () => [{ videoId, canonicalUrl: `https://www.youtube.com/watch?v=${videoId}`, resultOrdinal: 0 }], "test-key");
+    bindYoutubeDiscoveryExecutionPorts({ check: async () => { eligibilityCalls += 1; return "eligible"; } }, async () => [{ videoId, canonicalUrl: `https://www.youtube.com/watch?v=${videoId}`, resultOrdinal: 0, searchTranche: "medium" }], "test-key");
     setYoutubeDiscoveryEnrichmentForTest(async () => ({ videoId, signals: [] }));
 
     await expect(runYoutubeDiscoveryPoll("existing-recommendation-retry")).resolves.toMatchObject({ resultCode: "success", durableId: candidateClaim.id });
@@ -531,7 +531,7 @@ describe.sequential("YouTube Discovery run execution", () => {
     await testDb.execute(sql`update youtube_discovery_candidate_jobs set next_run_at = clock_timestamp() where id = ${candidateClaim.id}`);
 
     let eligibilityCalls = 0;
-    bindYoutubeDiscoveryExecutionPorts({ check: async () => { eligibilityCalls += 1; return "eligible"; } }, async () => [{ videoId, canonicalUrl: `https://www.youtube.com/watch?v=${videoId}`, resultOrdinal: 0 }], "test-key");
+    bindYoutubeDiscoveryExecutionPorts({ check: async () => { eligibilityCalls += 1; return "eligible"; } }, async () => [{ videoId, canonicalUrl: `https://www.youtube.com/watch?v=${videoId}`, resultOrdinal: 0, searchTranche: "medium" }], "test-key");
     setYoutubeDiscoveryEnrichmentForTest(async () => ({ videoId, signals: [] }));
     setYoutubeDiscoveryExecutionTimeoutForTest(1);
 
@@ -548,7 +548,7 @@ describe.sequential("YouTube Discovery run execution", () => {
     const run = await createYoutubeDiscoveryRun({ policyVersionId: policy.id, queryProposalId: proposal.id }, testDb);
     await completeDuePlanning();
     await testDb.insert(aiGatewayModels).values({ id: "invalid-eligibility-model", gatewayModelName: "test/invalid-eligibility", displayLabel: "Invalid eligibility", purpose: "youtube_discovery_triage", active: true, defaultForPurpose: true, supportsTextInput: true, supportsExtraction: true, pricingUnitTokens: 1_000_000 });
-    bindYoutubeDiscoveryExecutionPorts({ check: async () => undefined as never }, async () => [{ videoId: "abcDEF12345", canonicalUrl: "https://www.youtube.com/watch?v=abcDEF12345", resultOrdinal: 0 }], "test-key");
+    bindYoutubeDiscoveryExecutionPorts({ check: async () => undefined as never }, async () => [{ videoId: "abcDEF12345", canonicalUrl: "https://www.youtube.com/watch?v=abcDEF12345", resultOrdinal: 0, searchTranche: "medium" }], "test-key");
     setYoutubeDiscoveryEnrichmentForTest(async (videoId) => ({ videoId, signals: [] }));
     setYoutubeDiscoveryTriageCompletionForTest(async () => ({ ok: true, content: JSON.stringify({ relevanceScore: 1, expectedValueScore: 1, freshnessFitScore: 1, commercialRiskScore: 0, duplicateRiskScore: 0, signals: [] }), provider: "ai_gateway", model: "test/invalid-eligibility", latencyMs: 1, usage: { promptTokens: null, completionTokens: null, totalTokens: null, cachedPromptTokens: null, cacheWritePromptTokens: null }, requestMetadata: { providerRequestId: null } }));
 

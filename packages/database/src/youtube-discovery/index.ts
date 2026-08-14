@@ -1,7 +1,7 @@
 import { recordAuditEvent, type AuditEventWriter } from "../audit-writers";
 import { createSystemAuditActor, type AuditActor } from "../actors";
 import { getDb } from "../client";
-import { youtubeDiscoveryAppearances, youtubeDiscoveryCandidateJobs, youtubeDiscoveryCandidateReviewStates, youtubeDiscoveryCandidates, youtubeDiscoveryCommentSignalValues, youtubeDiscoveryCommentSignals, youtubeDiscoveryKnowledgeHandoffs, youtubeDiscoveryPlanningLeases, youtubeDiscoveryPlanningOutcomes, youtubeDiscoveryPolicyVersions, youtubeDiscoveryQueryProposals, youtubeDiscoveryQueryProposalReasonValues, youtubeDiscoveryRankingHistory, youtubeDiscoveryRecommendations, youtubeDiscoveryRuns, youtubeDiscoveryTriages, type YoutubeDiscoveryCandidateJobSafeErrorCode, type YoutubeDiscoveryCommentSignal, type YoutubeDiscoveryQueryProposalOrigin, type YoutubeDiscoveryQueryProposalReason, type YoutubeDiscoveryRunIncidentCategory, type YoutubeDiscoveryRunSafeErrorCode } from "../schema";
+import { youtubeDiscoveryAppearances, youtubeDiscoveryCandidateJobs, youtubeDiscoveryCandidateReviewStates, youtubeDiscoveryCandidates, youtubeDiscoveryCommentSignalValues, youtubeDiscoveryCommentSignals, youtubeDiscoveryKnowledgeHandoffs, youtubeDiscoveryPlanningLeases, youtubeDiscoveryPlanningOutcomes, youtubeDiscoveryPolicyVersions, youtubeDiscoveryQueryProposals, youtubeDiscoveryQueryProposalReasonValues, youtubeDiscoveryRankingHistory, youtubeDiscoveryRecommendations, youtubeDiscoveryRuns, youtubeDiscoveryTriages, type YoutubeDiscoveryCandidateJobSafeErrorCode, type YoutubeDiscoveryCommentSignal, type YoutubeDiscoveryQueryProposalOrigin, type YoutubeDiscoveryQueryProposalReason, type YoutubeDiscoveryRunIncidentCategory, type YoutubeDiscoveryRunSafeErrorCode, type YoutubeDiscoverySearchTranche } from "../schema";
 import type { YoutubeDiscoveryPolicyAuditSummary, YoutubeDiscoveryQueryProposalAuditSummary, YoutubeDiscoveryRunAuditSummary } from "@xuyenviet/contracts";
 import { canonicalizeYoutubeVideoUrl, deriveDiscoveryQueries, evaluateYoutubeDiscoveryRecommendation, parseYoutubeDiscoveryPolicy, type DiscoveryQuerySignalPortResult, type SafeDiscoveryQuerySignal } from "@xuyenviet/domain";
 import { and, eq, sql } from "drizzle-orm";
@@ -24,7 +24,7 @@ export type YoutubeDiscoveryCandidateJobClaimResult = Readonly<{ claim: YoutubeD
 export type YoutubeDiscoveryCandidateJobDisposition = YoutubeDiscoveryRunDisposition;
 type YoutubeDiscoveryCandidateWorkClaim = YoutubeDiscoveryRunClaim | YoutubeDiscoveryCandidateJobClaim;
 export type YoutubeDiscoveryPlanningClaim = Readonly<{ id: "youtube-discovery-planning"; policyVersionId: string; fencingToken: string }>;
-export type YoutubeDiscoverySearchCandidate = Readonly<{ videoId: string; canonicalUrl: string; resultOrdinal: number }>;
+export type YoutubeDiscoverySearchCandidate = Readonly<{ videoId: string; canonicalUrl: string; resultOrdinal: number; searchTranche?: YoutubeDiscoverySearchTranche }>;
 export type YoutubeDiscoveryEnrichment = Readonly<{ videoId: string; title?: string; description?: string; channelId?: string; channelName?: string; publishedAt?: Date; durationSeconds?: number; categoryId?: string; tags?: string[]; viewCount?: number; likeCount?: number; commentCount?: number; channelSubscriberCount?: number; thumbnailUrl?: string; signals: ReadonlyArray<{ signal: YoutubeDiscoveryCommentSignal; count: number; score: number }> }>;
 export type YoutubeDiscoveryTriageAssessment = Readonly<{ relevanceScore: number; expectedValueScore: number; freshnessFitScore: number; commercialRiskScore: number; duplicateRiskScore: number; signals: YoutubeDiscoveryCommentSignal[] }>;
 export type YoutubeDiscoveryTriageBundle = Readonly<{ candidateId: string; queryText: string; candidate: Readonly<{ videoId: string; title: string | null; channelName: string | null; publishedAt: string | null; durationSeconds: number | null; categoryId: string | null; viewCount: number | null; likeCount: number | null; commentCount: number | null; channelSubscriberCount: number | null }>; signals: ReadonlyArray<Readonly<{ signal: YoutubeDiscoveryCommentSignal; count: number; score: number }>> }>;
@@ -43,11 +43,11 @@ export async function createYoutubeDiscoveryPolicyVersion(input: CreateYoutubeDi
   const policy = parseYoutubeDiscoveryPolicy(input.policy === undefined ? {} : input.policy);
   assertDiscoveryPolicyActor(input.actor);
   return database.transaction(async (transaction) => {
-    const [previous] = input.isCurrent ? await transaction.select({ enabled: youtubeDiscoveryPolicyVersions.enabled, cadenceMinutes: youtubeDiscoveryPolicyVersions.cadenceMinutes }).from(youtubeDiscoveryPolicyVersions).where(eq(youtubeDiscoveryPolicyVersions.isCurrent, true)).limit(1).for("update") : [];
+    const [previous] = input.isCurrent ? await transaction.select({ enabled: youtubeDiscoveryPolicyVersions.enabled, cadenceMinutes: youtubeDiscoveryPolicyVersions.cadenceMinutes, queryBuilderVersion: youtubeDiscoveryPolicyVersions.queryBuilderVersion }).from(youtubeDiscoveryPolicyVersions).where(eq(youtubeDiscoveryPolicyVersions.isCurrent, true)).limit(1).for("update") : [];
     if (input.isCurrent) await transaction.update(youtubeDiscoveryPolicyVersions).set({ isCurrent: false }).where(eq(youtubeDiscoveryPolicyVersions.isCurrent, true));
     const [created] = await transaction.insert(youtubeDiscoveryPolicyVersions).values({ version: input.version, isCurrent: input.isCurrent, ...policy, relevanceWeight: policy.relevanceWeight.toFixed(6), expectedValueWeight: policy.expectedValueWeight.toFixed(6), freshnessFitWeight: policy.freshnessFitWeight.toFixed(6), commercialRiskWeight: policy.commercialRiskWeight.toFixed(6), duplicateRiskWeight: policy.duplicateRiskWeight.toFixed(6), deferMinimum: policy.deferMinimum.toFixed(6), considerMinimum: policy.considerMinimum.toFixed(6) }).returning();
     if (!created) throw new Error("YouTube Discovery policy creation failed.");
-    if (input.isCurrent && previous && (previous.enabled !== created.enabled || previous.cadenceMinutes !== created.cadenceMinutes)) await lockPlanningLease(transaction);
+    if (input.isCurrent && previous && (previous.enabled !== created.enabled || previous.cadenceMinutes !== created.cadenceMinutes || previous.queryBuilderVersion !== created.queryBuilderVersion)) await lockPlanningLease(transaction);
     if (input.isCurrent && previous?.enabled && !created.enabled) {
       await transaction.update(youtubeDiscoveryQueryProposals).set({ nextDueAt: null }).where(and(eq(youtubeDiscoveryQueryProposals.enabled, true), sql`${youtubeDiscoveryQueryProposals.scheduleAnchorAt} is not null`));
       await transaction.execute(sql`insert into youtube_discovery_planning_leases (id, policy_version_id, state, next_run_at, terminal_at, outcome) values ('youtube-discovery-planning', ${created.id}, 'cancelled', ${nextBoundaryFromStatementNow(created.cadenceMinutes)}, clock_timestamp(), 'cancelled') on conflict (id) do update set policy_version_id = excluded.policy_version_id, state = 'cancelled', next_run_at = excluded.next_run_at, claimed_by = null, claimed_at = null, lease_expires_at = null, fencing_token = null, terminal_at = excluded.terminal_at, outcome = 'cancelled', created_or_refreshed_count = 0, unavailable_codes = '{}'`);
@@ -61,6 +61,9 @@ export async function createYoutubeDiscoveryPolicyVersion(input: CreateYoutubeDi
       await transaction.execute(sql`update youtube_discovery_query_proposals set cadence_minutes = ${created.cadenceMinutes}, next_due_at = case when schedule_anchor_at is null then next_due_at else schedule_anchor_at + (floor(extract(epoch from (clock_timestamp() - schedule_anchor_at)) / 60 / ${created.cadenceMinutes})::integer + 1) * ${created.cadenceMinutes} * interval '1 minute' end where origin = 'system' and enabled = true`);
       await transaction.execute(sql`insert into youtube_discovery_planning_leases (id, policy_version_id, state, next_run_at) values ('youtube-discovery-planning', ${created.id}, 'queued', ${nextBoundaryFromStatementNow(created.cadenceMinutes)}) on conflict (id) do update set policy_version_id = excluded.policy_version_id, state = 'queued', next_run_at = excluded.next_run_at, claimed_by = null, claimed_at = null, lease_expires_at = null, fencing_token = null, terminal_at = null, outcome = null, created_or_refreshed_count = 0, unavailable_codes = '{}'`);
     }
+    if (input.isCurrent && previous?.enabled && created.enabled && previous.queryBuilderVersion !== created.queryBuilderVersion) {
+      await transaction.execute(sql`insert into youtube_discovery_planning_leases (id, policy_version_id, state, next_run_at) values ('youtube-discovery-planning', ${created.id}, 'queued', clock_timestamp()) on conflict (id) do update set policy_version_id = excluded.policy_version_id, state = 'queued', next_run_at = excluded.next_run_at, claimed_by = null, claimed_at = null, lease_expires_at = null, fencing_token = null, terminal_at = null, outcome = null, created_or_refreshed_count = 0, unavailable_codes = '{}'`);
+    }
     await recordAuditEvent({ actor: input.actor, operation: "create", targetType: "youtube_discovery_policy_version", targetId: created.id, afterSummary: JSON.stringify(policyAuditSummary({ ...created, relevanceWeight: Number(created.relevanceWeight), expectedValueWeight: Number(created.expectedValueWeight), freshnessFitWeight: Number(created.freshnessFitWeight), commercialRiskWeight: Number(created.commercialRiskWeight), duplicateRiskWeight: Number(created.duplicateRiskWeight), deferMinimum: Number(created.deferMinimum), considerMinimum: Number(created.considerMinimum) })) }, transaction);
     return created;
   });
@@ -71,8 +74,9 @@ export async function createYoutubeDiscoveryQueryProposal(input: CreateYoutubeDi
   assertSafeDiscoveryQueryProposal(input);
   return database.transaction(async (transaction) => {
     const { actor, ...proposal } = input;
-    const systemFields = input.origin === "system" ? systemProposalFields(input.systemSignal!) : null;
-    const [policy] = systemFields ? await transaction.select({ cadenceMinutes: youtubeDiscoveryPolicyVersions.cadenceMinutes, enabled: youtubeDiscoveryPolicyVersions.enabled }).from(youtubeDiscoveryPolicyVersions).where(eq(youtubeDiscoveryPolicyVersions.isCurrent, true)).limit(1).for("update") : [];
+    const [policy] = input.origin === "system" ? await transaction.select({ cadenceMinutes: youtubeDiscoveryPolicyVersions.cadenceMinutes, enabled: youtubeDiscoveryPolicyVersions.enabled, queryBuilderVersion: youtubeDiscoveryPolicyVersions.queryBuilderVersion }).from(youtubeDiscoveryPolicyVersions).where(eq(youtubeDiscoveryPolicyVersions.isCurrent, true)).limit(1).for("update") : [];
+    const systemFields = input.origin === "system" ? systemProposalFields(input.systemSignal!, policy?.queryBuilderVersion) : null;
+    if (systemFields && systemFields.queryText !== input.queryText) throw new Error("Invalid YouTube Discovery query proposal.");
     if (systemFields && !policy?.enabled) throw new Error("YouTube Discovery system query proposals require an enabled current policy version.");
     const enabled = input.enabled ?? true;
     const [created] = await transaction.insert(youtubeDiscoveryQueryProposals).values(systemFields ? { ...proposal, ...systemFields, priority: systemFields.priority, cadenceMinutes: policy!.cadenceMinutes, enabled, scheduleAnchorAt: enabled ? sql`clock_timestamp()` : undefined, nextDueAt: enabled && policy!.enabled ? sql`clock_timestamp() + ${policy!.cadenceMinutes} * interval '1 minute'` : undefined } : { ...proposal, enabled }).returning();
@@ -90,11 +94,13 @@ export async function createYoutubeDiscoveryRun(input: CreateYoutubeDiscoveryRun
     if (!policy) throw new Error("YouTube Discovery runs require the current policy version.");
     if (policy.id !== input.policyVersionId) throw new Error("YouTube Discovery runs require the current policy version.");
     if (!policy.enabled) throw new Error("YouTube Discovery runs require an enabled current policy version.");
+    let queryText: string | undefined;
     if (input.queryProposalId) {
-      const [proposal] = await transaction.select({ id: youtubeDiscoveryQueryProposals.id, enabled: youtubeDiscoveryQueryProposals.enabled }).from(youtubeDiscoveryQueryProposals).where(eq(youtubeDiscoveryQueryProposals.id, input.queryProposalId)).limit(1).for("update");
+      const [proposal] = await transaction.select({ id: youtubeDiscoveryQueryProposals.id, enabled: youtubeDiscoveryQueryProposals.enabled, queryText: youtubeDiscoveryQueryProposals.queryText }).from(youtubeDiscoveryQueryProposals).where(eq(youtubeDiscoveryQueryProposals.id, input.queryProposalId)).limit(1).for("update");
       if (!proposal || !proposal.enabled) throw new Error("YouTube Discovery runs require an enabled query proposal.");
+      queryText = proposal.queryText;
     }
-    const [created] = await transaction.insert(youtubeDiscoveryRuns).values({ policyVersionId: input.policyVersionId, queryProposalId: input.queryProposalId, scheduleIntervalAt: input.scheduleIntervalAt, state: "queued", maxRetryAttempts: policy.maxRetryAttempts, retryDelayMinutes: policy.retryDelayMinutes, maxConcurrentRuns: policy.maxConcurrentRuns }).onConflictDoNothing().returning();
+    const [created] = await transaction.insert(youtubeDiscoveryRuns).values({ policyVersionId: input.policyVersionId, queryProposalId: input.queryProposalId, queryText, scheduleIntervalAt: input.scheduleIntervalAt, state: "queued", maxRetryAttempts: policy.maxRetryAttempts, retryDelayMinutes: policy.retryDelayMinutes, maxConcurrentRuns: policy.maxConcurrentRuns }).onConflictDoNothing().returning();
     if (!created) {
       if (input.scheduleIntervalAt) return null;
       throw new Error("YouTube Discovery run creation failed.");
@@ -131,15 +137,15 @@ export async function claimYoutubeDiscoveryPlanning(workerId: string, database: 
 }
 
 export async function refreshYoutubeDiscoverySystemProposals(claim: YoutubeDiscoveryPlanningClaim, results: readonly DiscoveryQuerySignalPortResult[], database: DiscoveryWriter = getDb()): Promise<"completed" | "cancelled" | "contended"> {
-  const derived = deriveDiscoveryQueries(results);
   try {
     return await database.transaction(async (transaction) => {
-      const [policy] = await transaction.select({ enabled: youtubeDiscoveryPolicyVersions.enabled, cadenceMinutes: youtubeDiscoveryPolicyVersions.cadenceMinutes }).from(youtubeDiscoveryPolicyVersions).where(and(eq(youtubeDiscoveryPolicyVersions.id, claim.policyVersionId), eq(youtubeDiscoveryPolicyVersions.isCurrent, true))).limit(1).for("update");
+      const [policy] = await transaction.select({ enabled: youtubeDiscoveryPolicyVersions.enabled, cadenceMinutes: youtubeDiscoveryPolicyVersions.cadenceMinutes, queryBuilderVersion: youtubeDiscoveryPolicyVersions.queryBuilderVersion }).from(youtubeDiscoveryPolicyVersions).where(and(eq(youtubeDiscoveryPolicyVersions.id, claim.policyVersionId), eq(youtubeDiscoveryPolicyVersions.isCurrent, true))).limit(1).for("update");
       const active = and(eq(youtubeDiscoveryPlanningLeases.id, claim.id), eq(youtubeDiscoveryPlanningLeases.state, "running"), eq(youtubeDiscoveryPlanningLeases.fencingToken, claim.fencingToken), sql`${youtubeDiscoveryPlanningLeases.leaseExpiresAt} > clock_timestamp()`);
       const [locked] = await transaction.select({ id: youtubeDiscoveryPlanningLeases.id }).from(youtubeDiscoveryPlanningLeases).where(active).limit(1).for("update");
       if (!locked) return "contended";
       if (!policy?.enabled) return finishPlanning(transaction, claim, "cancelled", 0, []);
-      for (const query of derived.queries) {
+      const queries = deriveDiscoveryQueries(results, policy.queryBuilderVersion);
+      for (const query of queries.queries) {
         const current = await transaction.select({ enabled: youtubeDiscoveryPolicyVersions.enabled }).from(youtubeDiscoveryPolicyVersions).where(eq(youtubeDiscoveryPolicyVersions.isCurrent, true)).limit(1).for("update");
         if (!current[0]?.enabled) return finishPlanning(transaction, claim, "cancelled", 0, []);
         // Story 20.1 added Mission-specific query identities. Preserve the single
@@ -149,7 +155,7 @@ export async function refreshYoutubeDiscoverySystemProposals(claim: YoutubeDisco
         if (!upserted[0]) throw new PlanningLeaseLostError();
         await recordAuditEvent({ actor: createSystemAuditActor("system-youtube-discovery"), operation: "update", targetType: "youtube_discovery_query_proposal", targetId: upserted[0].id, afterSummary: JSON.stringify({ origin: "system", priority: upserted[0].priority, enabled: upserted[0].enabled, cadenceMinutes: policy.cadenceMinutes }) }, transaction);
       }
-      return finishPlanning(transaction, claim, derived.unavailableCodes.length ? "unavailable" : "completed", derived.queries.length, derived.unavailableCodes);
+      return finishPlanning(transaction, claim, queries.unavailableCodes.length ? "unavailable" : "completed", queries.queries.length, queries.unavailableCodes);
     });
   } catch (error) {
     if (error instanceof PlanningLeaseLostError) return "contended";
@@ -368,7 +374,7 @@ export async function cancelYoutubeDiscoveryRunIfDisabled(claim: YoutubeDiscover
 
 export async function getYoutubeDiscoveryRunQuery(claim: YoutubeDiscoveryRunClaim, database: DiscoveryWriter = getDb()): Promise<{ queryText: string } | "cancelled" | "contended"> {
   return database.transaction(async (transaction) => {
-    const rows = await transaction.execute(sql`select proposal.query_text as "queryText", proposal.enabled as "proposalEnabled", policy.is_current as "policyCurrent", policy.enabled as "policyEnabled" from youtube_discovery_runs run left join youtube_discovery_query_proposals proposal on proposal.id = run.query_proposal_id join youtube_discovery_policy_versions policy on policy.id = run.policy_version_id where run.id = ${claim.id} and run.state = 'running' and run.fencing_token = ${claim.fencingToken} and run.lease_expires_at > clock_timestamp()`) as Array<{ queryText: string | null; proposalEnabled: boolean | null; policyCurrent: boolean; policyEnabled: boolean }>;
+    const rows = await transaction.execute(sql`select run.query_text as "queryText", proposal.enabled as "proposalEnabled", policy.is_current as "policyCurrent", policy.enabled as "policyEnabled" from youtube_discovery_runs run left join youtube_discovery_query_proposals proposal on proposal.id = run.query_proposal_id join youtube_discovery_policy_versions policy on policy.id = run.policy_version_id where run.id = ${claim.id} and run.state = 'running' and run.fencing_token = ${claim.fencingToken} and run.lease_expires_at > clock_timestamp()`) as Array<{ queryText: string | null; proposalEnabled: boolean | null; policyCurrent: boolean; policyEnabled: boolean }>;
     const run = rows[0];
     if (!run) return "contended";
     if (!run.policyCurrent || !run.policyEnabled || !run.proposalEnabled || !run.queryText) return "cancelled";
@@ -377,6 +383,7 @@ export async function getYoutubeDiscoveryRunQuery(claim: YoutubeDiscoveryRunClai
 }
 
 export async function persistYoutubeDiscoveryCandidates(claim: YoutubeDiscoveryRunClaim, candidates: readonly YoutubeDiscoverySearchCandidate[], database: DiscoveryWriter = getDb()): Promise<"completed" | "cancelled" | "contended"> {
+  assertYoutubeDiscoverySearchCandidates(candidates);
   try {
     return await database.transaction<"completed">(async (transaction) => {
       const requireGuard = async () => {
@@ -389,7 +396,7 @@ export async function persistYoutubeDiscoveryCandidates(claim: YoutubeDiscoveryR
         await requireGuard();
         const [stored] = await transaction.execute(sql`insert into youtube_discovery_candidates (id, video_id, canonical_url, updated_at) values (${crypto.randomUUID()}, ${candidate.videoId}, ${candidate.canonicalUrl}, clock_timestamp()) on conflict (video_id) do update set updated_at = excluded.updated_at returning id`) as Array<{ id: string }>;
         await requireGuard();
-        const [appearance] = await transaction.execute(sql`insert into youtube_discovery_appearances (id, candidate_id, run_id, result_ordinal, discovered_at) values (${crypto.randomUUID()}, ${stored!.id}, ${claim.id}, ${candidate.resultOrdinal}, clock_timestamp()) on conflict (run_id, candidate_id) do nothing returning id`) as Array<{ id: string }>;
+        const [appearance] = await transaction.execute(sql`insert into youtube_discovery_appearances (id, candidate_id, run_id, result_ordinal, search_tranche, discovered_at) values (${crypto.randomUUID()}, ${stored!.id}, ${claim.id}, ${candidate.resultOrdinal}, ${candidate.searchTranche}, clock_timestamp()) on conflict (run_id, candidate_id) do nothing returning id`) as Array<{ id: string }>;
         if (appearance) {
           const historyGuard = await requireGuard();
           // The appearance and its downstream work are admitted in one fenced
@@ -409,6 +416,15 @@ export async function persistYoutubeDiscoveryCandidates(claim: YoutubeDiscoveryR
     // The sentinel rolls back every candidate-graph write. Cancellation itself
     // must be committed separately so its terminal audit is retained exactly once.
     return error.outcome === "cancelled" ? (await cancelYoutubeDiscoveryRunIfDisabled(claim, database)) === "cancelled" ? "cancelled" : "contended" : "contended";
+  }
+}
+
+function assertYoutubeDiscoverySearchCandidates(candidates: readonly YoutubeDiscoverySearchCandidate[]) {
+  const seen = new Set<string>();
+  for (const candidate of candidates) {
+    const canonical = canonicalizeYoutubeVideoUrl(candidate.canonicalUrl);
+    if (!canonical || candidate.videoId !== canonical.videoId || !Number.isSafeInteger(candidate.resultOrdinal) || candidate.resultOrdinal < 0 || candidate.resultOrdinal > 49 || (candidate.searchTranche !== "medium" && candidate.searchTranche !== "long") || seen.has(candidate.videoId)) throw new Error("Invalid YouTube Discovery search candidates.");
+    seen.add(candidate.videoId);
   }
 }
 
@@ -467,7 +483,7 @@ export async function getYoutubeDiscoveryTriageBundle(claim: YoutubeDiscoveryCan
     const guard = await guardYoutubeDiscoveryCandidateWrite(transaction, claim);
     if (typeof guard === "string") return guard;
     failurePoint = "triage_bundle_candidate_lookup";
-    const [row] = await transaction.execute(sql`select candidate.id as "candidateId", appearance.id as "appearanceId", proposal.query_text as "queryText", candidate.video_id as "videoId", appearance.title as title, appearance.channel_name as "channelName", appearance.published_at as "publishedAt", appearance.duration_seconds as "durationSeconds", appearance.category_id as "categoryId", appearance.view_count as "viewCount", appearance.like_count as "likeCount", appearance.comment_count as "commentCount", appearance.channel_subscriber_count as "channelSubscriberCount" from youtube_discovery_candidates candidate join youtube_discovery_appearances appearance on appearance.candidate_id = candidate.id and appearance.run_id = ${workRunId(claim)} join youtube_discovery_runs run on run.id = appearance.run_id join youtube_discovery_query_proposals proposal on proposal.id = run.query_proposal_id where candidate.video_id = ${videoId} and (${isYoutubeDiscoveryCandidateJobClaim(claim) ? sql`appearance.id = ${claim.appearanceId} and candidate.id = ${claim.candidateId}` : sql`true`}) for update`) as Array<{ candidateId: string; appearanceId: string; queryText: string; videoId: string; title: string | null; channelName: string | null; publishedAt: Date | null; durationSeconds: number | null; categoryId: string | null; viewCount: number | null; likeCount: number | null; commentCount: number | null; channelSubscriberCount: number | null }>;
+    const [row] = await transaction.execute(sql`select candidate.id as "candidateId", appearance.id as "appearanceId", run.query_text as "queryText", candidate.video_id as "videoId", appearance.title as title, appearance.channel_name as "channelName", appearance.published_at as "publishedAt", appearance.duration_seconds as "durationSeconds", appearance.category_id as "categoryId", appearance.view_count as "viewCount", appearance.like_count as "likeCount", appearance.comment_count as "commentCount", appearance.channel_subscriber_count as "channelSubscriberCount" from youtube_discovery_candidates candidate join youtube_discovery_appearances appearance on appearance.candidate_id = candidate.id and appearance.run_id = ${workRunId(claim)} join youtube_discovery_runs run on run.id = appearance.run_id where candidate.video_id = ${videoId} and (${isYoutubeDiscoveryCandidateJobClaim(claim) ? sql`appearance.id = ${claim.appearanceId} and candidate.id = ${claim.candidateId}` : sql`true`}) for update`) as Array<{ candidateId: string; appearanceId: string; queryText: string | null; videoId: string; title: string | null; channelName: string | null; publishedAt: Date | null; durationSeconds: number | null; categoryId: string | null; viewCount: number | null; likeCount: number | null; commentCount: number | null; channelSubscriberCount: number | null }>;
     if (!row) return "contended";
     failurePoint = "triage_bundle_existing_lookup";
     const [existing] = await transaction.select({ id: youtubeDiscoveryTriages.id }).from(youtubeDiscoveryTriages).where(and(eq(youtubeDiscoveryTriages.candidateId, row.candidateId), eq(youtubeDiscoveryTriages.runId, workRunId(claim)), eq(youtubeDiscoveryTriages.promptVersion, aiUsagePromptVersions.youtubeDiscoveryTriage), eq(youtubeDiscoveryTriages.status, "succeeded"))).limit(1);
@@ -475,6 +491,7 @@ export async function getYoutubeDiscoveryTriageBundle(claim: YoutubeDiscoveryCan
     failurePoint = "triage_bundle_signals_lookup";
     const signals = await transaction.select({ signal: youtubeDiscoveryCommentSignals.signal, count: youtubeDiscoveryCommentSignals.count, score: youtubeDiscoveryCommentSignals.score }).from(youtubeDiscoveryCommentSignals).where(and(eq(youtubeDiscoveryCommentSignals.candidateId, row.candidateId), eq(youtubeDiscoveryCommentSignals.runId, workRunId(claim)), sql`${youtubeDiscoveryCommentSignals.expiresAt} > clock_timestamp()`)).orderBy(youtubeDiscoveryCommentSignals.signal).limit(6);
     failurePoint = "triage_bundle_serialize";
+    if (row.queryText === null) return "contended";
     return { candidateId: row.candidateId, queryText: row.queryText, candidate: { videoId: row.videoId, title: row.title, channelName: row.channelName, publishedAt: toIsoTimestamp(row.publishedAt), durationSeconds: row.durationSeconds, categoryId: row.categoryId, viewCount: row.viewCount, likeCount: row.likeCount, commentCount: row.commentCount, channelSubscriberCount: row.channelSubscriberCount }, signals };
   }); } catch (error) { throw new YoutubeDiscoveryTriageBundleReadError(failurePoint, triageBundleFailureDetail(error)); }
 }
@@ -693,19 +710,19 @@ function assertDiscoveryQueryActor(origin: YoutubeDiscoveryQueryProposalOrigin, 
 }
 
 function assertSafeDiscoveryQueryProposal(input: CreateYoutubeDiscoveryQueryProposalInput) {
-  if (!youtubeDiscoveryQueryProposalReasonValues.includes(input.reason) || (input.origin === "system" && (!input.systemSignal || input.reason === "operator_request" || input.systemSignal.reason !== input.reason || systemProposalFields(input.systemSignal).queryText !== input.queryText)) || !/^[\p{L}\p{N} '-]{1,240}$/u.test(input.queryText.trim())) {
+  if (!youtubeDiscoveryQueryProposalReasonValues.includes(input.reason) || (input.origin === "system" && (!input.systemSignal || input.reason === "operator_request" || input.systemSignal.reason !== input.reason)) || !/^[\p{L}\p{N} '-]{1,240}$/u.test(input.queryText.trim())) {
     throw new Error("Invalid YouTube Discovery query proposal.");
   }
 }
 
-function systemProposalFields(signal: SafeDiscoveryQuerySignal) {
-  const [derived] = deriveDiscoveryQueries([{ status: "available", signals: [signal] }]).queries;
+function systemProposalFields(signal: SafeDiscoveryQuerySignal, queryBuilderVersion = 1) {
+  const [derived] = deriveDiscoveryQueries([{ status: "available", signals: [signal] }], queryBuilderVersion).queries;
   if (!derived) throw new Error("Invalid YouTube Discovery system query proposal.");
   return { targetDigest: derived.targetDigest, missionActionId: derived.missionActionId, safeSignalSummary: derived.reason, queryText: derived.queryText, priority: derived.priority };
 }
 
 function policyAuditSummary(policy: YoutubeDiscoveryPolicyAuditSummary): YoutubeDiscoveryPolicyAuditSummary {
-  return { version: policy.version, enabled: policy.enabled, minimumCandidateScore: policy.minimumCandidateScore, priorityScoreWeight: policy.priorityScoreWeight, freshnessScoreWeight: policy.freshnessScoreWeight, relevanceWeight: Number(policy.relevanceWeight), expectedValueWeight: Number(policy.expectedValueWeight), freshnessFitWeight: Number(policy.freshnessFitWeight), commercialRiskWeight: Number(policy.commercialRiskWeight), duplicateRiskWeight: Number(policy.duplicateRiskWeight), deferMinimum: Number(policy.deferMinimum), considerMinimum: Number(policy.considerMinimum), cadenceMinutes: policy.cadenceMinutes, retentionDays: policy.retentionDays, commentSignalTtlDays: policy.commentSignalTtlDays, maxConcurrentRuns: policy.maxConcurrentRuns, maxRetryAttempts: policy.maxRetryAttempts, retryDelayMinutes: policy.retryDelayMinutes, candidateBacklogThreshold: policy.candidateBacklogThreshold, actionQueueHighPriorityMaximum: policy.actionQueueHighPriorityMaximum, actionQueueMaximumOperatorReviewAgeHours: policy.actionQueueMaximumOperatorReviewAgeHours, actionQueueMaximumMissionStallHours: policy.actionQueueMaximumMissionStallHours, actionQueuePersistentIncidentFailureCount: policy.actionQueuePersistentIncidentFailureCount, actionQueuePersistentIncidentWindowHours: policy.actionQueuePersistentIncidentWindowHours };
+  return { version: policy.version, queryBuilderVersion: policy.queryBuilderVersion, enabled: policy.enabled, minimumCandidateScore: policy.minimumCandidateScore, priorityScoreWeight: policy.priorityScoreWeight, freshnessScoreWeight: policy.freshnessScoreWeight, relevanceWeight: Number(policy.relevanceWeight), expectedValueWeight: Number(policy.expectedValueWeight), freshnessFitWeight: Number(policy.freshnessFitWeight), commercialRiskWeight: Number(policy.commercialRiskWeight), duplicateRiskWeight: Number(policy.duplicateRiskWeight), deferMinimum: Number(policy.deferMinimum), considerMinimum: Number(policy.considerMinimum), cadenceMinutes: policy.cadenceMinutes, retentionDays: policy.retentionDays, commentSignalTtlDays: policy.commentSignalTtlDays, maxConcurrentRuns: policy.maxConcurrentRuns, maxRetryAttempts: policy.maxRetryAttempts, retryDelayMinutes: policy.retryDelayMinutes, candidateBacklogThreshold: policy.candidateBacklogThreshold, actionQueueHighPriorityMaximum: policy.actionQueueHighPriorityMaximum, actionQueueMaximumOperatorReviewAgeHours: policy.actionQueueMaximumOperatorReviewAgeHours, actionQueueMaximumMissionStallHours: policy.actionQueueMaximumMissionStallHours, actionQueuePersistentIncidentFailureCount: policy.actionQueuePersistentIncidentFailureCount, actionQueuePersistentIncidentWindowHours: policy.actionQueuePersistentIncidentWindowHours };
 }
 
 function queryProposalAuditSummary(proposal: YoutubeDiscoveryQueryProposalAuditSummary): YoutubeDiscoveryQueryProposalAuditSummary {

@@ -1,5 +1,6 @@
 export type YoutubeDiscoveryPolicyAuditSummary = Readonly<{
   version: number;
+  queryBuilderVersion: number;
   enabled: boolean;
   minimumCandidateScore: number;
   priorityScoreWeight: number;

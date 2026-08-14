@@ -5,8 +5,9 @@ import { auditEvents, claimNextYoutubeDiscoveryCandidateJob, claimNextYoutubeDis
 import { createUserAuditActor } from "@xuyenviet/database";
 import { youtubeCaptureCompatibilityForMediaResolution } from "@xuyenviet/domain";
 import { resetTestDatabase, seedTestOperator, testDb } from "./helpers/db";
+import { searchYoutubeVideos } from "../packages/worker-domain/src/features/youtube-discovery/youtube-search";
 
-const candidate = (videoId: string, resultOrdinal = 0) => ({ videoId, canonicalUrl: `https://www.youtube.com/watch?v=${videoId}`, resultOrdinal });
+const candidate = (videoId: string, resultOrdinal = 0) => ({ videoId, canonicalUrl: `https://www.youtube.com/watch?v=${videoId}`, resultOrdinal, searchTranche: "medium" as const });
 
 async function claimedRun() {
   await seedTestOperator();
@@ -29,6 +30,45 @@ describe.sequential("YouTube Discovery candidate persistence", () => {
     await expect(testDb.select().from(youtubeDiscoveryAppearances)).resolves.toHaveLength(25);
     await expect(testDb.select().from(youtubeDiscoveryCandidateJobs)).resolves.toHaveLength(25);
     await expect(testDb.select().from(youtubeDiscoveryRankingHistory)).resolves.toHaveLength(25);
+  });
+
+  test("persists the winning search tranche once for each canonical result and candidate job", async () => {
+    const { claim } = await claimedRun();
+    const results = [
+      { ...candidate("abcDEF12345", 0), searchTranche: "medium" as const },
+      { ...candidate("defGHI67890", 1), searchTranche: "long" as const },
+    ];
+
+    expect(await persistYoutubeDiscoveryCandidates(claim, results, testDb)).toBe("completed");
+    await expect(testDb.select({ videoId: youtubeDiscoveryCandidates.videoId, searchTranche: youtubeDiscoveryAppearances.searchTranche }).from(youtubeDiscoveryAppearances).innerJoin(youtubeDiscoveryCandidates, eq(youtubeDiscoveryAppearances.candidateId, youtubeDiscoveryCandidates.id)).orderBy(youtubeDiscoveryAppearances.resultOrdinal)).resolves.toEqual([
+      { videoId: "abcDEF12345", searchTranche: "medium" },
+      { videoId: "defGHI67890", searchTranche: "long" },
+    ]);
+    await expect(testDb.select().from(youtubeDiscoveryCandidateJobs)).resolves.toHaveLength(2);
+  });
+
+  test("persists actual medium-then-long adapter output with medium winning a duplicate", async () => {
+    const { claim } = await claimedRun();
+    let requests = 0;
+    const results = await searchYoutubeVideos("Da Lat", "test-key", async () => new Response(JSON.stringify({ items: requests++ === 0
+      ? [{ id: { kind: "youtube#video", videoId: "abcDEF12345" } }]
+      : [{ id: { kind: "youtube#video", videoId: "abcDEF12345" } }, { id: { kind: "youtube#video", videoId: "defGHI67890" } }],
+    })));
+
+    expect(await persistYoutubeDiscoveryCandidates(claim, results, testDb)).toBe("completed");
+    await expect(testDb.select({ videoId: youtubeDiscoveryCandidates.videoId, searchTranche: youtubeDiscoveryAppearances.searchTranche }).from(youtubeDiscoveryAppearances).innerJoin(youtubeDiscoveryCandidates, eq(youtubeDiscoveryAppearances.candidateId, youtubeDiscoveryCandidates.id)).orderBy(youtubeDiscoveryAppearances.resultOrdinal)).resolves.toEqual([
+      { videoId: "abcDEF12345", searchTranche: "medium" },
+      { videoId: "defGHI67890", searchTranche: "long" },
+    ]);
+    await expect(testDb.select().from(youtubeDiscoveryCandidateJobs)).resolves.toHaveLength(2);
+  });
+
+  test("rejects malformed tranche input before any candidate or appearance mutation", async () => {
+    const { claim } = await claimedRun();
+
+    await expect(persistYoutubeDiscoveryCandidates(claim, [{ ...candidate("abcDEF12345"), searchTranche: "invalid" } as never], testDb)).rejects.toThrow("Invalid YouTube Discovery search candidates");
+    await expect(testDb.select().from(youtubeDiscoveryCandidates)).resolves.toEqual([]);
+    await expect(testDb.select().from(youtubeDiscoveryAppearances)).resolves.toEqual([]);
   });
 
   test("deduplicates a candidate while retaining appearances and history across concurrent runs", async () => {

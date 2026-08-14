@@ -1,5 +1,5 @@
 # generated: 2026-07-25
-# last_updated: 08-14-2026 16:36 (Approved Vietnamese-first Discovery correction adds Epic 22 before Epic 21.)
+# last_updated: 08-14-2026 20:22 (Story 22.1 implementation and bounded review complete.)
 # project: xuyenviet
 # project_key: NOKEY
 # tracking_system: file-system
@@ -33,7 +33,7 @@
 #   - done: Completed
 
 generated: 2026-07-25
-last_updated: 08-14-2026 16:36
+last_updated: 08-14-2026 20:22
 project: xuyenviet
 project_key: NOKEY
 tracking_system: file-system
@@ -458,8 +458,8 @@ development_status:
   # 2026-08-14: Approved Correct Course proposal adds a prospective-only
   # Vietnamese-first Discovery quality correction. Complete Stories 22.1-22.3
   # before resuming Epic 21. Historical Discovery data remains unchanged.
-  epic-22: backlog
-  22-1-generate-vietnamese-first-discovery-queries: backlog
+  epic-22: in-progress
+  22-1-generate-vietnamese-first-discovery-queries: review
   22-2-gate-language-and-useful-duration-before-ai-triage: backlog
   22-3-surface-video-evidence-and-prove-vietnamese-first-quality: backlog
   epic-22-retrospective: optional
