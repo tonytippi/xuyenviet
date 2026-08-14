@@ -1,5 +1,5 @@
 # generated: 2026-07-25
-# last_updated: 08-13-2026 17:27 (Epic 21 migrated to specs/spec-epic-21 folder+ID dispatch.)
+# last_updated: 08-14-2026 16:36 (Approved Vietnamese-first Discovery correction adds Epic 22 before Epic 21.)
 # project: xuyenviet
 # project_key: NOKEY
 # tracking_system: file-system
@@ -33,7 +33,7 @@
 #   - done: Completed
 
 generated: 2026-07-25
-last_updated: 08-13-2026 17:27
+last_updated: 08-14-2026 16:36
 project: xuyenviet
 project_key: NOKEY
 tracking_system: file-system
@@ -454,6 +454,15 @@ development_status:
   20-5-verify-control-tower-accessibility-and-operational-boundaries: done
   20-6-decouple-candidate-processing-from-discovery-search-runs: done
   epic-20-retrospective: optional
+
+  # 2026-08-14: Approved Correct Course proposal adds a prospective-only
+  # Vietnamese-first Discovery quality correction. Complete Stories 22.1-22.3
+  # before resuming Epic 21. Historical Discovery data remains unchanged.
+  epic-22: backlog
+  22-1-generate-vietnamese-first-discovery-queries: backlog
+  22-2-gate-language-and-useful-duration-before-ai-triage: backlog
+  22-3-surface-video-evidence-and-prove-vietnamese-first-quality: backlog
+  epic-22-retrospective: optional
 
   # 2026-08-13: Canonical dispatch lives at _bmad-output/specs/spec-epic-21.
   # stories.yaml defines dependency order but owns no status. The orchestrator

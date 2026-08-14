@@ -2,14 +2,14 @@
 title: XuyenViet AI Travel Information MVP PRD
 status: final
 created: 2026-07-04
-updated: 2026-08-11
+updated: 2026-08-14
 ---
 
 # XuyenViet AI Travel Information MVP PRD
 
 ## 1. Summary
 
-XuyenViet will launch a public-access MVP for Vietnamese-speaking road-trip travelers, with supported route-planning coverage initially focused on the Hanoi-to-HCMC corridor. The MVP's primary product surface is **AI Ask**: an authenticated Vietnamese AI chat assistant that helps users plan trips faster by combining the current conversation or explicitly selected Trip Project, active travel knowledge, and scoped web verification when a required planning need is missing or freshness-sensitive.
+XuyenViet will launch a public-access MVP primarily for Vietnamese people planning domestic road trips, with supported route-planning coverage initially focused on the Hanoi-to-HCMC corridor. The MVP's primary product surface is **AI Ask**: an authenticated Vietnamese AI chat assistant that helps users plan trips faster by combining the current conversation or explicitly selected Trip Project, active travel knowledge, and scoped web verification when a required planning need is missing or freshness-sensitive.
 
 The MVP is not a complete travel marketplace, booking product, Google Maps replacement, or AI travel encyclopedia. It is a focused test of whether XuyenViet can give more useful Vietnam road-trip guidance than generic AI by remembering the user, grounding answers in collected sources, and being honest about uncertainty.
 
@@ -41,7 +41,7 @@ The MVP is not a complete travel marketplace, booking product, Google Maps repla
 
 ### 4.1 Public Traveler
 
-Vietnamese-speaking traveler planning a road trip, often with family members or children, who wants practical help finding routes, stops, places, services, risks, and tips without searching many separate sources.
+Vietnamese person planning a domestic road trip, often with family members or children, who wants practical Vietnamese-language help grounded in the context of driving and traveling within Vietnam without searching many separate sources. This is the actual primary MVP audience; content merely being about Vietnam does not make it suitable for this user.
 
 Initial magic-moment example:
 
@@ -58,6 +58,7 @@ Internal owner or future small operations team member who collects travel inform
 - Scoped fresh search third: answers may use web search when a required planning need lacks applicable evidence, when a relevant detail is freshness-sensitive, or when current evidence cannot support a safe factual premise.
 - Never fake certainty: collected web/Facebook information may be incomplete or wrong, so answers must expose uncertainty and recommend verification for changing details.
 - Practical over generic: useful local tips matter more than polished itinerary prose.
+- Vietnamese users first: discovery and guidance optimize for usefulness to Vietnamese people, Vietnamese-language content, and Vietnamese/local road-user context. Foreign-language sources are a bounded fallback for unique value, not the default content pool.
 - Family-aware by default when children are part of the trip.
 - Chat is the command surface; a Trip Project is the confirmed state surface. AI may suggest persistent changes but never applies them without user confirmation.
 
@@ -306,13 +307,13 @@ Internal owner or future small operations team member who collects travel inform
 
 ### 8.8 YouTube Discovery
 
-- FR-66: The system shall generate and refresh scoped YouTube Discovery query proposals from knowledge coverage gaps, freshness risk, unresolved conflicts, and safe aggregated traveler-demand signals, and shall support operator-created queries in the same governed workflow.
+- FR-66: The system shall generate and refresh scoped YouTube Discovery query proposals from knowledge coverage gaps, freshness risk, unresolved conflicts, and safe aggregated traveler-demand signals, and shall support operator-created queries in the same governed workflow. System-generated provider queries shall translate geography, taxonomy, and planning need into natural Vietnamese; raw internal English taxonomy labels shall never be sent unchanged to the provider.
 - FR-67: Authorized operators shall be able to inspect a query's origin, reason, priority, text, schedule context, and enabled or paused state and to create, edit, reprioritize, pause, or resume operator-managed queries.
 - FR-68: An authorized operator shall be able to enable or disable Discovery globally. Disabling stops new Discovery planning, search, enrichment, triage, provider calls, and writes safely; it shall not alter queued Knowledge sources, completed knowledge, or manual `youtube:capture` work.
-- FR-69: While permitted by global and query policy, the system shall run bounded scheduled discovery through documented YouTube Data API capabilities and deduplicate eligible individual public videos into canonical URL candidates without downloading or storing video media.
-- FR-70: Candidate enrichment shall retain only bounded safe video/channel metadata and closed derived comment signals needed for triage. Comments shall never become evidence, capture material, knowledge cards, retrieval input, or traveler content.
-- FR-71: The system shall validate bounded AI metadata triage and combine it with deterministic eligibility and ranking policy to produce `skip`, `defer`, or `consider` recommendations. Neither model output nor popularity establishes factual correctness, credibility, evidence, or publication eligibility.
-- FR-72: Authorized operators shall receive a ranked, one-at-a-time candidate review experience with safe metadata, a plain-language recommendation, concise factors and penalties, bounded derived signals, and prior safe capture outcome when available.
+- FR-69: While permitted by global and query policy, the system shall run bounded scheduled Vietnamese-first discovery through documented YouTube Data API capabilities and deduplicate eligible individual public videos into canonical URL candidates without downloading or storing video media. Provider region and language parameters are ranking hints, not proof of Vietnamese-language or Vietnamese-user fit.
+- FR-70: Candidate enrichment shall retain only bounded safe video/channel metadata, exact duration, default metadata/audio language where available, a versioned language-fit result, and closed derived comment signals needed for triage. Comments shall never become evidence, capture material, knowledge cards, retrieval input, or traveler content.
+- FR-71: The system shall apply deterministic language/audience-fit and minimum-useful-duration eligibility before downstream AI metadata triage and primary review, then validate bounded AI triage and combine it with deterministic ranking policy to produce `skip`, `defer`, or `consider` recommendations. A score, popularity signal, or model output shall not override a failed hard gate and shall not establish factual correctness, credibility, evidence, or publication eligibility.
+- FR-72: Authorized operators shall receive a ranked, one-at-a-time Vietnamese-first candidate review experience with safe metadata including channel, duration, view count, publish time, language fit, originating query, and decision reason; a plain-language recommendation; concise factors and penalties; bounded derived signals; and prior safe capture outcome when available. Foreign-language fallback shall be bounded and visibly separated from the primary review pool, while too-short and primary-language-ineligible candidates shall not enter Action Required or primary review.
 - FR-73: Authorized operators shall be able to Accept, Defer, or Skip a candidate through role-protected, audited commands. A failed or unknown result remains recoverable and shall not claim that a Knowledge source or capture exists.
 - FR-74: Accept shall submit only the canonical URL to the existing Knowledge intake API and shall record success only after a submitted or duplicate intake result. Discovery shall not create or own a Knowledge source, capture version, ingestion job, evidence, card, or publication state and shall never invoke, schedule, or retry manual `youtube:capture` or Gemini video analysis.
 - FR-75: The Discovery control tower shall prioritize Action Required rather than a KPI dashboard and shall provide Knowledge Mission views for coverage needs, queries, candidates, and funnel progress plus Automation Health views for enablement, schedule, backlog, persistent incidents, telemetry freshness, and safe affected-record detail.
@@ -469,6 +470,8 @@ The supported route-planning boundary shall be communicated to travelers. Knowle
 - SC-12: A traveler correction changes durable Trip planning context only after an explicit owner-confirmed proposal application; subsequent answers use the resulting current Trip version rather than the earlier request or proposal text.
 - SC-13: An authorized operator can move from a documented knowledge need to a reviewed and accepted canonical YouTube URL without Discovery creating Knowledge, starting capture, or bypassing evidence/publication policy.
 - SC-14: Discovery can be disabled without changing completed knowledge or queued/manual capture work, and its action-first control tower exposes only safe, attributable operational information needed to act on coverage, review, or persistent automation problems.
+- SC-15: At least 80% of `consider` recommendations produced by the Vietnamese-first policy are classified `vi` or `likely_vi`; `unknown` does not count toward the target and foreign fallback is reported separately.
+- SC-16: Zero `defer` or `consider` recommendations produced by the Vietnamese-first policy are shorter than its configured minimum useful duration.
 
 ## 13. MVP Acceptance Criteria
 
@@ -521,6 +524,8 @@ The supported route-planning boundary shall be communicated to travelers. Knowle
 - AC-39: The Discovery control tower opens on Action Required and provides bounded Knowledge Mission and Automation Health views sufficient to trace coverage needs, queries, candidates, review backlog, enablement, persistent incidents, and safe affected records.
 - AC-40: Discovery can link an operator to existing high-impact Knowledge work without gaining authority to verify, publish, suppress, or otherwise mutate a Knowledge claim.
 - AC-41: Discovery controls and views are role-protected, Vietnamese-first, keyboard accessible, screen-reader understandable, color independent, and usable on narrow layouts without losing an authorized action.
+- AC-42: System-generated Discovery requests use natural Vietnamese provider queries, and automated tests prove that raw internal English taxonomy labels never reach the provider adapter.
+- AC-43: Mixed Vietnamese, foreign-language, short, medium, long, missing-duration, and unknown-language fixtures prove that deterministic language and duration gates dominate AI score bands; quality measurements include only new-policy recommendations, and no historical candidate, recommendation, or operator decision is backfilled, reclassified, or mutated by the Vietnamese-first policy.
 
 ## 14. Risks
 

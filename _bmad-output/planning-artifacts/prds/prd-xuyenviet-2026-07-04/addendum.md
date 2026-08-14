@@ -5,6 +5,7 @@
 - Brainstorming intent: `_bmad-output/brainstorming/brainstorm-ai-travel-info-mvp-2026-07-04/brainstorm-intent.md`
 - Market landscape research digest captured during PRD creation.
 - YouTube Discovery proposal: `docs/proposals/ai-first-youtube-discovery.md`.
+- Approved Vietnamese-first Discovery correction: `_bmad-output/planning-artifacts/sprint-change-proposal-2026-08-14.md`.
 - Retrieval and Trip-aware Planning Context roadmap v6.2: `docs/roadmaps/retrieval-va-tri-nho-traveler-v6.2.md`.
 
 ## Resolved Product Decisions
@@ -28,7 +29,7 @@
 - Trip Home focus policy: pending expiring proposal, pending proposal, defined confirmed-item gap, next dated planned/confirmed leg, then preparation. Explicit lifecycle phases and on-trip today focus remain deferred.
 - `confirmed` means owner confirmation or a supplied real constraint, not booking/provider validation; booking and availability remain out of scope.
 - Proposal application uses aggregate/item version fences and structural preconditions; a stale proposal applies nothing and returns a safe refresh-required result.
-- YouTube Discovery is an approved bounded operator capability whose product contract is authoritative in PRD UJ-6, FR-66..78, NFR-19..20, SC-13..14, and AC-34..41. Discovery architecture, UX, and Epics 18-20 implement and trace that contract; they do not originate or override product behavior.
+- YouTube Discovery is an approved bounded operator capability whose product contract is authoritative in PRD UJ-6, FR-66..78, NFR-19..20, SC-13..16, and AC-34..43. The actual primary audience is Vietnamese people planning domestic road trips, so Vietnamese language and Vietnamese/local road-user usefulness precede generic content about Vietnam. Discovery architecture, UX, completed Epics 18-20, and corrective Epic 22 implement and trace that contract; they do not originate or override product behavior. The Epic 22 policy applies prospectively and does not backfill, reclassify, or mutate historical Discovery data.
 
 ## Roadmap v6.2 PRD Decision Traceability
 

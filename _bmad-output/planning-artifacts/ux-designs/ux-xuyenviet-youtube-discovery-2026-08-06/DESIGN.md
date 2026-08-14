@@ -4,7 +4,7 @@ description: Desktop-first operator control tower for URL-only YouTube discovery
 status: final
 project: xuyenviet
 created: 2026-08-06
-updated: 2026-08-06
+updated: 2026-08-14
 sources:
   - ../ux-xuyenviet-2026-07-05/DESIGN.md
   - ../../architecture/architecture-xuyenviet-youtube-discovery-2026-08-06/ARCHITECTURE-SPINE.md
@@ -99,7 +99,7 @@ components:
 
 This operator surface inherits the quiet, practical XuyenViet admin language from `../ux-xuyenviet-2026-07-05/DESIGN.md`. It is a workbench, not an analytics dashboard: the default screen points Mai to the few items that require a decision, while Mission and Health provide context on request.
 
-The control tower distinguishes action-required work from ordinary history through placement, plain-language labels, and status text, never color alone. It does not render raw comments, model text, provider payloads, video material, transcripts, evidence spans, or capture internals.
+The control tower distinguishes action-required work from ordinary history through placement, plain-language labels, and status text, never color alone. Its primary review pool serves Vietnamese operators selecting content for a primarily Vietnamese traveler audience; bounded foreign fallback is visibly separate. It does not render raw comments, model text, provider payloads, video material, transcripts, evidence spans, or capture internals.
 
 ## Colors
 
@@ -119,7 +119,7 @@ Inherit `{typography.display-sm}`, `{typography.body}`, `{typography.label}`, an
 - Desktop/tablet is the primary working surface. Use a flat admin navigation rail at `{spacing.admin-sidebar-width}`, a flexible main queue/list column, and a selected-candidate inspector at `{spacing.inspector-width}`.
 - The action queue is a short, ordered worklist rather than a KPI card grid. It contains candidates requiring review, stalled high-priority Mission needs, and persistent Discovery failures only.
 - Candidate review keeps the queue and inspector visible together. The queue prioritizes scanning; the inspector holds safe metadata, explanation, and one-at-a-time actions.
-- Mission and Health use wide readable tables/lists with an optional focused detail pane. Avoid dense chart walls and continuously scrolling event feeds.
+- Mission and Health use wide readable tables/lists with an optional focused detail pane. They may show concise new-policy distributions for language fit, duration fit, exclusion reason, and foreign fallback; avoid dense chart walls and continuously scrolling event feeds.
 - Below the three-column workspace breakpoint, collapse navigation, then replace the inspector with a sequential detail page/sheet. At 320 CSS pixels and 400% zoom, every authorized function remains reachable without two-dimensional scrolling; desktop-first changes density, not availability.
 
 ## Elevation & Depth
@@ -138,8 +138,10 @@ Inherit `{typography.display-sm}`, `{typography.body}`, `{typography.label}`, an
 ## Components
 
 - **Action queue item** uses `{components.action-queue-item}`. It contains a clear type label, one-line reason, priority/date context, and one entry action. It does not expose raw error or model details.
-- **Candidate queue row** shows title, channel, published date/duration when available, plain-language recommendation, priority, and current operator state. Selected row uses `{components.candidate-active-row}`.
-- **Candidate inspector** uses `{components.discovery-inspector}`. It shows canonical URL, safe video/channel metadata, query/reason, recommendation, up to five applicable factors and penalties, derived comment signals, prior safe capture outcome, and actions `Accept`, `Để sau`, `Bỏ qua`.
+- **Candidate queue row** shows thumbnail, title, channel, duration, human-readable view count, exact/relative publish time, Vietnamese language-fit label, plain-language recommendation, priority, and current operator state. Selected row uses `{components.candidate-active-row}`.
+- **Candidate inspector** uses `{components.discovery-inspector}`. It shows canonical URL, safe video/channel metadata, originating query, duration, view count, publish time, language fit, safe eligibility reason, recommendation, up to five applicable factors and penalties, derived comment signals, prior safe capture outcome, and actions `Accept`, `Để sau`, `Bỏ qua`.
+- **Foreign fallback section** is labelled `Nguồn ngoại ngữ bổ sung` and remains visually and semantically separate from the Vietnamese-first primary queue. It uses the same metadata evidence but never looks like a higher-ranked primary recommendation.
+- **Language-fit chip** renders `vi` as `Nội dung tiếng Việt` and `likely_vi` as `Có khả năng là tiếng Việt`. Raw classifier codes or diagnostic inputs are not primary operator copy.
 - **Accept feedback** temporarily disables inspector actions. A submitted intake reports `Đã thêm URL vào nguồn chờ xử lý. Bạn vẫn cần chạy YouTube Capture thủ công.` A duplicate reports `URL này đã có trong nguồn chờ xử lý hoặc đã được lưu trước đó.` It then advances selection. Neither outcome claims capture or knowledge creation.
 - **Signal chip** uses `{components.signal-chip}` for safe derived signals such as `Có nhắc đến thay đổi gần đây`; it must not quote a comment or imply verified evidence.
 - **Global Discovery switch** shows `Đang bật` / `Đang tắt` adjacent to the immediate toggle. Its feedback states the boundary: it controls planning/search/enrichment/triage only, not queued Knowledge sources or manual capture.
@@ -154,6 +156,8 @@ Inherit `{typography.display-sm}`, `{typography.body}`, `{typography.label}`, an
 | Keep candidate queue and inspector visible together on desktop | Force a separate detail route for every candidate decision |
 | State that Accept adds a URL to Knowledge intake and capture remains manual | Label Accept as capture, approval of knowledge, or successful Gemini analysis |
 | Use concise factors and explicit penalties to explain triage | Present model scores as proof of accuracy or credibility |
+| Show channel, duration, views, and publish time as review context | Treat popularity or freshness as proof that a video is correct |
+| Keep foreign fallback in `Nguồn ngoại ngữ bổ sung` | Mix foreign-language fallback into Vietnamese-first primary ranking |
 | Keep Health focused on action-required failures and trends | Show raw provider errors, comments, prompts, or payloads |
 | Make global enablement immediate and legible | Hide the switch effect behind technical status codes or a modal ritual |
 | Preserve the existing admin visual language | Introduce a separate analytics-product aesthetic or traveler chat shell |

@@ -7,7 +7,7 @@ paradigm: PostgreSQL-backed modular workflow with worker-owned scheduled executi
 scope: URL-only YouTube discovery, triage, and operator review
 status: final
 created: 2026-08-06
-updated: 2026-08-11
+updated: 2026-08-14
 binds: [youtube-discovery]
 sources:
   - _bmad-output/planning-artifacts/prds/prd-xuyenviet-2026-07-04/prd.md
@@ -19,7 +19,7 @@ companions: []
 
 # Architecture Spine - AI-First YouTube Discovery
 
-This architecture implements the active PRD's YouTube Discovery contract at UJ-6, FR-66..78, NFR-19..20, SC-13..14, and AC-34..41. It may refine mechanisms and failure handling but shall not broaden or weaken that product contract without a corresponding PRD update.
+This architecture implements the active PRD's YouTube Discovery contract at UJ-6, FR-66..78, NFR-19..20, SC-13..16, and AC-34..43. It may refine mechanisms and failure handling but shall not broaden or weaken that product contract without a corresponding PRD update. The primary audience is Vietnamese people planning domestic road trips; content merely being about Vietnam is not sufficient audience fit.
 
 ## Design Paradigm
 
@@ -54,29 +54,35 @@ PostgreSQL-backed modular workflow with Worker-owned scheduled execution. Discov
 - **Prevents:** request-serving execution, platform-specific cron ownership, overlapping runs, and a hidden capture scheduler.
 - **Rule:** Discovery is a registered Worker adapter with explicit readiness and telemetry. Its separately leased planning stage idempotently creates/refreshes system proposals; its due-query stage creates and claims runs only while the global switch is enabled. A due-query run searches, persists canonical candidates and immutable appearances, atomically enqueues one candidate-processing job per appearance, then completes. Candidate jobs independently perform enrichment, metadata triage, deterministic eligibility, and recommendation. Before every provider call, Discovery write, and retry/requeue write, the Worker compares current enablement under the matching active lease. A revoked run or job becomes `cancelled` with a safe terminal audit outcome and creates no further work. API/admin commands create or change policy/query state and read projections; they never execute Discovery stages. Provider-stage failures use bounded exponential backoff and safe terminal error codes at the candidate-job unit, so one URL cannot block a query or unrelated URL. Later scheduled query runs remain independent.
 
-### AD-4 - One Query Proposal Aggregate Serves System And Operator Origins [ADOPTED]
+### AD-4 - One Query Proposal Aggregate Serves System And Operator Origins [AMENDED 2026-08-14]
 
 - **Binds:** automated planning signals, operator-managed queries, schedules, priority, query lifecycle.
 - **Prevents:** separate scheduling and ranking contracts for semantically equivalent queries.
-- **Rule:** One `youtube_discovery_query_proposal` aggregate records `origin = system | operator`, reason, priority, query text, enabled/paused state, and cadence. System proposals derive only from coverage gaps, freshness risk, unresolved conflicts, and aggregated anonymized AI Ask demand. Global enablement controls all new Discovery planning and runs; per-query state controls an individual proposal.
+- **Rule:** One `youtube_discovery_query_proposal` aggregate records `origin = system | operator`, reason, priority, query text, enabled/paused state, cadence, and the applicable query-builder version. System proposals derive only from coverage gaps, freshness risk, unresolved conflicts, and aggregated anonymized AI Ask demand. Global enablement controls all new Discovery planning and runs; per-query state controls an individual proposal.
+- **Rule:** Normalized target identity and digests remain language-neutral, but a versioned builder translates system-owned geography, taxonomy, and planning need into natural Vietnamese provider queries. Mappings use Vietnamese road-user language, for example `route` to `kinh nghiệm cung đường ô tô`, `cost_note` to `chi phí hành trình`, and `hotel_area` to `khu vực lưu trú khách sạn`; unchanged internal English taxonomy must never reach the provider. Builder-version changes regenerate system proposals idempotently and never overwrite operator-authored query text.
+- **Rule:** A due query may issue bounded YouTube `medium` and `long` duration search tranches. Their results merge deterministically through the existing canonical candidate identity while each appearance retains originating query/tranche provenance. Search filters reduce waste but never replace authoritative exact-duration eligibility after enrichment.
 
-### AD-5 - Metadata Triage Uses The AI Gateway And Cannot Authorize Work [ADOPTED]
+### AD-5 - Vietnamese-First Eligibility Precedes AI Metadata Triage [AMENDED 2026-08-14]
 
-- **Binds:** bounded enrichment, AI triage, schema validation, deterministic recommendation, usage attribution.
-- **Prevents:** a second Gemini credential/path, unvalidated model output, or model-authorized capture.
-- **Rule:** Discovery metadata triage uses the existing AI Gateway adapter and Usage model, never the Gemini video-analysis path. The model catalog has dedicated `youtube_discovery_triage` purpose with text-input and structured-extraction capability, plus a versioned triage prompt and Usage purpose. Triage input is bounded safe metadata plus derived signals; output is schema-validated as untrusted operational input. Deterministic Discovery policy validates canonical URL, public individual-video eligibility, dedupe, Knowledge-owned safe prior-capture eligibility lookup, and score bands before `skip`, `defer`, or `consider` can be shown. Candidate, channel, and query blocking/exclusion policy is deferred from the initial slice. No triage result creates Knowledge state or authorizes capture.
+- **Binds:** bounded enrichment, language fit, exact duration, AI triage, schema validation, deterministic recommendation, usage attribution.
+- **Prevents:** foreign-language or too-short content entering primary review because it is about Vietnam, avoidable enrichment/AI work, a second Gemini credential/path, unvalidated model output, or model-authorized capture.
+- **Rule:** After bounded video metadata enrichment, a candidate job determines versioned `languageFit` and `durationFit` before channel enrichment, comments, AI triage, or recommendation. A primary-gate failure persists only a safe closed reason and stops downstream work. Only primary-eligible candidates continue through the existing AI Gateway and Usage path.
+- **Rule:** `languageFit` is exactly `vi | likely_vi | unknown | non_vi`. Explicit Vietnamese default metadata/audio language yields `vi`; explicit non-Vietnamese default audio yields `non_vi`; otherwise a bounded, versioned deterministic classifier uses title, description, and tags without a new provider, service, or dependency. `vi` and `likely_vi` are primary-eligible. `unknown` and `non_vi` may be considered only by a bounded same-need fallback when no qualified Vietnamese candidate exists, and fallback never mixes into primary ranking.
+- **Rule:** The versioned PostgreSQL policy owns `minimumUsefulDurationSeconds`, initially `180`. Exact duration below the threshold yields `too_short`; missing or invalid exact duration yields `duration_unknown`; both fail primary eligibility. Popularity, relevance score, and model output cannot override language or duration gates.
+- **Rule:** Discovery metadata triage uses the existing AI Gateway adapter and Usage model, never the Gemini video-analysis path. The model catalog has dedicated `youtube_discovery_triage` purpose with text-input and structured-extraction capability, plus a versioned triage prompt and Usage purpose. Triage input is bounded safe metadata plus derived signals; output is schema-validated as untrusted operational input. Deterministic policy then validates canonical URL, public individual-video eligibility, dedupe, Knowledge-owned safe prior-capture eligibility lookup, and score bands before `skip`, `defer`, or `consider` can be shown. No triage result creates Knowledge state or authorizes capture.
+- **Rule:** The Vietnamese-first policy is prospective. Existing candidates, appearances, recommendations, review states, and operator decisions are not reclassified, backfilled, superseded, or mutated; quality gates and measurements select only records produced with the new policy version.
 
 ### AD-6 - Discovery Persists Safe Operational State Only [ADOPTED]
 
 - **Binds:** candidate/query/run persistence, logs, audits, triage inputs, control-tower projections, retention.
 - **Prevents:** Discovery becoming a raw-source, provider-payload, or traveler-content store.
-- **Rule:** Persist only bounded video/channel metadata, sanitized derived comment signals, score factors, policy/version references, safe error codes, and audit summaries. Never persist raw comments, model prompts/responses, provider payloads, video media, transcripts, credentials, cookies, raw source material, evidence spans, or traveler content. Candidate/audit retention and derived-comment-signal TTL are policy-controlled; the initial candidate/audit default is 180 days, and comment-signal TTL is shorter.
+- **Rule:** Persist only bounded video/channel metadata including channel title, exact duration, view count, `publishedAt`, provider default language/audio language when available, versioned `languageFit` and `durationFit`, query-builder/classifier/policy references, sanitized derived comment signals, score factors, closed safe reason codes, safe error codes, and audit summaries. New-policy reasons are exactly `eligible_vietnamese | too_short | duration_unknown | non_vietnamese | language_unknown | foreign_fallback`. Never persist raw comments, model prompts/responses, provider payloads, video media, transcripts, credentials, cookies, raw source material, evidence spans, or traveler content. Candidate/audit retention and derived-comment-signal TTL are policy-controlled; the initial candidate/audit default is 180 days, and comment-signal TTL is shorter.
 
 ### AD-7 - Policy And Operator Control Are Database-Owned And Admin-Only [ADOPTED]
 
-- **Binds:** global switch, score bands/weights, cadence, retention, bounded worker concurrency/retry settings, candidate/query commands, control-tower read models.
+- **Binds:** global switch, Vietnamese-first query/language/duration policy, score bands/weights, cadence, retention, bounded worker concurrency/retry settings, candidate/query commands, control-tower read models.
 - **Prevents:** scattered environment policy, unaudited operational changes, and presentation-layer domain ownership.
-- **Rule:** Discovery policy is one versioned PostgreSQL record changed only through role-protected, audited admin API commands. Each run snapshots its effective policy version. Discovery has no hard budget/quota admission or reservation aggregate; provider/Usage telemetry is recorded where available. `apps/admin` is a typed API client only. Operator candidate actions and query changes are server-side commands with actor, target, action, timestamp, and safe before/after summary.
+- **Rule:** Discovery policy is one versioned PostgreSQL record changed only through role-protected, audited admin API commands. It owns the active query-builder version, language-classifier version, initial `minimumUsefulDurationSeconds=180`, and bounded foreign-fallback behavior in addition to existing scoring/operational values. Each run snapshots its effective policy version. Discovery has no hard budget/quota admission or reservation aggregate; provider/Usage telemetry is recorded where available. `apps/admin` is a typed API client only. Operator candidate actions and query changes are server-side commands with actor, target, action, timestamp, and safe before/after summary.
 
 ### AD-8 - Discovery Uses Closed Operational States And A Registered System Executor [AMENDED 2026-08-13]
 
@@ -156,12 +162,12 @@ apps/admin/
 
 | Capability / Area | Lives in | Governed by |
 | --- | --- | --- |
-| System/operator query proposals | Discovery domain, PostgreSQL | AD-3, AD-4, AD-7 |
+| System/operator query proposals and Vietnamese provider queries | Discovery domain, PostgreSQL | AD-3, AD-4, AD-7 |
 | Search and appearance enqueue | Worker and Discovery domain | AD-2, AD-3, AD-6, AD-9 |
-| Candidate enrichment, triage, ranking | Worker and Discovery domain | AD-3, AD-5, AD-6, AD-9 |
+| Candidate enrichment, language/duration eligibility, triage, ranking | Worker and Discovery domain | AD-3, AD-5, AD-6, AD-9 |
 | Metadata AI triage and ranking | Discovery domain, AI Gateway, Usage | AD-5, AD-6 |
 | Operator review and Knowledge intake handoff | Admin API/read models and Discovery domain | AD-1, AD-2, AD-7 |
-| Discovery health/control tower | Discovery read models | AD-3, AD-6, AD-7, AD-8 |
+| Discovery health/control tower and new-policy quality distributions | Discovery read models | AD-3, AD-5, AD-6, AD-7, AD-8 |
 | Manual capture handoff | Discovery accept command calls Knowledge seed-batch intake API, then existing `youtube:capture` workflow | AD-1, AD-2; inherited AD-10, AD-25, AD-32 |
 
 ## Deferred
@@ -170,4 +176,4 @@ apps/admin/
 - Exact coverage/freshness/conflict/demand read-model fields and aggregate latency: define in the upstream Knowledge/AI Ask integration story without persisting traveler content in Discovery.
 - Candidate UI interaction design and control-tower layout: UX artifact owns presentation while AD-7 preserves the API/ownership boundary.
 - Hard Discovery AI-cost budgets, quota reservations, projected capacity, and budget alerts: deferred until Discovery usage justifies enforcement beyond bounded concurrency and provider rate-limit handling.
-- Candidate, channel, and query blocking/exclusion policy: deferred; the initial slice supports only Accept, Defer, and Skip candidate decisions.
+- Operator-authored candidate, channel, and query blocklists remain deferred. The adopted Vietnamese-first language/duration eligibility policy is a separate deterministic gate and is not deferred.

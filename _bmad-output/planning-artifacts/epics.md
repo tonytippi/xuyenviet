@@ -326,7 +326,7 @@ UX-DR24: Referral attribution is silent and introduces no reward/credit/ranking/
 
 ### YouTube Discovery Requirements (2026-08-06)
 
-These `YTD-*` identifiers are retained as delivery aliases for the implemented Discovery tranche. The product contract is authoritative in the active PRD at UJ-6, FR-66..78, NFR-19..20, SC-13..14, and AC-34..41. The requirements below may add implementation and UX detail but shall not originate, broaden, or contradict product behavior; if they conflict, the PRD wins and the affected epic/story must be corrected.
+These `YTD-*` identifiers are retained as delivery aliases for the implemented Discovery tranche. The product contract is authoritative in the active PRD at UJ-6, FR-66..78, NFR-19..20, SC-13..16, and AC-34..43. The requirements below may add implementation and UX detail but shall not originate, broaden, or contradict product behavior; if they conflict, the PRD wins and the affected epic/story must be corrected.
 
 #### Functional Requirements
 
@@ -534,13 +534,13 @@ FR-62: Epic 21 - Capacity-safe prioritization, useful partial guidance, and expl
 FR-63: Epic 21 - Traveler-language supported route coverage.
 FR-64: Epic 21 - Safe bounded behavior for partial, ambiguous, and unsupported routes.
 FR-65: Epic 21 - Recent warnings remain distinct from live route authority.
-FR-66: Epic 18 Stories 18.2-18.3 - Governed system/operator Discovery query proposals.
+FR-66: Epic 18 Stories 18.2-18.3 - Governed system/operator Discovery query proposals; Epic 22 Story 22.1 - natural Vietnamese provider-query construction.
 FR-67: Epic 18 Story 18.3 - Authorized query inspection, management, and scheduling context.
 FR-68: Epic 18 Story 18.2 and Epic 20 Story 20.4 - Global Discovery disablement without changing Knowledge/manual capture.
-FR-69: Epic 18 Story 18.4 - Bounded documented YouTube API discovery and canonical URL deduplication.
-FR-70: Epic 18 Story 18.5 - Bounded safe metadata and non-evidence derived comment signals.
-FR-71: Epic 19 Stories 19.1-19.2 - Validated AI metadata triage plus deterministic eligibility/ranking.
-FR-72: Epic 19 Story 19.3 - Ranked explainable one-at-a-time candidate review.
+FR-69: Epic 18 Story 18.4 - Bounded documented YouTube API discovery and canonical URL deduplication; Epic 22 Stories 22.1-22.2 - Vietnamese-first search and authoritative exact-duration gating.
+FR-70: Epic 18 Story 18.5 - Bounded safe metadata and non-evidence derived comment signals; Epic 22 Story 22.2 - bounded language/audio-language, duration, views, publish time, and versioned fit metadata.
+FR-71: Epic 19 Stories 19.1-19.2 - Validated AI metadata triage plus deterministic eligibility/ranking; Epic 22 Story 22.2 - language/duration hard gates before downstream AI work.
+FR-72: Epic 19 Story 19.3 - Ranked explainable one-at-a-time candidate review; Epic 22 Story 22.3 - Vietnamese-first review evidence and separated foreign fallback.
 FR-73: Epic 19 Story 19.5 - Protected audited Accept/Defer/Skip and recoverable unknown outcomes.
 FR-74: Epic 19 Story 19.4 - Canonical URL handoff to Knowledge intake without capture ownership.
 FR-75: Epic 20 Stories 20.1-20.3 - Action Required, Knowledge Mission, and Automation Health control tower.
@@ -549,6 +549,9 @@ FR-77: Epic 18 Story 18.5 - Policy-controlled safe candidate and derived-signal 
 FR-78: Epic 18 Stories 18.4-18.5 - Documented APIs and bounded metadata only; no scraping, transcript, media, raw-comment, or automatic-video-analysis path.
 NFR-19: Epics 18-20 - Role-protected, attributable Discovery commands, read models, automation, AI usage, retention, and bounded safe operational projections.
 NFR-20: Epic 20 Stories 20.1-20.5 - Accessible, responsive Discovery control tower with retained authorized functions on narrow layouts.
+SC-15, SC-16: Epic 22 Story 22.3 - new-policy Vietnamese-language and minimum-duration release measurements.
+AC-42: Epic 22 Story 22.1 - natural Vietnamese system queries and provider-adapter boundary tests.
+AC-43: Epic 22 Stories 22.2-22.3 - hard-gate fixtures, prospective-only policy measurement, and no historical-data mutation.
 
 ### Architecture Delta Coverage Map (2026-07-28)
 
@@ -2437,7 +2440,16 @@ YTD-ARCH2: Epic 18 Story 18.1 - One versioned PostgreSQL Discovery policy record
 YTD-ARCH3: Epic 18 Story 18.3 - Separate triage/candidate/run state enums.
 YTD-ARCH4: Epic 18 Story 18.2 - Global-disable fence before every provider call and Discovery write.
 YTD-ARCH5: Epic 18 Stories 18.1 through 18.5 - No hard budget/quota reservation enforcement in the initial slice.
-YTD-ARCH6: Epic 19 Story 19.5 - Blocking/exclusion policy is deferred.
+YTD-ARCH6: Epic 19 Story 19.5 - Operator-authored candidate/channel/query blocklists are deferred; Epic 22 owns the separate deterministic language/duration gate.
+
+### Vietnamese-First Corrective Traceability (2026-08-14)
+
+- Epic 22 is a prospective correction to the completed Epic 18-20 baseline; it does not rewrite completed story outcomes.
+- The actual primary audience is Vietnamese people planning domestic road trips. Vietnamese language and Vietnamese/local road-user usefulness take precedence over generic content about Vietnam.
+- Story 22.1 covers FR-66, FR-69, and AC-42.
+- Story 22.2 covers FR-69 through FR-71 and the gate behavior in AC-43.
+- Story 22.3 covers FR-72, SC-15, SC-16, and operator/measurement behavior in AC-43.
+- Epic 22 applies only to new-policy runs. It does not backfill, reconcile, supersede, or mutate historical candidates, appearances, recommendations, or operator decisions.
 
 ## Epic 18: Automated Discovery Mission Foundation
 
@@ -2461,7 +2473,15 @@ Operators can act on the few Discovery items that need attention, trace mission 
 
 **Requirements covered:** YTD-FR11, YTD-FR12; YTD-UX1, YTD-UX5, YTD-UX6, YTD-UX7, YTD-UX8; YTD-NFR7, YTD-NFR8.
 
-**Implementation notes:** The default entry is an action-required queue, not a KPI dashboard. Mission delivers Coverage needs, Queries, Candidates, and Funnel drill-down. Health delivers schedule, backlog, incidents, telemetry freshness, and safe affected-record detail. The immediate global switch fences Discovery work only; it never changes queued Knowledge sources or executes/cancels manual `youtube:capture`. Story 20.6 corrects query-level head-of-line retry by separating durable candidate processing from search runs while preserving all control-tower ownership and safety boundaries. Blocking/exclusion policy and hard budget enforcement remain deferred.
+**Implementation notes:** The default entry is an action-required queue, not a KPI dashboard. Mission delivers Coverage needs, Queries, Candidates, and Funnel drill-down. Health delivers schedule, backlog, incidents, telemetry freshness, and safe affected-record detail. The immediate global switch fences Discovery work only; it never changes queued Knowledge sources or executes/cancels manual `youtube:capture`. Story 20.6 corrects query-level head-of-line retry by separating durable candidate processing from search runs while preserving all control-tower ownership and safety boundaries. Operator-authored candidate/channel/query blocklists and hard budget enforcement remain deferred; Epic 22 separately owns Vietnamese-first language/duration eligibility.
+
+## Epic 22: Vietnamese-First YouTube Discovery Quality
+
+Operators receive sufficiently detailed videos useful to XuyenViet's primarily Vietnamese audience, with Vietnamese-language and Vietnamese/local road-user fit evaluated before AI triage and enough safe metadata to make an informed review decision.
+
+**Requirements covered:** FR-66, FR-69, FR-70, FR-71, FR-72; SC-15, SC-16; AC-42, AC-43.
+
+**Implementation notes:** This corrective epic extends the shipped Epic 18-20 modules without reopening them. It preserves URL-only Discovery, candidate jobs, Knowledge intake handoff, manual `youtube:capture`, audit, Usage, and Worker lease/fence/retry ownership. The policy applies only to new runs and does not process historical Discovery data. Deliver Stories 22.1, 22.2, and 22.3 before resuming Epic 21.
 
 ### Story 18.1: Establish Discovery Ownership, Policy, and Audit Foundation
 
@@ -2920,6 +2940,105 @@ So that one failed enrichment, triage, or recommendation does not block a query 
 **When** the migration/backfill runs
 **Then** exactly one queued job is created for each appearance lacking one, preserving original provenance without replaying search or changing existing recommendation/review state
 **And** rerunning the backfill is idempotent.
+
+### Story 22.1: Generate Vietnamese-First Discovery Queries
+
+As an operator serving Vietnamese road-trip travelers,
+I want system discovery needs translated into natural Vietnamese YouTube queries,
+So that the candidate pool reflects how Vietnamese users describe domestic driving and travel needs instead of foreign content merely about Vietnam.
+
+**Acceptance Criteria:**
+
+**Given** a normalized coverage, freshness, conflict, or aggregated-demand target
+**When** Discovery creates or refreshes a system-owned query proposal
+**Then** a versioned query builder translates geography, taxonomy, and need into natural Vietnamese road-user language
+**And** raw internal English labels such as `route note`, `cost note`, or `general travel tip` never reach the provider adapter.
+
+**Given** the query-builder version changes
+**When** the planning stage refreshes existing system proposals
+**Then** regeneration is idempotent and preserves normalized target identity, target digest, origin, schedule ownership, and auditability
+**And** operator-authored query text is never overwritten or silently translated.
+
+**Given** a Vietnamese system query is due while Discovery is enabled
+**When** documented YouTube search executes
+**Then** it issues policy-bounded `medium` and `long` duration tranches, merges results deterministically through the existing canonical candidate identity, and retains query/tranche provenance on appearances
+**And** result count, documented API use, global/query enablement, canonical dedupe, candidate-job enqueue, and no-media boundaries remain unchanged.
+
+**Given** query generation and provider-adapter tests run
+**When** Vietnamese locations and each supported internal taxonomy are exercised
+**Then** exact provider requests contain the approved natural Vietnamese mapping and version
+**And** a boundary assertion fails if unchanged internal English taxonomy reaches the provider.
+
+### Story 22.2: Gate Language And Useful Duration Before AI Triage
+
+As an operator,
+I want language and useful-duration eligibility decided before costly downstream processing,
+So that primary review contains sufficiently detailed Vietnamese-first candidates and avoidable AI work is not performed.
+
+**Acceptance Criteria:**
+
+**Given** a new-policy candidate job begins bounded video enrichment
+**When** documented metadata is returned
+**Then** Discovery reads exact duration, default metadata language, default audio language, title, description, tags, channel title, view count, and `publishedAt` only within the existing safe metadata boundary
+**And** it persists the applicable policy, query-builder, language-classifier, `languageFit`, and `durationFit` versions without retaining provider payloads.
+
+**Given** language metadata is evaluated
+**When** explicit Vietnamese metadata/audio language exists, explicit non-Vietnamese audio exists, or provider language metadata is absent
+**Then** `languageFit` resolves to the closed `vi | likely_vi | unknown | non_vi` contract using explicit metadata first and a bounded versioned deterministic title/description/tag classifier second
+**And** the implementation introduces no new language provider, service, credential, environment variable, or dependency.
+
+**Given** the versioned PostgreSQL policy initially configures `minimumUsefulDurationSeconds=180`
+**When** exact duration and language fit are checked
+**Then** below-threshold video yields `too_short`, missing/invalid duration yields `duration_unknown`, explicit/likely non-Vietnamese yields `non_vietnamese`, and unresolved language yields `language_unknown`
+**And** each primary-gate failure stops before channel enrichment, comments, AI triage, Usage creation, score-band ranking, or primary recommendation.
+
+**Given** a candidate is `vi` or `likely_vi` and meets exact minimum duration
+**When** downstream processing continues
+**Then** it uses the existing candidate-job lease/fence, AI Gateway, Usage, deterministic ranking, audit, and Knowledge prior-capture boundaries
+**And** score, views, popularity, generic relevance, or model output cannot override a failed language or duration gate.
+
+**Given** no qualified Vietnamese candidate exists for the same normalized need
+**When** policy permits bounded foreign fallback
+**Then** an otherwise useful `unknown` or `non_vi` candidate may be marked only as `foreign_fallback` with distinct provenance
+**And** it never mixes into the Vietnamese-first primary ranking or its quality numerator.
+
+**Given** mixed explicit Vietnamese, explicit foreign-language, Vietnamese without diacritics, short, threshold, long, missing-duration, and missing-language fixtures
+**When** focused unit and serial PostgreSQL integration tests run
+**Then** classifications, threshold edges, downstream call suppression, retry/fence behavior, and fallback isolation are deterministic
+**And** historical candidates, appearances, recommendations, review states, and operator decisions are neither read for backfill nor mutated.
+
+### Story 22.3: Surface Video Evidence And Prove Vietnamese-First Quality
+
+As an operator,
+I want useful video metadata and clearly separated audience-fit results in review,
+So that I can judge relevance, reach, and freshness for Vietnamese users without mistaking those signals for verified evidence.
+
+**Acceptance Criteria:**
+
+**Given** a new-policy `vi` or `likely_vi` candidate reaches primary review
+**When** its row and inspector render
+**Then** they show thumbnail, title, channel, duration, localized view count, exact and relative publish time, `Nội dung tiếng Việt` or `Có khả năng là tiếng Việt`, originating query, and safe eligibility reason
+**And** views, freshness, channel metrics, comment signals, and AI factors are explicitly review context rather than proof of correctness, evidence, capture, or publication.
+
+**Given** bounded foreign fallback exists
+**When** the operator opens candidate review or Mission
+**Then** fallback appears under `Nguồn ngoại ngữ bổ sung` with the same safe metadata and trust boundary
+**And** it is not interleaved with Vietnamese-first primary ranking or counted in the primary Vietnamese-fit numerator.
+
+**Given** new-policy candidates fail primary language or duration eligibility
+**When** Action Required and primary Review Queue are projected
+**Then** those candidates do not appear as operator review work
+**And** Mission/Health exposes only bounded aggregates using `Video quá ngắn`, `Không xác định được thời lượng`, `Không phải nội dung tiếng Việt`, and `Chưa xác định được ngôn ngữ` plus separately measured fallback.
+
+**Given** release-quality evidence is computed
+**When** only recommendations carrying the Vietnamese-first policy version are selected
+**Then** at least 80% of `consider` is `vi` or `likely_vi`, `unknown` does not count, foreign fallback is reported separately, and zero `defer` or `consider` is below the configured minimum duration
+**And** historical rows are excluded from the measurement without reclassification, supersession, reconciliation, or synthetic operator actions.
+
+**Given** the story verification suite runs
+**When** focused unit, serial PostgreSQL integration, protected API, admin UI, accessibility, typecheck, lint, and build checks complete
+**Then** metadata formatting, responsive/assistive output, queue isolation, measurement filters, and safe reason projections are covered
+**And** no ownership, provider, credential, URL-only, Knowledge intake, manual capture, Usage, audit, lease, fence, retry, or retention boundary regresses.
 
 ## Epic 17: Current Operator Runbook
 
