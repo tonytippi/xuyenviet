@@ -5,8 +5,8 @@ import { youtubeDiscoveryReviewCopy } from "../apps/admin/app/knowledge/youtube-
 describe("admin YouTube Discovery review UI boundary", () => {
   test("maps every closed safe code to Vietnamese operator copy", () => {
     expect(youtubeDiscoveryReviewCopy).toEqual({
-      recommendation: { consider: expect.any(String) },
-      reason: { eligible_score_band: expect.any(String) },
+      recommendation: { skip: expect.any(String), defer: expect.any(String), consider: expect.any(String) },
+      reason: { eligible_score_band: expect.any(String), below_defer_band: expect.any(String), between_defer_and_consider_band: expect.any(String), already_compatible: expect.any(String), canonical_mismatch: expect.any(String), not_current_run_enriched: expect.any(String) },
       queryReason: { coverage_gap: expect.any(String), freshness_risk: expect.any(String), unresolved_conflict: expect.any(String), anonymized_demand: expect.any(String), operator_request: expect.any(String) },
       factor: { relevance: expect.any(String), expected_value: expect.any(String), freshness_fit: expect.any(String) },
       penalty: { commercial_risk: expect.any(String), duplicate_risk: expect.any(String) },
@@ -90,6 +90,13 @@ describe("admin YouTube Discovery review UI boundary", () => {
     expect(source).toContain('async function admitDeepLink(recommendationId: string)');
     expect(source).toContain('if (!response.ok || !parsed || requestId !== detailRequestId.current) throw new Error("unavailable");');
     expect(source).toContain('Ứng viên trong liên kết không còn khả dụng.');
+    expect(source).toContain('/v1/admin/knowledge/youtube-discovery/browse?${params}');
+    expect(source).toContain('setBrowseFilter(filter)');
+    expect(source).toContain('Chỉ đọc. Các quyết định chỉ áp dụng');
+    expect(source).not.toContain('browse/${encodeURIComponent');
+    expect(source).toContain('useState<AdminYoutubeDiscoveryBrowseFilter>("consider")');
+    expect(source).toContain('if (loadingBrowseMore.current || nextCursor !== browseCursor) return;');
+    expect(source).toContain('++browseGeneration.current; loadingBrowseMore.current = false; setBrowseItems([]); setBrowseCursor(null);');
   });
 
   test("uses the main Discovery route for URL review and exposes Health", async () => {

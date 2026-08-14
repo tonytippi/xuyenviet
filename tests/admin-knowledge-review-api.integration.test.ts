@@ -3,7 +3,7 @@ import { NestFactory } from "@nestjs/core";
 import request from "supertest";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
-import { createPostgresApiIdentityRepository } from "@xuyenviet/database";
+import { createPostgresApiIdentityRepository, type BrowserIdentityRepository } from "@xuyenviet/database";
 import { KnowledgeDraftReviewPolicyError, type AdminKnowledgeReviewPort } from "@xuyenviet/domain";
 import { createApiModule } from "../apps/api/src/app.module";
 import { csrfHash, csrfNonce } from "../apps/api/src/auth/browser-auth";
@@ -16,13 +16,14 @@ const recommendationId = "11111111-1111-4111-8111-111111111111";
 const cardId = "22222222-2222-4222-8222-222222222222";
 let app: INestApplication;
 let resolveRecommendation: ReturnType<typeof vi.fn<AdminKnowledgeReviewPort["resolveRecommendation"]>>;
+let identities: BrowserIdentityRepository;
 
 async function browserSession(userId: string, role: "operator" | "traveler") {
   const sessionId = `${userId[0]}${"s".repeat(63)}`;
   const csrf = csrfNonce(browserAuth, sessionId);
   await testDb.insert(users).values({ id: userId, email: `${userId}@example.com` });
   await testDb.insert(userRoles).values({ userId, role });
-  await createPostgresApiIdentityRepository(getTestDatabaseUrl(), browserAuth.sessionLookupKey, browserAuth.oauthTransactionProtectionKey).createBrowserSession(userId, sessionId, csrfHash(browserAuth, sessionId, csrf), 1, new Date(Date.now() + 60_000));
+  await identities.createBrowserSession(userId, sessionId, csrfHash(browserAuth, sessionId, csrf), 1, new Date(Date.now() + 60_000));
   return { cookie: `${browserAuth.cookieName}=${sessionId}`, csrf };
 }
 
@@ -32,14 +33,14 @@ beforeEach(async () => {
   const review: AdminKnowledgeReviewPort = {
     listCards: vi.fn(), getCard: vi.fn(), listRecommendations: vi.fn(), getRecommendation: vi.fn(), resolveRecommendation: (...args) => resolveRecommendation(...args),
   };
-  const identities = createPostgresApiIdentityRepository(getTestDatabaseUrl(), browserAuth.sessionLookupKey, browserAuth.oauthTransactionProtectionKey);
+  identities = createPostgresApiIdentityRepository(getTestDatabaseUrl(), browserAuth.sessionLookupKey, browserAuth.oauthTransactionProtectionKey);
   const ApiModule = createApiModule(identities, { conversationSummaries: { async listOwnedConversationSummaryRows() { return []; } }, browserAuth, adminKnowledgeReview: review });
   @Module({ imports: [ApiModule] }) class TestModule {}
   app = await NestFactory.create(TestModule, { logger: false });
   await app.init();
 });
 
-afterEach(async () => { await app.close(); });
+afterEach(async () => { await app.close(); await identities.close(); });
 
 describe("admin knowledge review direct API", () => {
   test("rejects anonymous, traveler, invalid or missing CSRF, and malformed requests before lifecycle resolution", async () => {

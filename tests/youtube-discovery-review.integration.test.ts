@@ -1,9 +1,9 @@
 import { readFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { beforeEach, describe, expect, test, vi } from "vitest";
-import { asc, eq, sql } from "drizzle-orm";
-import { parseAdminYoutubeDiscoveryReviewCursor, type RequestPrincipal } from "@xuyenviet/contracts";
-import { YoutubeDiscoveryReviewCursorValidationError } from "@xuyenviet/domain";
+import { asc, desc, eq, sql } from "drizzle-orm";
+import { parseAdminYoutubeDiscoveryBrowseCursor, parseAdminYoutubeDiscoveryReviewCursor, type RequestPrincipal } from "@xuyenviet/contracts";
+import { YoutubeDiscoveryBrowseCursorValidationError, YoutubeDiscoveryReviewCursorValidationError } from "@xuyenviet/domain";
 
 import { aiGatewayModels, auditEvents, claimNextYoutubeDiscoveryRun, createPostgresAdminYoutubeDiscoveryPort, createSystemAuditActor, createUserAuditActor, createYoutubeDiscoveryPolicyVersion, createYoutubeDiscoveryQueryProposal, createYoutubeDiscoveryRun, finishYoutubeDiscoveryRun, getYoutubeDiscoveryRecommendationBundle, persistYoutubeDiscoveryCandidates, persistYoutubeDiscoveryEnrichment, persistYoutubeDiscoveryRecommendation, persistYoutubeDiscoveryTriage, selectYoutubeDiscoveryTriageModel, youtubeDiscoveryCandidateReviewStates, youtubeDiscoveryCandidates, youtubeDiscoveryKnowledgeHandoffs, youtubeDiscoveryRecommendations } from "@xuyenviet/database";
 import { resetTestDatabase, seedTestOperator, testDb } from "./helpers/db";
@@ -142,7 +142,22 @@ describe.sequential("YouTube Discovery review read model", () => {
         expect(acceptRaceState?.state).toMatch(/accepted|deferred/);
         const acceptRaceHandoffs = await transaction.select({ reference: youtubeDiscoveryKnowledgeHandoffs.reference }).from(youtubeDiscoveryKnowledgeHandoffs).where(eq(youtubeDiscoveryKnowledgeHandoffs.recommendationId, acceptRaceRecommendationId));
         expect(acceptRaceHandoffs).toHaveLength(acceptRaceState?.state === "accepted" ? 1 : 0);
-      await transaction.update(youtubeDiscoveryCandidates).set({ title: "  Padded title  ", channelName: "   " }).where(eq(youtubeDiscoveryCandidates.id, historicCandidate.id));
+       const browseFirst = await port.listBrowse(principal, "all", null);
+       const browseSecond = await port.listBrowse(principal, "all", parseAdminYoutubeDiscoveryBrowseCursor(browseFirst.nextCursor));
+       const browseIds = [...browseFirst.items, ...browseSecond.items].map((item) => item.recommendationId);
+       expect(browseFirst.items).toHaveLength(20);
+       expect(browseSecond.items).toHaveLength(1);
+       expect(new Set(browseIds)).toHaveLength(21);
+       expect(browseIds).toEqual((await transaction.select({ id: youtubeDiscoveryRecommendations.id }).from(youtubeDiscoveryRecommendations).orderBy(desc(youtubeDiscoveryRecommendations.createdAt), desc(youtubeDiscoveryRecommendations.id))).map((row) => row.id));
+       const browseAnchor = parseAdminYoutubeDiscoveryBrowseCursor(browseFirst.nextCursor);
+       if (!browseAnchor) throw new Error("expected browse cursor");
+       await expect(port.listBrowse(principal, "all", { ...browseAnchor, recommendationId: "fabricated-recommendation" })).rejects.toBeInstanceOf(YoutubeDiscoveryBrowseCursorValidationError);
+       await transaction.update(youtubeDiscoveryRecommendations).set({ recommendation: "skip" }).where(eq(youtubeDiscoveryRecommendations.id, browseIds[0]!));
+       const skippedBrowse = await port.listBrowse(principal, "skip", null);
+       expect(skippedBrowse.items.map((item) => item.recommendation)).toEqual(["skip"]);
+       await transaction.update(youtubeDiscoveryCandidateReviewStates).set({ state: "deferred" }).where(eq(youtubeDiscoveryCandidateReviewStates.recommendationId, browseIds[0]!));
+       expect((await port.listBrowse(principal, "all", null)).items).not.toHaveLength(0);
+       await transaction.update(youtubeDiscoveryCandidates).set({ title: "  Padded title  ", channelName: "   " }).where(eq(youtubeDiscoveryCandidates.id, historicCandidate.id));
        const normalized = await port.listReview(principal, null);
       expect(normalized.items.some((item) => item.title === "Padded title" && item.channelName === null)).toBe(true);
       await transaction.update(youtubeDiscoveryCandidateReviewStates).set({ state: "deferred" }).where(eq(youtubeDiscoveryCandidateReviewStates.recommendationId, first.items[0]!.recommendationId));

@@ -77,6 +77,7 @@ export type BrowserIdentity = ApiIdentityRecord & { roles: RequestRole[]; csrfHa
 export type BrowserOAuthTransaction = { id: string; state: string; codeVerifier: string; returnUrl: string; referralCode?: string | null; expires: Date };
 export class BrowserGoogleAccountConflictError extends Error {}
 export interface BrowserIdentityRepository extends ApiIdentityRepository {
+  close(): Promise<void>;
   purgeExpiredBrowserOAuthTransactions(limit: number): Promise<void>;
   createBrowserOAuthTransaction(transaction: BrowserOAuthTransaction): Promise<void>;
   consumeBrowserOAuthTransaction(id: string, state: string): Promise<BrowserOAuthTransaction | null>;
@@ -297,6 +298,7 @@ export function createPostgresApiIdentityRepository(databaseUrl: string, browser
   const browserLookupHash = (sessionId: string) => createHmac("sha256", browserSessionLookupKey).update(sessionId).digest("base64url");
   const oauthTransactionProtection = browserOAuthTransactionProtectionKey ? createBrowserOAuthTransactionProtection(browserOAuthTransactionProtectionKey) : null;
   return {
+    async close() { await sql.end(); },
     async getSession(sessionId) {
       const rows = await sql<ApiIdentityRecord[]>`
         select sessions.user_id as "userId", sessions.expires, users.authorization_version as "authorizationVersion"

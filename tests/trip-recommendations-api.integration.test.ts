@@ -3,7 +3,7 @@ import { NestFactory } from "@nestjs/core";
 import request from "supertest";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
-import { createPostgresApiIdentityRepository } from "@xuyenviet/database";
+import { createPostgresApiIdentityRepository, type BrowserIdentityRepository } from "@xuyenviet/database";
 import type { TravelerCommandPort } from "@xuyenviet/domain";
 import { createApiModule } from "../apps/api/src/app.module";
 import { csrfHash, csrfNonce } from "../apps/api/src/auth/browser-auth";
@@ -13,6 +13,7 @@ import { userRoles, users } from "@/db/schema";
 
 const browserAuth = { googleClientId: "client", googleClientSecret: "secret", callbackUrl: "https://api.xuyenviet.app/auth/google/callback", allowedOrigins: ["https://web.xuyenviet.vn"], allowedReturnUrls: ["https://web.xuyenviet.vn/trips"], sessionLookupKey: "b".repeat(32), csrfKey: "c".repeat(32), oauthTransactionProtectionKey: "d".repeat(32), cookieName: "__Host-xuyenviet-session" } as const;
 let app: INestApplication;
+let identities: BrowserIdentityRepository;
 const loadRecommendations = vi.fn();
 const acceptTripCreationRecommendation = vi.fn();
 const declineTripCreationRecommendation = vi.fn();
@@ -31,7 +32,7 @@ beforeEach(async () => {
   saveAnswerUsefulnessFeedback.mockReset().mockResolvedValue({ success: true, feedback: { rating: "useful", comment: null, updatedAt: "2026-08-05T00:00:00.000Z" } });
   listTripProjects.mockReset().mockResolvedValue([]);
   const commands: Pick<TravelerCommandPort, "acceptTripCreationRecommendation" | "declineTripCreationRecommendation" | "choosePrivateTripRecommendation" | "continueInTrip" | "saveAnswerUsefulnessFeedback"> = { acceptTripCreationRecommendation, declineTripCreationRecommendation, choosePrivateTripRecommendation, continueInTrip, saveAnswerUsefulnessFeedback };
-  const identities = createPostgresApiIdentityRepository(getTestDatabaseUrl(), browserAuth.sessionLookupKey, browserAuth.oauthTransactionProtectionKey);
+  identities = createPostgresApiIdentityRepository(getTestDatabaseUrl(), browserAuth.sessionLookupKey, browserAuth.oauthTransactionProtectionKey);
   const ApiModule = createApiModule(identities, {
     conversationSummaries: { async listOwnedConversationSummaryRows() { return []; } },
     tripRecommendations: { loadOwnedTripRecommendations: loadRecommendations },
@@ -44,14 +45,14 @@ beforeEach(async () => {
   await app.init();
 });
 
-afterEach(async () => { await app.close(); });
+afterEach(async () => { await app.close(); await identities.close(); });
 
 async function travelerSession(userId = "traveler") {
   const sessionId = `${userId}${"s".repeat(64)}`.slice(0, 64);
   const csrf = csrfNonce(browserAuth, sessionId);
   await testDb.insert(users).values({ id: userId, email: `${userId}@example.com` });
   await testDb.insert(userRoles).values({ userId, role: "traveler" });
-  await createPostgresApiIdentityRepository(getTestDatabaseUrl(), browserAuth.sessionLookupKey, browserAuth.oauthTransactionProtectionKey).createBrowserSession(userId, sessionId, csrfHash(browserAuth, sessionId, csrf), 1, new Date(Date.now() + 60_000));
+  await identities.createBrowserSession(userId, sessionId, csrfHash(browserAuth, sessionId, csrf), 1, new Date(Date.now() + 60_000));
   return { cookie: `${browserAuth.cookieName}=${sessionId}`, csrf };
 }
 

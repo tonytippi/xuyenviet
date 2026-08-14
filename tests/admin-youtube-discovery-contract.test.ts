@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { encodeAdminYoutubeDiscoveryActionRequiredCursor, encodeAdminYoutubeDiscoveryHealthIncidentCursor, encodeAdminYoutubeDiscoveryMissionCandidateCursor, encodeAdminYoutubeDiscoveryMissionCoverageCursor, encodeAdminYoutubeDiscoveryMissionQueryCursor, encodeAdminYoutubeDiscoveryReviewCursor, parseAdminYoutubeDiscoveryAcceptCommand, parseAdminYoutubeDiscoveryAcceptReviewResult, parseAdminYoutubeDiscoveryActionRequiredCursor, parseAdminYoutubeDiscoveryActionRequiredQueue, parseAdminYoutubeDiscoveryDeferCommand, parseAdminYoutubeDiscoveryDeferReviewResult, parseAdminYoutubeDiscoveryEnablementCommand, parseAdminYoutubeDiscoveryEnablementResult, parseAdminYoutubeDiscoveryHealthIncidentDetail, parseAdminYoutubeDiscoveryHealthIncidentCursor, parseAdminYoutubeDiscoveryHealthOverview, parseAdminYoutubeDiscoveryMissionCandidatePage, parseAdminYoutubeDiscoveryMissionCoveragePage, parseAdminYoutubeDiscoveryMissionDetail, parseAdminYoutubeDiscoveryMissionFunnel, parseAdminYoutubeDiscoveryMissionQueryPage, parseAdminYoutubeDiscoveryQuery, parseAdminYoutubeDiscoveryQueryList, parseAdminYoutubeDiscoveryReviewCursor, parseAdminYoutubeDiscoveryReviewDetail, parseAdminYoutubeDiscoveryReviewQueue, parseAdminYoutubeDiscoverySkipCommand, parseAdminYoutubeDiscoverySkipReviewResult } from "@xuyenviet/contracts";
+import { encodeAdminYoutubeDiscoveryActionRequiredCursor, encodeAdminYoutubeDiscoveryBrowseCursor, encodeAdminYoutubeDiscoveryHealthIncidentCursor, encodeAdminYoutubeDiscoveryMissionCandidateCursor, encodeAdminYoutubeDiscoveryMissionCoverageCursor, encodeAdminYoutubeDiscoveryMissionQueryCursor, encodeAdminYoutubeDiscoveryReviewCursor, parseAdminYoutubeDiscoveryAcceptCommand, parseAdminYoutubeDiscoveryAcceptReviewResult, parseAdminYoutubeDiscoveryActionRequiredCursor, parseAdminYoutubeDiscoveryActionRequiredQueue, parseAdminYoutubeDiscoveryBrowseCursor, parseAdminYoutubeDiscoveryBrowsePage, parseAdminYoutubeDiscoveryDeferCommand, parseAdminYoutubeDiscoveryDeferReviewResult, parseAdminYoutubeDiscoveryEnablementCommand, parseAdminYoutubeDiscoveryEnablementResult, parseAdminYoutubeDiscoveryHealthIncidentDetail, parseAdminYoutubeDiscoveryHealthIncidentCursor, parseAdminYoutubeDiscoveryHealthOverview, parseAdminYoutubeDiscoveryMissionCandidatePage, parseAdminYoutubeDiscoveryMissionCoveragePage, parseAdminYoutubeDiscoveryMissionDetail, parseAdminYoutubeDiscoveryMissionFunnel, parseAdminYoutubeDiscoveryMissionQueryPage, parseAdminYoutubeDiscoveryQuery, parseAdminYoutubeDiscoveryQueryList, parseAdminYoutubeDiscoveryReviewCursor, parseAdminYoutubeDiscoveryReviewDetail, parseAdminYoutubeDiscoveryReviewQueue, parseAdminYoutubeDiscoverySkipCommand, parseAdminYoutubeDiscoverySkipReviewResult } from "@xuyenviet/contracts";
 
 const query = { id: "proposal-1", origin: "operator" as const, queryText: "Da Lat route", reason: "operator_request" as const, priority: 50, enabled: true, cadenceMinutes: 60, nextRunAt: "2026-08-07T00:00:00.000Z", pausedReason: null };
 
@@ -58,6 +58,15 @@ describe("admin YouTube Discovery contract", () => {
         expect(parseAdminYoutubeDiscoveryAcceptReviewResult({ outcome, [unsafeKey]: "unsafe" })).toBeNull();
       }
     }
+  });
+
+  test("requires safe immutable browse projections and filter-bound cursors", () => {
+    const item = { recommendationId: "recommendation-1", canonicalUrl: "https://www.youtube.com/watch?v=abcDEF12345", title: "Da Lat route", channelName: "Route channel", publishedAt: "2026-08-07T00:00:00.000Z", durationSeconds: 120, recommendation: "skip" as const, reason: "below_defer_band" as const, score: 0.2, factors: [], penalties: ["duplicate_risk" as const], signals: [], createdAt: "2026-08-07T00:00:00.000Z" };
+    const cursor = encodeAdminYoutubeDiscoveryBrowseCursor({ version: 1, filter: "skip", createdAt: "2026-08-07T00:00:00.000001Z", recommendationId: item.recommendationId });
+    expect(parseAdminYoutubeDiscoveryBrowseCursor(cursor)).toEqual({ version: 1, filter: "skip", createdAt: "2026-08-07T00:00:00.000001Z", recommendationId: item.recommendationId });
+    expect(parseAdminYoutubeDiscoveryBrowseCursor("ydr2.bad")).toBeNull();
+    expect(parseAdminYoutubeDiscoveryBrowsePage({ items: [item], nextCursor: cursor })).not.toBeNull();
+    expect(parseAdminYoutubeDiscoveryBrowsePage({ items: [{ ...item, rawComment: "unsafe" }], nextCursor: null })).toBeNull();
   });
 
   test("defer and skip accept exactly empty JSON objects with route-specific closed outcomes", () => {

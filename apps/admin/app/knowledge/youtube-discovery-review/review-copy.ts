@@ -1,6 +1,6 @@
 export const youtubeDiscoveryReviewCopy = {
-  recommendation: { consider: "Nên xem xét" },
-  reason: { eligible_score_band: "Nằm trong nhóm điểm ưu tiên xem xét" },
+  recommendation: { skip: "Bỏ qua tự động", defer: "Để sau tự động", consider: "Nên xem xét" },
+  reason: { eligible_score_band: "Nằm trong nhóm điểm ưu tiên xem xét", below_defer_band: "Điểm dưới ngưỡng để sau", between_defer_and_consider_band: "Điểm nằm giữa ngưỡng để sau và xem xét", already_compatible: "Đã có bản tương thích", canonical_mismatch: "URL chuẩn không khớp", not_current_run_enriched: "Không thuộc lượt chạy đã làm giàu hiện tại" },
   queryReason: { coverage_gap: "Bổ sung vùng thông tin còn thiếu", freshness_risk: "Kiểm tra thông tin có nguy cơ lỗi thời", unresolved_conflict: "Làm rõ thông tin còn mâu thuẫn", anonymized_demand: "Đáp ứng nhu cầu đã được ẩn danh", operator_request: "Yêu cầu do người vận hành tạo" },
   factor: { relevance: "Phù hợp chủ đề", expected_value: "Giá trị dự kiến", freshness_fit: "Phù hợp độ mới" },
   penalty: { commercial_risk: "Rủi ro thương mại", duplicate_risk: "Nguy cơ trùng lặp" },

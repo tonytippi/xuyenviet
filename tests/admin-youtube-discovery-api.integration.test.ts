@@ -3,7 +3,7 @@ import { NestFactory } from "@nestjs/core";
 import request from "supertest";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
-import { createPostgresApiIdentityRepository } from "@xuyenviet/database";
+import { createPostgresApiIdentityRepository, type BrowserIdentityRepository } from "@xuyenviet/database";
 import { YoutubeDiscoveryMissionCursorValidationError, YoutubeDiscoveryReviewCursorValidationError, type AdminYoutubeDiscoveryPort } from "@xuyenviet/domain";
 import { createApiModule } from "../apps/api/src/app.module";
 import { csrfHash, csrfNonce } from "../apps/api/src/auth/browser-auth";
@@ -17,29 +17,31 @@ const reviewItem = { recommendationId: "recommendation-1", canonicalUrl: "https:
 const reviewDetail = { ...reviewItem, queryText: "Da Lat route", queryReason: "operator_request" as const, score: 0.7, factors: ["relevance" as const], penalties: [], signals: ["practical_question_demand" as const], priorCaptureOutcome: "eligible" as const };
 let app: INestApplication;
 let port: Record<string, ReturnType<typeof vi.fn>>;
+let identities: BrowserIdentityRepository;
 
 async function browserSession(userId: string, role: "operator" | "traveler") {
   const sessionId = `${userId[0]}${"s".repeat(63)}`;
   const csrf = csrfNonce(browserAuth, sessionId);
   await testDb.insert(users).values({ id: userId, email: `${userId}@example.com` });
   await testDb.insert(userRoles).values({ userId, role });
-  await createPostgresApiIdentityRepository(getTestDatabaseUrl(), browserAuth.sessionLookupKey, browserAuth.oauthTransactionProtectionKey).createBrowserSession(userId, sessionId, csrfHash(browserAuth, sessionId, csrf), 1, new Date(Date.now() + 60_000));
+  await identities.createBrowserSession(userId, sessionId, csrfHash(browserAuth, sessionId, csrf), 1, new Date(Date.now() + 60_000));
   return { cookie: `${browserAuth.cookieName}=${sessionId}`, csrf };
 }
 
 beforeEach(async () => {
   await resetTestDatabase();
   port = { list: vi.fn().mockResolvedValue({ items: [query] }), listReview: vi.fn().mockResolvedValue({ items: [], nextCursor: null }), getReview: vi.fn().mockResolvedValue(null), acceptReview: vi.fn().mockResolvedValue({ outcome: "submitted" }), deferReview: vi.fn().mockResolvedValue({ outcome: "deferred" }), skipReview: vi.fn().mockResolvedValue({ outcome: "skipped" }), create: vi.fn().mockResolvedValue(query), edit: vi.fn().mockResolvedValue(query), reprioritize: vi.fn().mockResolvedValue(query), pause: vi.fn().mockResolvedValue({ ...query, enabled: false, nextRunAt: null, pausedReason: "operator" }), resume: vi.fn().mockResolvedValue(query), listActionRequired: vi.fn().mockResolvedValue({ items: [], nextCursor: null }), listMissionCoverage: vi.fn().mockResolvedValue({ items: [], nextCursor: null }), listMissionQueries: vi.fn().mockResolvedValue({ items: [], nextCursor: null }), listMissionCandidates: vi.fn().mockResolvedValue({ items: [], nextCursor: null }), missionFunnel: vi.fn().mockResolvedValue({ asOf: "2026-08-07T00:00:00.000Z", discovered: 0, enriched: 0, triaged: 0, recommended: 0, pendingReview: 0, accepted: 0, deferred: 0, skipped: 0 }), getMissionDetail: vi.fn().mockResolvedValue(null), healthOverview: vi.fn().mockResolvedValue({ asOf: "2026-08-07T00:00:00.000Z", lastUpdatedAt: null, planning: { state: "no_run", at: null, lastUpdatedAt: null, nextRunAt: null, retryCount: null, category: "unavailable", freshness: "unavailable" }, querySchedule: { enabled: null, cadenceMinutes: null, nextRunAt: null, lastUpdatedAt: null, freshness: "unavailable" }, latestQueryRun: { state: "no_run", at: null, lastUpdatedAt: null, nextRunAt: null, retryCount: null, category: "unavailable", freshness: "unavailable" }, throughput: { windowHours: 24, discovered: 0, enriched: 0, triaged: 0, recommended: 0, lastUpdatedAt: null }, backlog: { pending: 0, deferred: 0, oldestDeferredAt: null, deferredAge: "unavailable", lastUpdatedAt: null }, incidents: [], usage: { availability: "missing", requests: 0, totalTokens: null, costMicros: null, lastUpdatedAt: null, freshness: "unavailable" } }), getHealthIncident: vi.fn().mockResolvedValue(null) };
+  port.listBrowse = vi.fn().mockResolvedValue({ items: [], nextCursor: null });
   port.setEnabled = vi.fn().mockResolvedValue({ enabled: false, version: 2, createdAt: "2026-08-07T00:00:00.000Z", changed: true });
   port.healthOverview.mockResolvedValue({ asOf: "2026-08-07T00:00:00.000Z", lastUpdatedAt: null, policy: { enabled: null }, planning: { state: "no_run", at: null, lastUpdatedAt: null, nextRunAt: null, retryCount: null, category: "unavailable", freshness: "unavailable" }, querySchedule: { enabled: null, cadenceMinutes: null, nextRunAt: null, lastUpdatedAt: null, freshness: "unavailable" }, latestQueryRun: { state: "no_run", at: null, lastUpdatedAt: null, nextRunAt: null, retryCount: null, category: "unavailable", freshness: "unavailable" }, pausedRuns: [], throughput: { windowHours: 24, discovered: 0, enriched: 0, triaged: 0, recommended: 0, lastUpdatedAt: null, freshness: "unavailable" }, backlog: { pending: 0, deferred: 0, candidateQueued: 0, candidateRetrying: 0, candidateRunning: 0, oldestDeferredAt: null, deferredAge: "unavailable", lastUpdatedAt: null }, incidents: [], usage: { availability: "missing", requests: 0, totalTokens: null, costMicros: null, lastUpdatedAt: null, freshness: "unavailable" } });
-  const identities = createPostgresApiIdentityRepository(getTestDatabaseUrl(), browserAuth.sessionLookupKey, browserAuth.oauthTransactionProtectionKey);
+  identities = createPostgresApiIdentityRepository(getTestDatabaseUrl(), browserAuth.sessionLookupKey, browserAuth.oauthTransactionProtectionKey);
   const ApiModule = createApiModule(identities, { conversationSummaries: { async listOwnedConversationSummaryRows() { return []; } }, browserAuth, adminYoutubeDiscovery: port as unknown as AdminYoutubeDiscoveryPort });
   @Module({ imports: [ApiModule] }) class TestModule {}
   app = await NestFactory.create(TestModule, { logger: false });
   await app.init();
 });
 
-afterEach(async () => { await app.close(); });
+afterEach(async () => { await app.close(); await identities.close(); });
 
 describe("admin YouTube Discovery direct API", () => {
   test("denies anonymous and traveler commands before port admission", async () => {
@@ -110,6 +112,25 @@ describe("admin YouTube Discovery direct API", () => {
     await request(app.getHttpServer()).get("/v1/admin/knowledge/youtube-discovery/review/recommendation-1").set({ Cookie: operator.cookie }).expect(200, reviewDetail);
     expect(port.listReview).toHaveBeenCalledWith(expect.objectContaining({ userId: "operator" }), null);
     expect(port.getReview).toHaveBeenCalledWith(expect.objectContaining({ userId: "operator" }), "recommendation-1");
+  });
+
+  test("admits a strict protected read-only browse endpoint", async () => {
+    const operator = await browserSession("operator", "operator");
+    const item = { recommendationId: "recommendation-1", canonicalUrl: "https://www.youtube.com/watch?v=abcDEF12345", title: "Da Lat route", channelName: "Route channel", publishedAt: "2026-08-07T00:00:00.000Z", durationSeconds: 120, recommendation: "skip", reason: "below_defer_band", score: 0.2, factors: [], penalties: [], signals: [], createdAt: "2026-08-07T00:00:00.000Z" };
+    port.listBrowse.mockResolvedValueOnce({ items: [item], nextCursor: null });
+    await request(app.getHttpServer()).get("/v1/admin/knowledge/youtube-discovery/browse?filter=skip").set({ Cookie: operator.cookie }).expect(200, { items: [item], nextCursor: null });
+    expect(port.listBrowse).toHaveBeenCalledWith(expect.objectContaining({ userId: "operator" }), "skip", null);
+    await request(app.getHttpServer()).get("/v1/admin/knowledge/youtube-discovery/browse?filter=unknown").set({ Cookie: operator.cookie }).expect(400);
+    await request(app.getHttpServer()).get("/v1/admin/knowledge/youtube-discovery/browse?cursor=ydr2.bad").set({ Cookie: operator.cookie }).expect(400);
+  });
+
+  test("rejects browse pages that contradict the requested filter", async () => {
+    const operator = await browserSession("operator", "operator");
+    const item = { recommendationId: "recommendation-1", canonicalUrl: "https://www.youtube.com/watch?v=abcDEF12345", title: "Da Lat route", channelName: "Route channel", publishedAt: "2026-08-07T00:00:00.000Z", durationSeconds: 120, recommendation: "defer", reason: "between_defer_and_consider_band", score: 0.5, factors: [], penalties: [], signals: [], createdAt: "2026-08-07T00:00:00.000Z" };
+    port.listBrowse.mockResolvedValueOnce({ items: [item], nextCursor: null });
+    await request(app.getHttpServer()).get("/v1/admin/knowledge/youtube-discovery/browse?filter=skip").set({ Cookie: operator.cookie }).expect(503);
+    port.listBrowse.mockResolvedValueOnce({ items: [], nextCursor: "ydb1.eyJ2ZXJzaW9uIjoxLCJmaWx0ZXIiOiJkZWZlciIsImNyZWF0ZWRBdCI6IjIwMjYtMDgtMDdUMDA6MDA6MDAuMDAwMDAxWiIsInJlY29tbWVuZGF0aW9uSWQiOiJyZWNvbW1lbmRhdGlvbi0xIn0" });
+    await request(app.getHttpServer()).get("/v1/admin/knowledge/youtube-discovery/browse?filter=skip").set({ Cookie: operator.cookie }).expect(503);
   });
 
   test("admits the protected action-required queue and rejects malformed cursors before admission", async () => {

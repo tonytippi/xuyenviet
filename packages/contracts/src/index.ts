@@ -529,7 +529,12 @@ let consoleTelemetryBlocked = false;
 // stdout reports async write failures as stream errors even when a write
 // callback receives the error. Console telemetry is strictly best-effort.
 const telemetryStdout = typeof process !== "undefined" ? process.stdout : undefined;
-telemetryStdout?.on("error", () => process.emitWarning("Operational telemetry stdout is unavailable."));
+const telemetryStdoutErrorListenerKey = Symbol.for("xuyenviet.operationalTelemetry.stdoutErrorListener");
+const telemetryGlobalState = globalThis as { [key: symbol]: boolean | undefined };
+if (telemetryStdout && !telemetryGlobalState[telemetryStdoutErrorListenerKey]) {
+  telemetryGlobalState[telemetryStdoutErrorListenerKey] = true;
+  telemetryStdout.on("error", () => process.emitWarning("Operational telemetry stdout is unavailable."));
+}
 
 export const consoleOperationalTelemetrySink: OperationalTelemetrySink = {
   emit(event) {

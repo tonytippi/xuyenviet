@@ -4,25 +4,27 @@ import request from "supertest";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import { getBrowserAuthConfig } from "@xuyenviet/config";
-import { createPostgresApiIdentityRepository } from "@xuyenviet/database";
+import { createPostgresApiIdentityRepository, type BrowserIdentityRepository } from "@xuyenviet/database";
 import { createApiModule } from "../apps/api/src/app.module";
 import { getTestDatabaseUrl } from "./helpers/env-file";
 import { accounts, browserOAuthTransactions, browserSessions, referralAttributions, referralCodes, userRoles, users } from "@/db/schema";
 import { resetTestDatabase, testDb } from "./helpers/db";
 
 let app: INestApplication;
+let identities: BrowserIdentityRepository;
 const browserAuth = { googleClientId: "client", googleClientSecret: "secret", callbackUrl: "https://api.xuyenviet.app/auth/google/callback", allowedOrigins: ["https://web.xuyenviet.vn", "https://admin.xuyenviet.app"], allowedReturnUrls: ["https://web.xuyenviet.vn/trips", "https://admin.xuyenviet.app/", "https://admin.xuyenviet.app/knowledge/facebook-captures"], sessionLookupKey: "b".repeat(32), csrfKey: "c".repeat(32), oauthTransactionProtectionKey: "d".repeat(32), cookieName: "__Host-xuyenviet-session" } as const;
 
 beforeEach(async () => {
   await resetTestDatabase();
-  const ApiModule = createApiModule(browserRepository(), { conversationSummaries: { async listOwnedConversationSummaryRows() { return []; } }, browserAuth });
+  identities = createPostgresApiIdentityRepository(getTestDatabaseUrl(), browserAuth.sessionLookupKey, browserAuth.oauthTransactionProtectionKey);
+  const ApiModule = createApiModule(identities, { conversationSummaries: { async listOwnedConversationSummaryRows() { return []; } }, browserAuth });
   @Module({ imports: [ApiModule] })
   class TestModule {}
   app = await NestFactory.create(TestModule, { logger: false });
   await app.init();
 });
 
-afterEach(async () => { vi.unstubAllGlobals(); await app.close(); });
+afterEach(async () => { vi.unstubAllGlobals(); await app.close(); await identities.close(); });
 
 describe("browser Google identity callback", () => {
   test("requires canonical exact browser OAuth return URLs independently from callback validation", () => {
@@ -302,7 +304,7 @@ async function startBrowserApp(schemaReady = true) {
 
 function randomTransactionId() { return crypto.randomUUID(); }
 
-function browserRepository() { return createPostgresApiIdentityRepository(getTestDatabaseUrl(), browserAuth.sessionLookupKey, browserAuth.oauthTransactionProtectionKey); }
+function browserRepository() { return identities; }
 
 function callback(id: string, state: string) { return request(app.getHttpServer()).get(`/auth/google/callback?code=code&state=${id}.${state}`).set("Cookie", `__Host-xuyenviet-browser-oauth=${id}`); }
 
