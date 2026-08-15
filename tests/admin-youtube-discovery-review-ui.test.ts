@@ -104,7 +104,7 @@ describe("admin YouTube Discovery review UI boundary", () => {
     expect(source).toContain('item.thumbnailUrl ? <img alt="" className="h-16 w-24 rounded object-cover"');
   });
 
-  test("uses the main Discovery route for URL review and exposes Health", async () => {
+  test("uses the main Discovery route for URL review and exposes Mission and Health", async () => {
     const [nav, page, review] = await Promise.all([
       readFile("apps/admin/app/admin-access-gate.tsx", "utf8"),
       readFile("apps/admin/app/knowledge/youtube-discovery/page.tsx", "utf8"),
@@ -114,7 +114,10 @@ describe("admin YouTube Discovery review UI boundary", () => {
     expect(nav).not.toContain('Việc cần xử lý Discovery');
     expect(page).toContain('import { YoutubeDiscoveryReview } from "../youtube-discovery-review/review";');
     expect(review).toContain('>Youtube Discovery</h1>');
+    expect(review).toContain('aria-label="Điều hướng Discovery"');
+    expect(review).toContain('href="/knowledge/youtube-discovery/mission">Nhu cầu Discovery</Link>');
     expect(review).toContain('href="/knowledge/youtube-discovery/health">Sức khỏe Discovery</Link>');
+    expect(review).toContain('focus-visible:outline-emerald-800');
     expect(review).toContain('returnUrl: `${window.location.origin}/knowledge/youtube-discovery`');
   });
 
