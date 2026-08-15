@@ -3,9 +3,9 @@ import { and, eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 
-import { aiGatewayModels, auditEvents, cancelYoutubeDiscoveryRunIfDisabled, claimNextYoutubeDiscoveryCandidateJob, claimNextYoutubeDiscoveryRun, claimYoutubeDiscoveryPlanning, createAiAskDiscoveryQuerySignalPort, createKnowledgeDiscoveryQuerySignalPort, createSystemAuditActor, createUserAuditActor, createYoutubeDiscoveryPolicyVersion, createYoutubeDiscoveryQueryProposal, createYoutubeDiscoveryRun, finishYoutubeDiscoveryCandidateJob, finishYoutubeDiscoveryRun, getYoutubeDiscoveryRecommendationBundle, persistYoutubeDiscoveryCandidates, persistYoutubeDiscoveryEnrichment, persistYoutubeDiscoveryRecommendation, persistYoutubeDiscoveryTriage, recoverExpiredYoutubeDiscoveryRuns, refreshYoutubeDiscoverySystemProposals, retryYoutubeDiscoveryCandidateJob, retryYoutubeDiscoveryRun, scheduleYoutubeDiscoveryDueRuns, schema, selectYoutubeDiscoveryTriageModel, youtubeDiscoveryAppearances, youtubeDiscoveryCandidateJobs, youtubeDiscoveryCandidates, youtubeDiscoveryRankingHistory, youtubeDiscoveryPlanningLeases, youtubeDiscoveryPlanningOutcomes, youtubeDiscoveryQueryProposals, youtubeDiscoveryRecommendations, youtubeDiscoveryRuns, youtubeDiscoveryTriages } from "@xuyenviet/database";
+import { aiGatewayModels, aiUsageEvents, auditEvents, cancelYoutubeDiscoveryRunIfDisabled, claimNextYoutubeDiscoveryCandidateJob, claimNextYoutubeDiscoveryRun, claimYoutubeDiscoveryPlanning, createAiAskDiscoveryQuerySignalPort, createKnowledgeDiscoveryQuerySignalPort, createSystemAuditActor, createUserAuditActor, createYoutubeDiscoveryPolicyVersion, createYoutubeDiscoveryQueryProposal, createYoutubeDiscoveryRun, finishYoutubeDiscoveryCandidateJob, finishYoutubeDiscoveryRun, getYoutubeDiscoveryRecommendationBundle, persistYoutubeDiscoveryCandidates, persistYoutubeDiscoveryEligibility, persistYoutubeDiscoveryEnrichment, persistYoutubeDiscoveryRecommendation, persistYoutubeDiscoveryTriage, recoverExpiredYoutubeDiscoveryRuns, refreshYoutubeDiscoverySystemProposals, retryYoutubeDiscoveryCandidateJob, retryYoutubeDiscoveryRun, scheduleYoutubeDiscoveryDueRuns, schema, selectYoutubeDiscoveryTriageModel, youtubeDiscoveryAppearances, youtubeDiscoveryCandidateJobs, youtubeDiscoveryCandidateReviewStates, youtubeDiscoveryCandidates, youtubeDiscoveryCommentSignals, youtubeDiscoveryKnowledgeHandoffs, youtubeDiscoveryRankingHistory, youtubeDiscoveryPlanningLeases, youtubeDiscoveryPlanningOutcomes, youtubeDiscoveryQueryProposals, youtubeDiscoveryRecommendations, youtubeDiscoveryRuns, youtubeDiscoveryTriages } from "@xuyenviet/database";
 import { resetTestDatabase, seedTestOperator, testDb } from "./helpers/db";
-import { bindYoutubeDiscoveryExecutionPorts, runYoutubeDiscoveryPoll, setYoutubeDiscoveryEnrichmentForTest, setYoutubeDiscoveryExecutionStageForTest, setYoutubeDiscoveryExecutionTimeoutForTest, setYoutubeDiscoveryPlanningPortsForTest, setYoutubeDiscoveryTriageCompletionForTest, setYoutubeDiscoveryTriagePersistenceForTest } from "../packages/worker-domain/src/features/youtube-discovery/execution";
+import { bindYoutubeDiscoveryExecutionPorts, runYoutubeDiscoveryPoll, setYoutubeDiscoveryEnrichmentForTest, setYoutubeDiscoveryExecutionStageForTest, setYoutubeDiscoveryExecutionTimeoutForTest, setYoutubeDiscoveryPlanningPortsForTest, setYoutubeDiscoveryTriageCompletionForTest, setYoutubeDiscoveryTriagePersistenceForTest, setYoutubeDiscoveryVideoMetadataForTest } from "../packages/worker-domain/src/features/youtube-discovery/execution";
 
 let firstWorker: ReturnType<typeof drizzle<typeof schema>>;
 let secondWorker: ReturnType<typeof drizzle<typeof schema>>;
@@ -42,7 +42,7 @@ describe.sequential("YouTube Discovery run execution", () => {
 
   beforeEach(async () => { await resetTestDatabase(); });
 
-  afterEach(() => { setYoutubeDiscoveryEnrichmentForTest(undefined); setYoutubeDiscoveryExecutionStageForTest(undefined); setYoutubeDiscoveryExecutionTimeoutForTest(undefined); setYoutubeDiscoveryPlanningPortsForTest(undefined, undefined); setYoutubeDiscoveryTriageCompletionForTest(undefined); setYoutubeDiscoveryTriagePersistenceForTest(undefined); });
+  afterEach(() => { setYoutubeDiscoveryEnrichmentForTest(undefined); setYoutubeDiscoveryVideoMetadataForTest(undefined); setYoutubeDiscoveryExecutionStageForTest(undefined); setYoutubeDiscoveryExecutionTimeoutForTest(undefined); setYoutubeDiscoveryPlanningPortsForTest(undefined, undefined); setYoutubeDiscoveryTriageCompletionForTest(undefined); setYoutubeDiscoveryTriagePersistenceForTest(undefined); });
 
   test("claims one due run and persists an atomic fenced terminal audit", async () => {
     const policy = await createYoutubeDiscoveryPolicyVersion({ version: 1, isCurrent: true, actor: createSystemAuditActor("system-youtube-discovery") }, testDb);
@@ -260,7 +260,7 @@ describe.sequential("YouTube Discovery run execution", () => {
     await expect(testDb.select().from(auditEvents).where(and(eq(auditEvents.targetType, "youtube_discovery_run_terminal"), eq(auditEvents.targetId, run.id)))).resolves.toHaveLength(1);
   });
 
-  test("continues an old candidate job across an enabled policy transition and counts queued work as backlog", async () => {
+  test("cancels an old candidate job across an enabled policy transition and counts queued work as backlog", async () => {
     await seedTestOperator();
     const first = await createYoutubeDiscoveryPolicyVersion({ version: 1, isCurrent: true, policy: { candidateBacklogThreshold: 1 }, actor: createSystemAuditActor("system-youtube-discovery") }, testDb);
     const proposal = await createYoutubeDiscoveryQueryProposal({ origin: "operator", reason: "operator_request", priority: 50, queryText: "Da Lat route", cadenceMinutes: 15, actor: createUserAuditActor({ userId: "operator", email: "operator@example.com" }) }, testDb);
@@ -272,7 +272,7 @@ describe.sequential("YouTube Discovery run execution", () => {
     expect(await scheduleYoutubeDiscoveryDueRuns(testDb)).toBe("candidate_backlog_blocked");
     const job = (await claimNextYoutubeDiscoveryCandidateJob({ workerId: "old-policy-candidate" }, testDb)).claim;
     expect(job).toMatchObject({ runId: run.id, policyVersionId: first.id });
-    expect(await finishYoutubeDiscoveryCandidateJob(job!, testDb)).toBe("completed");
+    expect(await finishYoutubeDiscoveryCandidateJob(job!, testDb)).toBe("cancelled");
   });
 
   test("does not let already-running candidate work block scheduling", async () => {
@@ -290,7 +290,7 @@ describe.sequential("YouTube Discovery run execution", () => {
 
   test("does not claim or continue a due run after its proposal is paused", async () => {
     await seedTestOperator();
-    const policy = await createYoutubeDiscoveryPolicyVersion({ version: 1, isCurrent: true, actor: createSystemAuditActor("system-youtube-discovery") }, testDb);
+    const policy = await createYoutubeDiscoveryPolicyVersion({ version: 1, isCurrent: true, policy: { allowForeignFallback: false }, actor: createSystemAuditActor("system-youtube-discovery") }, testDb);
     const proposal = await createYoutubeDiscoveryQueryProposal({ origin: "operator", reason: "operator_request", priority: 50, queryText: "Da Lat route", cadenceMinutes: 15, actor: createUserAuditActor({ userId: "operator", email: "operator@example.com" }) }, testDb);
     const queued = await createYoutubeDiscoveryRun({ policyVersionId: policy.id, queryProposalId: proposal.id }, testDb);
     await testDb.update(youtubeDiscoveryQueryProposals).set({ enabled: false, nextDueAt: null }).where(eq(youtubeDiscoveryQueryProposals.id, proposal.id));
@@ -303,7 +303,7 @@ describe.sequential("YouTube Discovery run execution", () => {
   });
 
   test("cancels before an injected stage without continuation", async () => {
-    const policy = await createYoutubeDiscoveryPolicyVersion({ version: 1, isCurrent: true, actor: createSystemAuditActor("system-youtube-discovery") }, testDb);
+    const policy = await createYoutubeDiscoveryPolicyVersion({ version: 1, isCurrent: true, policy: { allowForeignFallback: false }, actor: createSystemAuditActor("system-youtube-discovery") }, testDb);
     const run = await createYoutubeDiscoveryRun({ policyVersionId: policy.id }, testDb);
     let stageCalls = 0;
     setYoutubeDiscoveryExecutionStageForTest(async () => { stageCalls += 1; return "complete"; });
@@ -375,7 +375,7 @@ describe.sequential("YouTube Discovery run execution", () => {
     await completeDuePlanning();
     await testDb.insert(aiGatewayModels).values({ id: "deadline-triage-model", gatewayModelName: "test/triage", displayLabel: "Triage", purpose: "youtube_discovery_triage", active: true, defaultForPurpose: true, supportsTextInput: true, supportsExtraction: true, pricingUnitTokens: 1_000_000 });
     bindYoutubeDiscoveryExecutionPorts({ check: async () => "eligible" }, async () => [{ videoId: "abcDEF12345", canonicalUrl: "https://www.youtube.com/watch?v=abcDEF12345", resultOrdinal: 0, searchTranche: "medium" }], "test-key");
-    setYoutubeDiscoveryEnrichmentForTest(async () => ({ videoId: "abcDEF12345", title: "Da Lat route", signals: [{ signal: "practical_question_demand", count: 1, score: 10 }] }));
+    setYoutubeDiscoveryEnrichmentForTest(async () => ({ videoId: "abcDEF12345", title: "Da Lat route", durationSeconds: 180, defaultAudioLanguage: "vi", signals: [{ signal: "practical_question_demand", count: 1, score: 10 }] }));
     let triageCalls = 0;
     setYoutubeDiscoveryTriageCompletionForTest(async () => { triageCalls += 1; return { ok: true, content: "{}", provider: "ai_gateway", model: "test/triage", latencyMs: 1, usage: { promptTokens: null, completionTokens: null, totalTokens: null, cachedPromptTokens: null, cacheWritePromptTokens: null }, requestMetadata: { providerRequestId: null } }; });
     setYoutubeDiscoveryExecutionTimeoutForTest(9_000);
@@ -394,7 +394,7 @@ describe.sequential("YouTube Discovery run execution", () => {
     await completeDuePlanning();
     await testDb.insert(aiGatewayModels).values({ id: "retry-triage-model", gatewayModelName: "test/triage", displayLabel: "Triage", purpose: "youtube_discovery_triage", active: true, defaultForPurpose: true, supportsTextInput: true, supportsExtraction: true, pricingUnitTokens: 1_000_000 });
     bindYoutubeDiscoveryExecutionPorts({ check: async () => "eligible" }, async () => [{ videoId: "abcDEF12345", canonicalUrl: "https://www.youtube.com/watch?v=abcDEF12345", resultOrdinal: 0, searchTranche: "medium" }], "test-key");
-    setYoutubeDiscoveryEnrichmentForTest(async () => ({ videoId: "abcDEF12345", title: "Da Lat route", signals: [] }));
+    setYoutubeDiscoveryEnrichmentForTest(async () => ({ videoId: "abcDEF12345", title: "Da Lat route", durationSeconds: 180, defaultAudioLanguage: "vi", signals: [] }));
     setYoutubeDiscoveryTriageCompletionForTest(async () => ({ ok: false, provider: "ai_gateway", model: "test/triage", latencyMs: 1, errorCode: "gateway_network_error", requestMetadata: { providerRequestId: null } }));
 
     await completeSearchEnqueue(run.id, "discovery-triage-retry");
@@ -411,7 +411,7 @@ describe.sequential("YouTube Discovery run execution", () => {
     await completeDuePlanning();
     await testDb.insert(aiGatewayModels).values({ id: "contended-triage-model", gatewayModelName: "test/triage", displayLabel: "Triage", purpose: "youtube_discovery_triage", active: true, defaultForPurpose: true, supportsTextInput: true, supportsExtraction: true, pricingUnitTokens: 1_000_000 });
     bindYoutubeDiscoveryExecutionPorts({ check: async () => "eligible" }, async () => [{ videoId: "abcDEF12345", canonicalUrl: "https://www.youtube.com/watch?v=abcDEF12345", resultOrdinal: 0, searchTranche: "medium" }], "test-key");
-    setYoutubeDiscoveryEnrichmentForTest(async () => ({ videoId: "abcDEF12345", title: "Da Lat route", signals: [] }));
+    setYoutubeDiscoveryEnrichmentForTest(async () => ({ videoId: "abcDEF12345", title: "Da Lat route", durationSeconds: 180, defaultAudioLanguage: "vi", signals: [] }));
     setYoutubeDiscoveryTriageCompletionForTest(async () => ({ ok: true, content: JSON.stringify({ relevanceScore: 1, expectedValueScore: 1, freshnessFitScore: 1, commercialRiskScore: 0, duplicateRiskScore: 0, signals: [] }), provider: "ai_gateway", model: "test/triage", latencyMs: 1, usage: { promptTokens: null, completionTokens: null, totalTokens: null, cachedPromptTokens: null, cacheWritePromptTokens: null }, requestMetadata: { providerRequestId: null } }));
     setYoutubeDiscoveryTriagePersistenceForTest(async () => "contended");
 
@@ -456,6 +456,166 @@ describe.sequential("YouTube Discovery run execution", () => {
     await expect(testDb.select().from(youtubeDiscoveryCandidateJobs)).resolves.toMatchObject([{ state: "retrying", safeErrorCode: "enrichment_transient" }]);
   });
 
+  test("terminalizes a short video after metadata eligibility without downstream triage artifacts", async () => {
+    await seedTestOperator();
+    const policy = await createYoutubeDiscoveryPolicyVersion({ version: 1, isCurrent: true, actor: createSystemAuditActor("system-youtube-discovery") }, testDb);
+    const proposal = await createYoutubeDiscoveryQueryProposal({ origin: "operator", reason: "operator_request", priority: 50, queryText: "Da Lat route", cadenceMinutes: 15, actor: createUserAuditActor({ userId: "operator", email: "operator@example.com" }) }, testDb);
+    const run = await createYoutubeDiscoveryRun({ policyVersionId: policy.id, queryProposalId: proposal.id }, testDb);
+    await completeDuePlanning();
+    bindYoutubeDiscoveryExecutionPorts({ check: async () => "eligible" }, async () => [{ videoId: "abcDEF12345", canonicalUrl: "https://www.youtube.com/watch?v=abcDEF12345", resultOrdinal: 0, searchTranche: "medium" }], "test-key");
+    let detailCalls = 0;
+    setYoutubeDiscoveryEnrichmentForTest(async (videoId) => { detailCalls += 1; return { videoId, signals: [] }; });
+    setYoutubeDiscoveryVideoMetadataForTest(async (videoId) => ({ videoId, title: "Đường đèo", durationSeconds: 179, defaultAudioLanguage: "vi" }));
+    let triageCalls = 0;
+    setYoutubeDiscoveryTriageCompletionForTest(async () => { triageCalls += 1; throw new Error("triage must not run"); });
+
+    await completeSearchEnqueue(run.id, "discovery-short-gate");
+    await expect(runYoutubeDiscoveryPoll("discovery-short-gate")).resolves.toMatchObject({ resultCode: "success", executionKind: "candidate_job" });
+
+    expect(triageCalls).toBe(0);
+    expect(detailCalls).toBe(0);
+    await expect(testDb.select({ state: youtubeDiscoveryCandidateJobs.state }).from(youtubeDiscoveryCandidateJobs)).resolves.toEqual([{ state: "completed" }]);
+    await expect(testDb.select({ languageFit: youtubeDiscoveryAppearances.languageFit, durationFit: youtubeDiscoveryAppearances.durationFit, reason: youtubeDiscoveryAppearances.eligibilityReason, duration: youtubeDiscoveryAppearances.durationSeconds }).from(youtubeDiscoveryAppearances)).resolves.toEqual([{ languageFit: "vi", durationFit: "too_short", reason: "too_short", duration: 179 }]);
+    await expect(testDb.select().from(youtubeDiscoveryTriages)).resolves.toEqual([]);
+    await expect(testDb.select().from(youtubeDiscoveryRecommendations)).resolves.toEqual([]);
+    await expect(testDb.select().from(aiUsageEvents)).resolves.toEqual([]);
+    await expect(testDb.select().from(youtubeDiscoveryCommentSignals)).resolves.toEqual([]);
+    await expect(testDb.select().from(youtubeDiscoveryRankingHistory).where(eq(youtubeDiscoveryRankingHistory.stage, "enriched"))).resolves.toEqual([]);
+    await expect(testDb.select().from(youtubeDiscoveryCandidateReviewStates)).resolves.toEqual([]);
+    await expect(testDb.select().from(youtubeDiscoveryKnowledgeHandoffs)).resolves.toEqual([]);
+  });
+
+  test.each([
+    { label: "non-Vietnamese audio", metadata: { durationSeconds: 180, defaultAudioLanguage: "en" }, fit: "non_vi", reason: "non_vietnamese" },
+    { label: "unknown language", metadata: { durationSeconds: 180, title: "road trip tips" }, fit: "unknown", reason: "language_unknown" },
+  ])("terminalizes $label without downstream artifacts", async ({ metadata, fit, reason }) => {
+    await seedTestOperator();
+    const policy = await createYoutubeDiscoveryPolicyVersion({ version: 1, isCurrent: true, policy: { allowForeignFallback: false }, actor: createSystemAuditActor("system-youtube-discovery") }, testDb);
+    const proposal = await createYoutubeDiscoveryQueryProposal({ origin: "operator", reason: "operator_request", priority: 50, queryText: "Da Lat route", cadenceMinutes: 15, actor: createUserAuditActor({ userId: "operator", email: "operator@example.com" }) }, testDb);
+    const run = await createYoutubeDiscoveryRun({ policyVersionId: policy.id, queryProposalId: proposal.id }, testDb);
+    await completeDuePlanning();
+    bindYoutubeDiscoveryExecutionPorts({ check: async () => "eligible" }, async () => [{ videoId: "abcDEF12345", canonicalUrl: "https://www.youtube.com/watch?v=abcDEF12345", resultOrdinal: 0, searchTranche: "medium" }], "test-key");
+    let detailCalls = 0;
+    let triageCalls = 0;
+    setYoutubeDiscoveryEnrichmentForTest(async (videoId) => { detailCalls += 1; return { videoId, signals: [] }; });
+    setYoutubeDiscoveryVideoMetadataForTest(async (videoId) => ({ videoId, ...metadata }));
+    setYoutubeDiscoveryTriageCompletionForTest(async () => { triageCalls += 1; throw new Error("triage must not run"); });
+
+    await completeSearchEnqueue(run.id, `language-gate-${fit}`);
+    await expect(runYoutubeDiscoveryPoll(`language-gate-${fit}`)).resolves.toMatchObject({ resultCode: "success", executionKind: "candidate_job" });
+
+    expect(detailCalls).toBe(0);
+    expect(triageCalls).toBe(0);
+    await expect(testDb.select({ languageFit: youtubeDiscoveryAppearances.languageFit, reason: youtubeDiscoveryAppearances.eligibilityReason }).from(youtubeDiscoveryAppearances).where(eq(youtubeDiscoveryAppearances.runId, run.id))).resolves.toEqual([{ languageFit: fit, reason }]);
+    await Promise.all([
+      expect(testDb.select().from(aiUsageEvents)).resolves.toEqual([]),
+      expect(testDb.select().from(youtubeDiscoveryCommentSignals)).resolves.toEqual([]),
+      expect(testDb.select().from(youtubeDiscoveryRankingHistory).where(eq(youtubeDiscoveryRankingHistory.stage, "enriched"))).resolves.toEqual([]),
+      expect(testDb.select().from(youtubeDiscoveryTriages)).resolves.toEqual([]),
+      expect(testDb.select().from(youtubeDiscoveryRecommendations)).resolves.toEqual([]),
+      expect(testDb.select().from(youtubeDiscoveryCandidateReviewStates)).resolves.toEqual([]),
+      expect(testDb.select().from(youtubeDiscoveryKnowledgeHandoffs)).resolves.toEqual([]),
+    ]);
+  });
+
+  test("preserves eligibility provenance across a retried candidate job", async () => {
+    await seedTestOperator();
+    const policy = await createYoutubeDiscoveryPolicyVersion({ version: 1, isCurrent: true, actor: createSystemAuditActor("system-youtube-discovery") }, testDb);
+    const proposal = await createYoutubeDiscoveryQueryProposal({ origin: "operator", reason: "operator_request", priority: 50, queryText: "Da Lat route", cadenceMinutes: 15, actor: createUserAuditActor({ userId: "operator", email: "operator@example.com" }) }, testDb);
+    const run = await createYoutubeDiscoveryRun({ policyVersionId: policy.id, queryProposalId: proposal.id }, testDb);
+    const search = (await claimNextYoutubeDiscoveryRun({ workerId: "eligibility-retry-search" }, testDb)).claim!;
+    await persistYoutubeDiscoveryCandidates(search, [{ videoId: "abcDEF12345", canonicalUrl: "https://www.youtube.com/watch?v=abcDEF12345", resultOrdinal: 0, searchTranche: "medium" }], testDb);
+    await finishYoutubeDiscoveryRun(search, testDb);
+    const claim = (await claimNextYoutubeDiscoveryCandidateJob({ workerId: "eligibility-retry-first" }, testDb)).claim!;
+    await persistYoutubeDiscoveryEligibility(claim, { videoId: claim.videoId, durationSeconds: 180, defaultAudioLanguage: "en" }, testDb);
+    await retryYoutubeDiscoveryCandidateJob(claim, "enrichment_transient", "enrichment", testDb);
+    await testDb.execute(sql`update youtube_discovery_candidate_jobs set next_run_at = clock_timestamp() where id = ${claim.id}`);
+    const retry = (await claimNextYoutubeDiscoveryCandidateJob({ workerId: "eligibility-retry-second" }, testDb)).claim!;
+    await persistYoutubeDiscoveryEligibility(retry, { videoId: retry.videoId, durationSeconds: 180, defaultAudioLanguage: "vi" }, testDb);
+    await expect(testDb.select({ queryBuilderVersion: youtubeDiscoveryAppearances.queryBuilderVersion, languageFit: youtubeDiscoveryAppearances.languageFit, reason: youtubeDiscoveryAppearances.eligibilityReason }).from(youtubeDiscoveryAppearances).where(eq(youtubeDiscoveryAppearances.id, claim.appearanceId))).resolves.toEqual([{ queryBuilderVersion: policy.queryBuilderVersion, languageFit: "non_vi", reason: "non_vietnamese" }]);
+  });
+
+  test("rejects mutable eligibility policy and inconsistent appearance outcomes", async () => {
+    await seedTestOperator();
+    const policy = await createYoutubeDiscoveryPolicyVersion({ version: 1, isCurrent: true, actor: createSystemAuditActor("system-youtube-discovery") }, testDb);
+    const proposal = await createYoutubeDiscoveryQueryProposal({ origin: "operator", reason: "operator_request", priority: 50, queryText: "Da Lat route", cadenceMinutes: 15, actor: createUserAuditActor({ userId: "operator", email: "operator@example.com" }) }, testDb);
+    const run = await createYoutubeDiscoveryRun({ policyVersionId: policy.id, queryProposalId: proposal.id }, testDb);
+    const search = (await claimNextYoutubeDiscoveryRun({ workerId: "eligibility-constraint-search" }, testDb)).claim!;
+    await persistYoutubeDiscoveryCandidates(search, [{ videoId: "abcDEF12345", canonicalUrl: "https://www.youtube.com/watch?v=abcDEF12345", resultOrdinal: 0, searchTranche: "medium" }], testDb);
+    await finishYoutubeDiscoveryRun(search, testDb);
+    const job = (await claimNextYoutubeDiscoveryCandidateJob({ workerId: "eligibility-constraint-job" }, testDb)).claim!;
+    await persistYoutubeDiscoveryEligibility(job, { videoId: job.videoId, durationSeconds: 180, defaultAudioLanguage: "en" }, testDb);
+
+    await expect(persistYoutubeDiscoveryEligibility(job, { videoId: job.videoId, durationSeconds: 180, defaultAudioLanguage: "not a language" }, testDb)).rejects.toThrow("enrichment metadata is invalid");
+  });
+
+  test("suppresses foreign fallback when a qualified Vietnamese peer terminalizes in the same query run", async () => {
+    await seedTestOperator();
+    const policy = await createYoutubeDiscoveryPolicyVersion({ version: 1, isCurrent: true, policy: { maxConcurrentRuns: 2 }, actor: createSystemAuditActor("system-youtube-discovery") }, testDb);
+    const proposal = await createYoutubeDiscoveryQueryProposal({ origin: "operator", reason: "operator_request", priority: 50, queryText: "Da Lat route", cadenceMinutes: 15, actor: createUserAuditActor({ userId: "operator", email: "operator@example.com" }) }, testDb);
+    const run = await createYoutubeDiscoveryRun({ policyVersionId: policy.id, queryProposalId: proposal.id }, testDb);
+    const search = (await claimNextYoutubeDiscoveryRun({ workerId: "fallback-peer-search" }, testDb)).claim!;
+    await persistYoutubeDiscoveryCandidates(search, [{ videoId: "abcDEF12345", canonicalUrl: "https://www.youtube.com/watch?v=abcDEF12345", resultOrdinal: 0, searchTranche: "medium" }, { videoId: "defGHI67890", canonicalUrl: "https://www.youtube.com/watch?v=defGHI67890", resultOrdinal: 1, searchTranche: "long" }], testDb);
+    await finishYoutubeDiscoveryRun(search, testDb);
+    const foreign = (await claimNextYoutubeDiscoveryCandidateJob({ workerId: "fallback-foreign" }, testDb)).claim!;
+    const vietnamese = (await claimNextYoutubeDiscoveryCandidateJob({ workerId: "fallback-vietnamese" }, testDb)).claim!;
+    await persistYoutubeDiscoveryEligibility(foreign, { videoId: foreign.videoId, durationSeconds: 180, defaultAudioLanguage: "en" }, testDb);
+    await persistYoutubeDiscoveryEligibility(vietnamese, { videoId: vietnamese.videoId, durationSeconds: 180, defaultAudioLanguage: "vi" }, testDb);
+    await finishYoutubeDiscoveryCandidateJob(foreign, testDb);
+    await finishYoutubeDiscoveryCandidateJob(vietnamese, testDb);
+
+    await expect(testDb.select({ languageFit: youtubeDiscoveryAppearances.languageFit, reason: youtubeDiscoveryAppearances.eligibilityReason }).from(youtubeDiscoveryAppearances).where(eq(youtubeDiscoveryAppearances.runId, run.id)).orderBy(youtubeDiscoveryAppearances.resultOrdinal)).resolves.toEqual([{ languageFit: "non_vi", reason: "non_vietnamese" }, { languageFit: "vi", reason: "eligible_vietnamese" }]);
+    await expect(testDb.select().from(youtubeDiscoveryRecommendations)).resolves.toEqual([]);
+  });
+
+  test("finalizes bounded foreign fallback once concurrent terminal jobs leave no qualified peer", async () => {
+    await seedTestOperator();
+    const policy = await createYoutubeDiscoveryPolicyVersion({ version: 1, isCurrent: true, policy: { maxConcurrentRuns: 2 }, actor: createSystemAuditActor("system-youtube-discovery") }, testDb);
+    const proposal = await createYoutubeDiscoveryQueryProposal({ origin: "operator", reason: "operator_request", priority: 50, queryText: "Da Lat route", cadenceMinutes: 15, actor: createUserAuditActor({ userId: "operator", email: "operator@example.com" }) }, testDb);
+    const run = await createYoutubeDiscoveryRun({ policyVersionId: policy.id, queryProposalId: proposal.id }, testDb);
+    const search = (await claimNextYoutubeDiscoveryRun({ workerId: "fallback-race-search" }, testDb)).claim!;
+    await persistYoutubeDiscoveryCandidates(search, [{ videoId: "abcDEF12345", canonicalUrl: "https://www.youtube.com/watch?v=abcDEF12345", resultOrdinal: 0, searchTranche: "medium" }, { videoId: "defGHI67890", canonicalUrl: "https://www.youtube.com/watch?v=defGHI67890", resultOrdinal: 1, searchTranche: "long" }], testDb);
+    await finishYoutubeDiscoveryRun(search, testDb);
+    const left = (await claimNextYoutubeDiscoveryCandidateJob({ workerId: "fallback-race-left" }, firstWorker)).claim!;
+    const right = (await claimNextYoutubeDiscoveryCandidateJob({ workerId: "fallback-race-right" }, secondWorker)).claim!;
+    await persistYoutubeDiscoveryEligibility(left, { videoId: left.videoId, durationSeconds: 180, defaultAudioLanguage: "en" }, firstWorker);
+    await persistYoutubeDiscoveryEligibility(right, { videoId: right.videoId, durationSeconds: 180, title: "road trip tips" }, secondWorker);
+    await Promise.all([finishYoutubeDiscoveryCandidateJob(left, firstWorker), finishYoutubeDiscoveryCandidateJob(right, secondWorker)]);
+
+    await expect(testDb.select({ reason: youtubeDiscoveryAppearances.eligibilityReason }).from(youtubeDiscoveryAppearances).where(eq(youtubeDiscoveryAppearances.runId, run.id))).resolves.toEqual([{ reason: "foreign_fallback" }, { reason: "foreign_fallback" }]);
+    await expect(testDb.select().from(youtubeDiscoveryRecommendations)).resolves.toEqual([]);
+    await expect(testDb.select({ state: youtubeDiscoveryCandidateJobs.state }).from(youtubeDiscoveryCandidateJobs).where(eq(youtubeDiscoveryCandidateJobs.runId, run.id))).resolves.toEqual([{ state: "completed" }, { state: "completed" }]);
+    await expect(testDb.select({ targetId: auditEvents.targetId, afterSummary: auditEvents.afterSummary }).from(auditEvents).where(eq(auditEvents.targetType, "youtube_discovery_foreign_fallback"))).resolves.toEqual([{ targetId: run.id, afterSummary: JSON.stringify({ policyVersionId: policy.id, fallbackCount: 2 }) }]);
+  });
+
+  test("keeps fallback disabled, run-local, and limited to exact eligible duration", async () => {
+    await seedTestOperator();
+    const disabled = await createYoutubeDiscoveryPolicyVersion({ version: 1, isCurrent: true, policy: { allowForeignFallback: false }, actor: createSystemAuditActor("system-youtube-discovery") }, testDb);
+    const proposal = await createYoutubeDiscoveryQueryProposal({ origin: "operator", reason: "operator_request", priority: 50, queryText: "Da Lat route", cadenceMinutes: 15, actor: createUserAuditActor({ userId: "operator", email: "operator@example.com" }) }, testDb);
+    const disabledRun = await createYoutubeDiscoveryRun({ policyVersionId: disabled.id, queryProposalId: proposal.id }, testDb);
+    const disabledSearch = (await claimNextYoutubeDiscoveryRun({ workerId: "fallback-disabled-search" }, testDb)).claim!;
+    await persistYoutubeDiscoveryCandidates(disabledSearch, [{ videoId: "abcDEF12345", canonicalUrl: "https://www.youtube.com/watch?v=abcDEF12345", resultOrdinal: 0, searchTranche: "medium" }], testDb);
+    await finishYoutubeDiscoveryRun(disabledSearch, testDb);
+    const disabledJob = (await claimNextYoutubeDiscoveryCandidateJob({ workerId: "fallback-disabled-job" }, testDb)).claim!;
+    await persistYoutubeDiscoveryEligibility(disabledJob, { videoId: disabledJob.videoId, durationSeconds: 180, defaultAudioLanguage: "en" }, testDb);
+    await finishYoutubeDiscoveryCandidateJob(disabledJob, testDb);
+    await expect(testDb.select({ reason: youtubeDiscoveryAppearances.eligibilityReason }).from(youtubeDiscoveryAppearances).where(eq(youtubeDiscoveryAppearances.runId, disabledRun.id))).resolves.toEqual([{ reason: "non_vietnamese" }]);
+
+    const enabled = await createYoutubeDiscoveryPolicyVersion({ version: 2, isCurrent: true, policy: { maxConcurrentRuns: 2 }, actor: createSystemAuditActor("system-youtube-discovery") }, testDb);
+    const enabledRun = await createYoutubeDiscoveryRun({ policyVersionId: enabled.id, queryProposalId: proposal.id }, testDb);
+    const enabledSearch = (await claimNextYoutubeDiscoveryRun({ workerId: "fallback-local-search" }, testDb)).claim!;
+    await persistYoutubeDiscoveryCandidates(enabledSearch, [{ videoId: "abcDEF12345", canonicalUrl: "https://www.youtube.com/watch?v=abcDEF12345", resultOrdinal: 0, searchTranche: "medium" }, { videoId: "defGHI67890", canonicalUrl: "https://www.youtube.com/watch?v=defGHI67890", resultOrdinal: 1, searchTranche: "long" }], testDb);
+    await finishYoutubeDiscoveryRun(enabledSearch, testDb);
+    const first = (await claimNextYoutubeDiscoveryCandidateJob({ workerId: "fallback-local-first" }, testDb)).claim!;
+    const second = (await claimNextYoutubeDiscoveryCandidateJob({ workerId: "fallback-local-second" }, testDb)).claim!;
+    await persistYoutubeDiscoveryEligibility(first, { videoId: first.videoId, durationSeconds: 179, defaultAudioLanguage: "en" }, testDb);
+    await persistYoutubeDiscoveryEligibility(second, { videoId: second.videoId, durationSeconds: 180, defaultAudioLanguage: "en" }, testDb);
+    await finishYoutubeDiscoveryCandidateJob(first, testDb);
+    await finishYoutubeDiscoveryCandidateJob(second, testDb);
+    await expect(testDb.select({ duration: youtubeDiscoveryAppearances.durationSeconds, reason: youtubeDiscoveryAppearances.eligibilityReason }).from(youtubeDiscoveryAppearances).where(eq(youtubeDiscoveryAppearances.runId, enabledRun.id)).orderBy(youtubeDiscoveryAppearances.resultOrdinal)).resolves.toEqual([{ duration: 179, reason: "too_short" }, { duration: 180, reason: "foreign_fallback" }]);
+    await expect(testDb.select({ reason: youtubeDiscoveryAppearances.eligibilityReason }).from(youtubeDiscoveryAppearances).where(eq(youtubeDiscoveryAppearances.runId, disabledRun.id))).resolves.toEqual([{ reason: "non_vietnamese" }]);
+  });
+
   test("does not call another eligibility check after policy revocation", async () => {
     await seedTestOperator();
     const policy = await createYoutubeDiscoveryPolicyVersion({ version: 1, isCurrent: true, actor: createSystemAuditActor("system-youtube-discovery") }, testDb);
@@ -463,7 +623,7 @@ describe.sequential("YouTube Discovery run execution", () => {
     const run = await createYoutubeDiscoveryRun({ policyVersionId: policy.id, queryProposalId: proposal.id }, testDb);
     await completeDuePlanning();
     await testDb.insert(aiGatewayModels).values({ id: "revocation-triage-model", gatewayModelName: "test/revocation-triage", displayLabel: "Revocation triage", purpose: "youtube_discovery_triage", active: true, defaultForPurpose: true, supportsTextInput: true, supportsExtraction: true, pricingUnitTokens: 1_000_000 });
-    setYoutubeDiscoveryEnrichmentForTest(async (videoId) => ({ videoId, signals: [] }));
+    setYoutubeDiscoveryEnrichmentForTest(async (videoId) => ({ videoId, durationSeconds: 180, defaultAudioLanguage: "vi", signals: [] }));
     setYoutubeDiscoveryTriageCompletionForTest(async () => ({ ok: true, content: JSON.stringify({ relevanceScore: 1, expectedValueScore: 1, freshnessFitScore: 1, commercialRiskScore: 0, duplicateRiskScore: 0, signals: [] }), provider: "ai_gateway", model: "test/revocation-triage", latencyMs: 1, usage: { promptTokens: null, completionTokens: null, totalTokens: null, cachedPromptTokens: null, cacheWritePromptTokens: null }, requestMetadata: { providerRequestId: null } }));
     let eligibilityCalls = 0;
     bindYoutubeDiscoveryExecutionPorts({ check: async () => {
@@ -505,7 +665,7 @@ describe.sequential("YouTube Discovery run execution", () => {
     await testDb.execute(sql`update youtube_discovery_candidate_jobs set next_run_at = clock_timestamp() where id = ${candidateClaim.id}`);
     let eligibilityCalls = 0;
     bindYoutubeDiscoveryExecutionPorts({ check: async () => { eligibilityCalls += 1; return "eligible"; } }, async () => [{ videoId, canonicalUrl: `https://www.youtube.com/watch?v=${videoId}`, resultOrdinal: 0, searchTranche: "medium" }], "test-key");
-    setYoutubeDiscoveryEnrichmentForTest(async () => ({ videoId, signals: [] }));
+    setYoutubeDiscoveryEnrichmentForTest(async () => ({ videoId, durationSeconds: 180, defaultAudioLanguage: "vi", signals: [] }));
 
     await expect(runYoutubeDiscoveryPoll("existing-recommendation-retry")).resolves.toMatchObject({ resultCode: "success", durableId: candidateClaim.id });
     expect(eligibilityCalls).toBe(0);
@@ -532,7 +692,7 @@ describe.sequential("YouTube Discovery run execution", () => {
 
     let eligibilityCalls = 0;
     bindYoutubeDiscoveryExecutionPorts({ check: async () => { eligibilityCalls += 1; return "eligible"; } }, async () => [{ videoId, canonicalUrl: `https://www.youtube.com/watch?v=${videoId}`, resultOrdinal: 0, searchTranche: "medium" }], "test-key");
-    setYoutubeDiscoveryEnrichmentForTest(async () => ({ videoId, signals: [] }));
+    setYoutubeDiscoveryEnrichmentForTest(async () => ({ videoId, durationSeconds: 180, defaultAudioLanguage: "vi", signals: [] }));
     setYoutubeDiscoveryExecutionTimeoutForTest(1);
 
     await expect(runYoutubeDiscoveryPoll("recommendation-deadline")).resolves.toMatchObject({ resultCode: "retry", durableId: candidateClaim.id });
@@ -549,7 +709,7 @@ describe.sequential("YouTube Discovery run execution", () => {
     await completeDuePlanning();
     await testDb.insert(aiGatewayModels).values({ id: "invalid-eligibility-model", gatewayModelName: "test/invalid-eligibility", displayLabel: "Invalid eligibility", purpose: "youtube_discovery_triage", active: true, defaultForPurpose: true, supportsTextInput: true, supportsExtraction: true, pricingUnitTokens: 1_000_000 });
     bindYoutubeDiscoveryExecutionPorts({ check: async () => undefined as never }, async () => [{ videoId: "abcDEF12345", canonicalUrl: "https://www.youtube.com/watch?v=abcDEF12345", resultOrdinal: 0, searchTranche: "medium" }], "test-key");
-    setYoutubeDiscoveryEnrichmentForTest(async (videoId) => ({ videoId, signals: [] }));
+    setYoutubeDiscoveryEnrichmentForTest(async (videoId) => ({ videoId, durationSeconds: 180, defaultAudioLanguage: "vi", signals: [] }));
     setYoutubeDiscoveryTriageCompletionForTest(async () => ({ ok: true, content: JSON.stringify({ relevanceScore: 1, expectedValueScore: 1, freshnessFitScore: 1, commercialRiskScore: 0, duplicateRiskScore: 0, signals: [] }), provider: "ai_gateway", model: "test/invalid-eligibility", latencyMs: 1, usage: { promptTokens: null, completionTokens: null, totalTokens: null, cachedPromptTokens: null, cacheWritePromptTokens: null }, requestMetadata: { providerRequestId: null } }));
 
     await completeSearchEnqueue(run.id, "invalid-eligibility");

@@ -2,33 +2,38 @@ import { canonicalizeYoutubeVideoUrl } from "@xuyenviet/domain";
 
 export const youtubeCommentSignalValues = ["recent_discussion", "stale_or_changed_warning", "practical_question_demand", "creator_responsiveness", "commercial_risk", "contradictory_discussion"] as const;
 export type YoutubeCommentSignal = (typeof youtubeCommentSignalValues)[number];
-export type YoutubeEnrichment = Readonly<{ videoId: string; title?: string; description?: string; channelId?: string; channelName?: string; publishedAt?: Date; durationSeconds?: number; categoryId?: string; tags?: string[]; viewCount?: number; likeCount?: number; commentCount?: number; channelSubscriberCount?: number; thumbnailUrl?: string; signals: ReadonlyArray<{ signal: YoutubeCommentSignal; count: number; score: number }> }>;
+export type YoutubeVideoMetadata = Readonly<{ videoId: string; title?: string; description?: string; channelId?: string; channelName?: string; publishedAt?: Date; durationSeconds?: number; defaultLanguage?: string; defaultAudioLanguage?: string; categoryId?: string; tags?: string[]; viewCount?: number; likeCount?: number; commentCount?: number; thumbnailUrl?: string }>;
+export type YoutubeEnrichment = Readonly<YoutubeVideoMetadata & { channelSubscriberCount?: number; signals: ReadonlyArray<{ signal: YoutubeCommentSignal; count: number; score: number }> }>;
 
 const apiRoot = "https://www.googleapis.com/youtube/v3";
 const commentPageSize = 20;
 const maxResponseBytes = 64 * 1024;
 
 export async function enrichYoutubeVideo(videoId: string, apiKey: string, fetchImpl: typeof fetch = fetch, signal?: AbortSignal, beforeRequest?: () => Promise<void>): Promise<YoutubeEnrichment> {
-  if (!apiKey.trim() || !canonicalizeYoutubeVideoUrl(`https://www.youtube.com/watch?v=${videoId}`)) throw new Error("youtube_enrichment_configuration");
-  const videoPayload = await request("videos", { part: "snippet,contentDetails,statistics", id: videoId, key: apiKey }, fetchImpl, signal, beforeRequest);
-  const video = firstItem(videoPayload);
-  const id = string(video.id);
-  if (id !== videoId) throw new Error("youtube_enrichment_transient");
-  const snippet = object(video.snippet);
-  const channelId = optionalId(snippet?.channelId);
-  if (!snippet || !channelId) throw new Error("youtube_enrichment_transient");
+  const metadata = await fetchYoutubeVideoMetadata(videoId, apiKey, fetchImpl, signal, beforeRequest);
+  return enrichYoutubeVideoDetails(metadata, apiKey, fetchImpl, signal, beforeRequest);
+}
+
+export async function enrichYoutubeVideoDetails(metadata: YoutubeVideoMetadata, apiKey: string, fetchImpl: typeof fetch = fetch, signal?: AbortSignal, beforeRequest?: () => Promise<void>): Promise<YoutubeEnrichment> {
+  const channelId = metadata.channelId;
+  if (!channelId) throw new Error("youtube_enrichment_transient");
   const channelPayload = await request("channels", { part: "snippet,statistics", id: channelId, key: apiKey }, fetchImpl, signal, beforeRequest);
   const channel = firstItem(channelPayload);
   if (string(channel.id) !== channelId) throw new Error("youtube_enrichment_transient");
-  const commentPayload = await requestComments(videoId, apiKey, fetchImpl, signal, beforeRequest);
+  const commentPayload = await requestComments(metadata.videoId, apiKey, fetchImpl, signal, beforeRequest);
   return {
-    videoId,
-    title: safeText(snippet.title, 200), description: safeText(snippet.description, 1000), channelId,
-    channelName: safeText(snippet.channelTitle, 160), publishedAt: date(snippet.publishedAt),
-    durationSeconds: duration(object(video.contentDetails)?.duration), categoryId: optionalCategory(snippet.categoryId),
-    tags: safeTags(snippet.tags), ...statistics(object(video.statistics)), channelSubscriberCount: nonNegativeInteger(object(channel.statistics)?.subscriberCount),
-    thumbnailUrl: thumbnail(object(snippet.thumbnails)), signals: deriveYoutubeCommentSignals(commentPayload),
+    ...metadata, channelSubscriberCount: nonNegativeInteger(object(channel.statistics)?.subscriberCount), signals: deriveYoutubeCommentSignals(commentPayload),
   };
+}
+
+export async function fetchYoutubeVideoMetadata(videoId: string, apiKey: string, fetchImpl: typeof fetch = fetch, signal?: AbortSignal, beforeRequest?: () => Promise<void>): Promise<YoutubeVideoMetadata> {
+  if (!apiKey.trim() || !canonicalizeYoutubeVideoUrl(`https://www.youtube.com/watch?v=${videoId}`)) throw new Error("youtube_enrichment_configuration");
+  const video = firstItem(await request("videos", { part: "snippet,contentDetails,statistics", id: videoId, key: apiKey }, fetchImpl, signal, beforeRequest));
+  if (string(video.id) !== videoId) throw new Error("youtube_enrichment_transient");
+  const snippet = object(video.snippet);
+  if (!snippet) throw new Error("youtube_enrichment_transient");
+  const channelId = optionalId(snippet.channelId);
+  return { videoId, title: safeText(snippet.title, 200), description: safeText(snippet.description, 1000), channelId, channelName: safeText(snippet.channelTitle, 160), publishedAt: date(snippet.publishedAt), durationSeconds: duration(object(video.contentDetails)?.duration), defaultLanguage: language(snippet.defaultLanguage), defaultAudioLanguage: language(object(video.contentDetails)?.defaultAudioLanguage), categoryId: optionalCategory(snippet.categoryId), tags: safeTags(snippet.tags), ...statistics(object(video.statistics)), thumbnailUrl: thumbnail(object(snippet.thumbnails)) };
 }
 
 async function request(endpoint: string, params: Record<string, string>, fetchImpl: typeof fetch, signal?: AbortSignal, beforeRequest?: () => Promise<void>): Promise<Record<string, unknown>> {
@@ -103,6 +108,7 @@ function firstItem(payload: Record<string, unknown>) { const item = Array.isArra
 function safeText(value: unknown, maximum: number) { const text = string(value)?.trim(); return text && text.length <= maximum && !/[\x00-\x1F\x7F]/.test(text) ? text : undefined; }
 function optionalId(value: unknown) { const id = string(value); return id && /^[A-Za-z0-9_-]{6,64}$/.test(id) ? id : undefined; }
 function optionalCategory(value: unknown) { const id = string(value); return id && /^\d{1,8}$/.test(id) ? id : undefined; }
+function language(value: unknown) { const code = string(value)?.trim(); return code && /^[a-z]{2,3}(?:-[A-Za-z0-9]{2,8})?$/.test(code) ? code.toLowerCase() : undefined; }
 function nonNegativeInteger(value: unknown) { const number = typeof value === "string" && /^\d+$/.test(value) ? Number(value) : typeof value === "number" ? value : NaN; return Number.isSafeInteger(number) && number >= 0 && number <= 2147483647 ? number : undefined; }
 function statistics(value: Record<string, unknown> | null) { return { viewCount: nonNegativeInteger(value?.viewCount), likeCount: nonNegativeInteger(value?.likeCount), commentCount: nonNegativeInteger(value?.commentCount) }; }
 function date(value: unknown) { if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/.test(value)) return undefined; const parsed = new Date(value); const expected = value.includes(".") ? value : `${value.slice(0, -1)}.000Z`; return parsed.toISOString() === expected ? parsed : undefined; }

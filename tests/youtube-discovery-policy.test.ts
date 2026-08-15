@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 
-import { defaultYoutubeDiscoveryPolicy, parseYoutubeDiscoveryPolicy, YoutubeDiscoveryPolicyValidationError } from "@xuyenviet/domain";
+import { defaultYoutubeDiscoveryPolicy, evaluateYoutubeDiscoveryEligibility, parseYoutubeDiscoveryPolicy, YoutubeDiscoveryPolicyValidationError } from "@xuyenviet/domain";
 import { createSystemAuditActor, createUserAuditActor, createYoutubeDiscoveryPolicyVersion, createYoutubeDiscoveryQueryProposal } from "@xuyenviet/database";
 
 describe("YouTube Discovery policy", () => {
@@ -8,6 +8,23 @@ describe("YouTube Discovery policy", () => {
     expect(parseYoutubeDiscoveryPolicy({})).toEqual(defaultYoutubeDiscoveryPolicy);
     expect(defaultYoutubeDiscoveryPolicy.retentionDays).toBe(180);
     expect(defaultYoutubeDiscoveryPolicy.commentSignalTtlDays).toBeLessThan(defaultYoutubeDiscoveryPolicy.retentionDays);
+    expect(defaultYoutubeDiscoveryPolicy.minimumUsefulDurationSeconds).toBe(180);
+  });
+
+  test("classifies duration before bounded Vietnamese language eligibility", () => {
+    expect(evaluateYoutubeDiscoveryEligibility(defaultYoutubeDiscoveryPolicy, { durationSeconds: 179, defaultAudioLanguage: "vi", title: "đường đèo" })).toMatchObject({ durationFit: "too_short", languageFit: "vi", reason: "too_short", primaryEligible: false });
+    expect(evaluateYoutubeDiscoveryEligibility(defaultYoutubeDiscoveryPolicy, { durationSeconds: 180, defaultAudioLanguage: "vi" })).toMatchObject({ durationFit: "eligible", languageFit: "vi", reason: "eligible_vietnamese", primaryEligible: true });
+    expect(evaluateYoutubeDiscoveryEligibility(defaultYoutubeDiscoveryPolicy, { durationSeconds: undefined, title: "kinh nghiệm đường đèo" })).toMatchObject({ durationFit: "duration_unknown", languageFit: "likely_vi", reason: "duration_unknown", primaryEligible: false });
+    expect(evaluateYoutubeDiscoveryEligibility(defaultYoutubeDiscoveryPolicy, { durationSeconds: 180, defaultAudioLanguage: "en", title: "kinh nghiệm đường đèo" })).toMatchObject({ languageFit: "non_vi", reason: "non_vietnamese", primaryEligible: false });
+    expect(evaluateYoutubeDiscoveryEligibility(defaultYoutubeDiscoveryPolicy, { durationSeconds: 180, defaultLanguage: "en-US", title: "kinh nghiệm đường đèo" })).toMatchObject({ languageFit: "likely_vi", reason: "eligible_vietnamese", primaryEligible: true });
+    expect(evaluateYoutubeDiscoveryEligibility(defaultYoutubeDiscoveryPolicy, { durationSeconds: 180, defaultLanguage: "vi-VN" })).toMatchObject({ languageFit: "vi", reason: "eligible_vietnamese", primaryEligible: true });
+    expect(evaluateYoutubeDiscoveryEligibility(defaultYoutubeDiscoveryPolicy, { durationSeconds: 180, defaultAudioLanguage: "en-US", defaultLanguage: "vi-VN" })).toMatchObject({ languageFit: "non_vi", reason: "non_vietnamese", primaryEligible: false });
+    expect(evaluateYoutubeDiscoveryEligibility(defaultYoutubeDiscoveryPolicy, { durationSeconds: 180, title: "kinh nghiệm đường đèo" })).toMatchObject({ languageFit: "likely_vi", reason: "eligible_vietnamese", primaryEligible: true });
+    expect(evaluateYoutubeDiscoveryEligibility(defaultYoutubeDiscoveryPolicy, { durationSeconds: 180, title: "road trip tips" })).toMatchObject({ languageFit: "unknown", reason: "language_unknown", primaryEligible: false });
+  });
+
+  test("accepts the migrated legacy classifier version without enabling classification", () => {
+    expect(parseYoutubeDiscoveryPolicy({ languageClassifierVersion: 0 }).languageClassifierVersion).toBe(0);
   });
 
   test.each([

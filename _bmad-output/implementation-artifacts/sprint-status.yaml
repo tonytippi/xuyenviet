@@ -1,5 +1,5 @@
 # generated: 2026-07-25
-# last_updated: 08-14-2026 20:56 (Story 22.1 review repairs complete; unit, typecheck, lint, and diff check pass.)
+# last_updated: 08-14-2026 (Story 22.2 independent code review repairs complete.)
 # project: xuyenviet
 # project_key: NOKEY
 # tracking_system: file-system
@@ -33,7 +33,7 @@
 #   - done: Completed
 
 generated: 2026-07-25
-last_updated: 08-14-2026 20:56
+last_updated: 08-14-2026
 project: xuyenviet
 project_key: NOKEY
 tracking_system: file-system
@@ -461,7 +461,7 @@ development_status:
   epic-22: in-progress
   # 2026-08-14: BMad code review repaired tranche contract/caller regressions, deterministic persistence ordering, and immutable review-query provenance. Unit tests (349), typecheck, lint (0 errors; pre-existing warnings), and diff check pass. Integration runner ignores supplied file filters and timed out in unrelated existing tests; no Story 22.1 integration assertion failed before timeout.
   22-1-generate-vietnamese-first-discovery-queries: done
-  22-2-gate-language-and-useful-duration-before-ai-triage: backlog
+  22-2-gate-language-and-useful-duration-before-ai-triage: done
   22-3-surface-video-evidence-and-prove-vietnamese-first-quality: backlog
   epic-22-retrospective: optional
 

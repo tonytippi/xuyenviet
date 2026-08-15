@@ -1,6 +1,9 @@
 export type YoutubeDiscoveryPolicyAuditSummary = Readonly<{
   version: number;
   queryBuilderVersion: number;
+  languageClassifierVersion: number;
+  minimumUsefulDurationSeconds: number;
+  allowForeignFallback: boolean;
   enabled: boolean;
   minimumCandidateScore: number;
   priorityScoreWeight: number;

@@ -1,5 +1,8 @@
 export type YoutubeDiscoveryPolicy = Readonly<{
   queryBuilderVersion: number;
+  languageClassifierVersion: number;
+  minimumUsefulDurationSeconds: number;
+  allowForeignFallback: boolean;
   enabled: boolean;
   minimumCandidateScore: number;
   priorityScoreWeight: number;
@@ -27,6 +30,9 @@ export type YoutubeDiscoveryPolicy = Readonly<{
 
 export const defaultYoutubeDiscoveryPolicy: YoutubeDiscoveryPolicy = Object.freeze({
   queryBuilderVersion: 1,
+  languageClassifierVersion: 1,
+  minimumUsefulDurationSeconds: 180,
+  allowForeignFallback: true,
   enabled: true,
   minimumCandidateScore: 0.5,
   priorityScoreWeight: 0.6,
@@ -64,10 +70,39 @@ export function parseYoutubeDiscoveryPolicy(input: unknown): YoutubeDiscoveryPol
     throw new YoutubeDiscoveryPolicyValidationError();
   }
   const policy = { ...defaultYoutubeDiscoveryPolicy, ...input };
-  if (typeof policy.enabled !== "boolean" || !integerBetween(policy.queryBuilderVersion, 1, 2) || !score(policy.minimumCandidateScore) || !score(policy.priorityScoreWeight) || !score(policy.freshnessScoreWeight) || !rankingPolicy(policy) || !integerBetween(policy.cadenceMinutes, 15, 10_080) || !integerBetween(policy.retentionDays, 1, 365) || !integerBetween(policy.commentSignalTtlDays, 1, policy.retentionDays - 1) || !integerBetween(policy.maxConcurrentRuns, 1, 20) || !integerBetween(policy.maxRetryAttempts, 0, 10) || !integerBetween(policy.retryDelayMinutes, 1, 1_440) || !integerBetween(policy.candidateBacklogThreshold, 1, 10_000) || !integerBetween(policy.actionQueueHighPriorityMaximum, 1, 100) || !integerBetween(policy.actionQueueMaximumOperatorReviewAgeHours, 1, 720) || !integerBetween(policy.actionQueueMaximumMissionStallHours, 1, 720) || !integerBetween(policy.actionQueuePersistentIncidentFailureCount, 2, 10) || !integerBetween(policy.actionQueuePersistentIncidentWindowHours, 1, 168)) {
+  if (typeof policy.enabled !== "boolean" || typeof policy.allowForeignFallback !== "boolean" || !integerBetween(policy.queryBuilderVersion, 1, 2) || !integerBetween(policy.languageClassifierVersion, 0, 1) || !integerBetween(policy.minimumUsefulDurationSeconds, 180, 86_400) || !score(policy.minimumCandidateScore) || !score(policy.priorityScoreWeight) || !score(policy.freshnessScoreWeight) || !rankingPolicy(policy) || !integerBetween(policy.cadenceMinutes, 15, 10_080) || !integerBetween(policy.retentionDays, 1, 365) || !integerBetween(policy.commentSignalTtlDays, 1, policy.retentionDays - 1) || !integerBetween(policy.maxConcurrentRuns, 1, 20) || !integerBetween(policy.maxRetryAttempts, 0, 10) || !integerBetween(policy.retryDelayMinutes, 1, 1_440) || !integerBetween(policy.candidateBacklogThreshold, 1, 10_000) || !integerBetween(policy.actionQueueHighPriorityMaximum, 1, 100) || !integerBetween(policy.actionQueueMaximumOperatorReviewAgeHours, 1, 720) || !integerBetween(policy.actionQueueMaximumMissionStallHours, 1, 720) || !integerBetween(policy.actionQueuePersistentIncidentFailureCount, 2, 10) || !integerBetween(policy.actionQueuePersistentIncidentWindowHours, 1, 168)) {
     throw new YoutubeDiscoveryPolicyValidationError();
   }
   return Object.freeze(policy);
+}
+
+export const youtubeDiscoveryLanguageFits = ["vi", "likely_vi", "unknown", "non_vi"] as const;
+export type YoutubeDiscoveryLanguageFit = (typeof youtubeDiscoveryLanguageFits)[number];
+export const youtubeDiscoveryDurationFits = ["eligible", "too_short", "duration_unknown"] as const;
+export type YoutubeDiscoveryDurationFit = (typeof youtubeDiscoveryDurationFits)[number];
+export const youtubeDiscoveryEligibilityReasons = ["eligible_vietnamese", "too_short", "duration_unknown", "non_vietnamese", "language_unknown", "foreign_fallback"] as const;
+export type YoutubeDiscoveryEligibilityReason = (typeof youtubeDiscoveryEligibilityReasons)[number];
+export type YoutubeDiscoveryEligibility = Readonly<{ languageFit: YoutubeDiscoveryLanguageFit; durationFit: YoutubeDiscoveryDurationFit; reason: YoutubeDiscoveryEligibilityReason; primaryEligible: boolean }>;
+
+/** Classifies only bounded provider metadata; explicit audio/language wins over text. */
+export function evaluateYoutubeDiscoveryEligibility(policy: YoutubeDiscoveryPolicy, metadata: Readonly<{ durationSeconds?: number; defaultLanguage?: string; defaultAudioLanguage?: string; title?: string; description?: string; tags?: readonly string[] }>): YoutubeDiscoveryEligibility {
+  const durationFit: YoutubeDiscoveryDurationFit = !Number.isSafeInteger(metadata.durationSeconds) || metadata.durationSeconds! < 0 || metadata.durationSeconds! > 86_400 ? "duration_unknown" : metadata.durationSeconds! < policy.minimumUsefulDurationSeconds ? "too_short" : "eligible";
+  const audio = primaryLanguage(metadata.defaultAudioLanguage);
+  const declared = primaryLanguage(metadata.defaultLanguage);
+  const languageFit: YoutubeDiscoveryLanguageFit = audio === "vi" || !audio && declared === "vi" ? "vi" : audio ? "non_vi" : vietnameseText(`${metadata.title ?? ""} ${metadata.description ?? ""} ${(metadata.tags ?? []).join(" ")}`) ? "likely_vi" : "unknown";
+  if (durationFit !== "eligible") return { languageFit, durationFit, reason: durationFit, primaryEligible: false };
+  if (languageFit === "vi" || languageFit === "likely_vi") return { languageFit, durationFit, reason: "eligible_vietnamese", primaryEligible: true };
+  return { languageFit, durationFit, reason: languageFit === "non_vi" ? "non_vietnamese" : "language_unknown", primaryEligible: false };
+}
+
+function primaryLanguage(value: string | undefined): string | undefined {
+  const match = /^([a-z]{2,3})(?:-[a-z0-9]{2,8})?$/i.exec(value?.trim() ?? "");
+  return match?.[1]?.toLowerCase();
+}
+
+function vietnameseText(value: string): boolean {
+  const text = value.normalize("NFKC").toLocaleLowerCase("vi-VN").slice(0, 2_800);
+  return /[ăâđêôơư]|\b(đường|kinh nghiệm|hành trình|du lịch|lái xe|việt nam|đà lạt|phượt|cung đường)\b/.test(text);
 }
 
 export const youtubeDiscoveryRecommendationValues = ["skip", "defer", "consider"] as const;
