@@ -55,7 +55,7 @@ describe.sequential("YouTube Discovery action-required queue", () => {
     expect(review.items.map((item) => item.recommendationId)).toEqual([primaryRecommendationId]);
     expect(actions.items.some((item) => item.actionId === fallbackRecommendationId)).toBe(false);
     expect(fallbackProjection.items).toEqual([expect.objectContaining({ eligibilityReason: "foreign_fallback", languageFit: "non_vi", queryText: "Da Lat route" })]);
-    expect(health.quality).toMatchObject({ foreignFallback: 1, vietnameseConsider: 1, considered: 2, vietnameseFitPercent: 50, durationViolations: 0 });
+    expect(health.quality).toMatchObject({ foreignFallback: 1, vietnameseConsider: 1, considered: 1, vietnameseFitPercent: 100, durationViolations: 0 });
     expect(mission.quality).toEqual(health.quality);
     expect(await queueWriteSnapshot()).toEqual(before);
   });
@@ -70,7 +70,24 @@ describe.sequential("YouTube Discovery action-required queue", () => {
     const [projection, health] = await Promise.all([createPostgresAdminYoutubeDiscoveryPort(undefined, testDb).listForeignFallback(), createPostgresAdminYoutubeDiscoveryPort(undefined, testDb).healthOverview()]);
 
     expect(projection.items).toEqual([]);
-    expect(health.quality).toMatchObject({ foreignFallback: 0, vietnameseConsider: 0, considered: 1, vietnameseFitPercent: 0, durationViolations: 1 });
+    expect(health.quality).toMatchObject({ foreignFallback: 0, vietnameseConsider: 0, considered: 0, vietnameseFitPercent: null, durationViolations: 1 });
+  });
+
+  test("reports each new-policy gate failure separately without admitting it to Vietnamese-first measurement", async () => {
+    const { policy, proposal } = await queueFixture();
+    const primaryRecommendationId = await createConsiderCandidate(policy.id, proposal.id, "qualityprimary");
+    const cases = [{ reason: "too_short", videoId: "qualityshort" }, { reason: "duration_unknown", videoId: "qualityduration" }, { reason: "non_vietnamese", videoId: "qualitynonvi" }, { reason: "language_unknown", videoId: "qualityunknown" }] as const;
+    for (const { reason, videoId } of cases) {
+      const recommendationId = await createConsiderCandidate(policy.id, proposal.id, videoId);
+      const [recommendation] = await testDb.select({ appearanceId: youtubeDiscoveryRecommendations.appearanceId }).from(youtubeDiscoveryRecommendations).where(eq(youtubeDiscoveryRecommendations.id, recommendationId));
+      if (!recommendation) throw new Error("expected gate-failed recommendation");
+      await testDb.update(youtubeDiscoveryAppearances).set({ eligibilityReason: reason, languageFit: reason === "non_vietnamese" ? "non_vi" : reason === "language_unknown" ? "unknown" : "vi", durationFit: reason === "too_short" ? "too_short" : reason === "duration_unknown" ? "duration_unknown" : "eligible", durationSeconds: reason === "too_short" ? 179 : reason === "duration_unknown" ? null : 180 }).where(eq(youtubeDiscoveryAppearances.id, recommendation.appearanceId));
+    }
+
+    const health = await createPostgresAdminYoutubeDiscoveryPort(undefined, testDb).healthOverview();
+
+    expect(health.quality).toMatchObject({ tooShort: 1, durationUnknown: 1, nonVietnamese: 1, languageUnknown: 1, vietnameseConsider: 1, considered: 1, vietnameseFitPercent: 100, durationViolations: 2 });
+    expect(primaryRecommendationId).toBeTruthy();
   });
 
   test("uses typed incident escalation and clearance while excluding non-actionable runs", async () => {

@@ -458,11 +458,12 @@ development_status:
   # 2026-08-14: Approved Correct Course proposal adds a prospective-only
   # Vietnamese-first Discovery quality correction. Complete Stories 22.1-22.3
   # before resuming Epic 21. Historical Discovery data remains unchanged.
-  epic-22: in-progress
+  epic-22: done
   # 2026-08-14: BMad code review repaired tranche contract/caller regressions, deterministic persistence ordering, and immutable review-query provenance. Unit tests (349), typecheck, lint (0 errors; pre-existing warnings), and diff check pass. Integration runner ignores supplied file filters and timed out in unrelated existing tests; no Story 22.1 integration assertion failed before timeout.
   22-1-generate-vietnamese-first-discovery-queries: done
   22-2-gate-language-and-useful-duration-before-ai-triage: done
-  22-3-surface-video-evidence-and-prove-vietnamese-first-quality: review
+  # 2026-08-15: BMad code review repaired primary-row thumbnail presentation and Vietnamese-first measurement admission, then added PostgreSQL projection coverage for persisted metadata and all four gate-failure aggregates. Focused unit suite: 357 passed; serial integration: action-required 13 passed and review 1 passed; typecheck passed; lint had 0 errors and existing warnings. One fallback-render claim was dismissed after source reinspection because the existing supplemental section already renders the fetched projection.
+  22-3-surface-video-evidence-and-prove-vietnamese-first-quality: done
   epic-22-retrospective: optional
 
   # 2026-08-13: Canonical dispatch lives at _bmad-output/specs/spec-epic-21.

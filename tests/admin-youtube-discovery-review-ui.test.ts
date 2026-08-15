@@ -101,6 +101,7 @@ describe("admin YouTube Discovery review UI boundary", () => {
     expect(source).toContain('Nguồn ngoại ngữ bổ sung');
     expect(source).toContain('/v1/admin/knowledge/youtube-discovery/fallback');
     expect(source).toContain('không thuộc hàng đợi ưu tiên, xếp hạng hoặc hành động xem xét');
+    expect(source).toContain('item.thumbnailUrl ? <img alt="" className="h-16 w-24 rounded object-cover"');
   });
 
   test("uses the main Discovery route for URL review and exposes Health", async () => {

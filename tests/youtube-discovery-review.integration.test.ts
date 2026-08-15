@@ -27,7 +27,7 @@ describe.sequential("YouTube Discovery review read model", () => {
     if (!model) throw new Error("expected review triage model");
 
     for (const videoId of videos) {
-       await persistYoutubeDiscoveryEnrichment(claim, { videoId, title: "Đường đèo Việt Nam", durationSeconds: 180, defaultAudioLanguage: "vi", signals: [] }, testDb);
+       await persistYoutubeDiscoveryEnrichment(claim, { videoId, title: "Đường đèo Việt Nam", channelName: "Kênh đường đèo", thumbnailUrl: `https://i.ytimg.com/vi/${videoId}/mqdefault.jpg`, viewCount: 4_567, durationSeconds: 180, defaultAudioLanguage: "vi", signals: [] }, testDb);
        await testDb.update(youtubeDiscoveryAppearances).set({ languageFit: "vi", durationFit: "eligible", eligibilityReason: "eligible_vietnamese", queryBuilderVersion: 2, languageClassifierVersion: 1, minimumUsefulDurationSeconds: 180 }).where(eq(youtubeDiscoveryAppearances.runId, claim.id));
       const [candidate] = await testDb.select({ id: youtubeDiscoveryCandidates.id }).from(youtubeDiscoveryCandidates).where(eq(youtubeDiscoveryCandidates.videoId, videoId));
       if (!candidate) throw new Error(`expected persisted candidate for ${videoId}`);
@@ -98,7 +98,8 @@ describe.sequential("YouTube Discovery review read model", () => {
 
         await transaction.execute(sql`update youtube_discovery_query_proposals set query_text = 'rewritten proposal query' where id = ${query.id}`);
         const detail = await port.getReview(principal, first.items[0]!.recommendationId);
-      expect(detail).toMatchObject({ recommendationId: first.items[0]!.recommendationId, queryText: "Da Lat route", queryReason: "operator_request", priorCaptureOutcome: "unavailable" });
+       expect(first.items[0]).toMatchObject({ thumbnailUrl: expect.stringMatching(/^https:\/\/i\.ytimg\.com\/vi\/rv\d{9}\/mqdefault\.jpg$/), title: "Đường đèo Việt Nam", channelName: "Kênh đường đèo", durationSeconds: 180, viewCount: 4_567, languageFit: "vi", eligibilityReason: "eligible_vietnamese" });
+       expect(detail).toMatchObject({ recommendationId: first.items[0]!.recommendationId, thumbnailUrl: expect.stringMatching(/^https:\/\/i\.ytimg\.com\/vi\/rv\d{9}\/mqdefault\.jpg$/), title: "Đường đèo Việt Nam", channelName: "Kênh đường đèo", durationSeconds: 180, viewCount: 4_567, languageFit: "vi", eligibilityReason: "eligible_vietnamese", queryText: "Da Lat route", queryReason: "operator_request", priorCaptureOutcome: "unavailable" });
       expect(eligibility.check).toHaveBeenCalledWith(expect.stringMatching(/^rv\d{9}$/));
        expect(detail).not.toHaveProperty("videoId");
        const intake = { submit: vi.fn().mockResolvedValue("submitted" as const), lookup: vi.fn().mockResolvedValue("submitted" as const) };

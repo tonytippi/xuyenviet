@@ -56,6 +56,14 @@ context:
 - [x] `apps/admin/app/knowledge/youtube-discovery-review/review.tsx`, `review-copy.ts`, `mission/mission.tsx`, `health/health.tsx` -- hiển thị Vietnamese-first metadata, trust boundary, fallback riêng và aggregate accessible -- giúp operator đánh giá mà không nhầm tín hiệu với evidence Knowledge.
 - [x] `tests/admin-youtube-discovery-contract.test.ts`, `tests/youtube-discovery-review.integration.test.ts`, `tests/youtube-discovery-action-required.integration.test.ts`, `tests/youtube-discovery-mission.integration.test.ts`, `tests/admin-youtube-discovery-review-ui.test.ts`, `tests/admin-youtube-discovery-mission-ui.test.ts`, `tests/admin-youtube-discovery-health-ui.test.ts` -- cover contract boundary, policy isolation, measurement, no-write and accessibility behavior -- chứng minh AC và không mutate history.
 
+### Review Findings
+
+- [x] [Review][Dismiss] Foreign fallback projection is never rendered [apps/admin/app/knowledge/youtube-discovery-review/review.tsx:221] -- dismissed after reinspection; the existing rendered section consumes `fallbackItems` and `fallbackStatus`.
+- [x] [Review][Patch] Primary queue rows omit the required thumbnail [apps/admin/app/knowledge/youtube-discovery-review/review.tsx:221]
+- [x] [Review][Patch] Quality measurement includes non-primary `consider` recommendations [packages/database/src/admin-youtube-discovery.ts:257]
+- [x] [Review][Patch] Review metadata projection lacks persisted-data integration coverage [tests/youtube-discovery-review.integration.test.ts:100]
+- [x] [Review][Patch] Gate-failure quality aggregates lack projection-boundary coverage [tests/youtube-discovery-action-required.integration.test.ts:76]
+
 **Acceptance Criteria:**
 - Given một new-policy `vi` hoặc `likely_vi` candidate vào primary review, when operator xem row và inspector, then metadata/label/query/reason safe được hiển thị bằng tiếng Việt và nêu rõ metrics chỉ là review context, không là correctness/evidence/capture/publication proof.
 - Given gate failures hoặc `foreign_fallback`, when Action Required, primary queue, Mission và Health render, then failures không là review work, fallback chỉ ở `Nguồn ngoại ngữ bổ sung`, và primary ranking/numerator không chứa fallback.
