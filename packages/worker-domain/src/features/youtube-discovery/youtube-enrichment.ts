@@ -33,7 +33,7 @@ export async function fetchYoutubeVideoMetadata(videoId: string, apiKey: string,
   const snippet = object(video.snippet);
   if (!snippet) throw new Error("youtube_enrichment_transient");
   const channelId = optionalId(snippet.channelId);
-  return { videoId, title: safeText(snippet.title, 200), description: safeText(snippet.description, 1000), channelId, channelName: safeText(snippet.channelTitle, 160), publishedAt: date(snippet.publishedAt), durationSeconds: duration(object(video.contentDetails)?.duration), defaultLanguage: language(snippet.defaultLanguage), defaultAudioLanguage: language(object(video.contentDetails)?.defaultAudioLanguage), categoryId: optionalCategory(snippet.categoryId), tags: safeTags(snippet.tags), ...statistics(object(video.statistics)), thumbnailUrl: thumbnail(object(snippet.thumbnails)) };
+  return { videoId, title: safeText(snippet.title, 200), description: safeText(snippet.description, 1000), channelId, channelName: safeText(snippet.channelTitle, 160), publishedAt: date(snippet.publishedAt), durationSeconds: duration(object(video.contentDetails)?.duration), defaultLanguage: language(snippet.defaultLanguage), defaultAudioLanguage: language(snippet.defaultAudioLanguage), categoryId: optionalCategory(snippet.categoryId), tags: safeTags(snippet.tags), ...statistics(object(video.statistics)), thumbnailUrl: thumbnail(object(snippet.thumbnails)) };
 }
 
 async function request(endpoint: string, params: Record<string, string>, fetchImpl: typeof fetch, signal?: AbortSignal, beforeRequest?: () => Promise<void>): Promise<Record<string, unknown>> {

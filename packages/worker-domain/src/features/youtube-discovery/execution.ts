@@ -1,6 +1,6 @@
-import { cancelYoutubeDiscoveryCandidateJobIfDisabled, cancelYoutubeDiscoveryRunIfDisabled, claimNextYoutubeDiscoveryCandidateJob, claimNextYoutubeDiscoveryRun, claimYoutubeDiscoveryPlanning, completeYoutubeDiscoveryTriage, finishYoutubeDiscoveryCandidateJob, finishYoutubeDiscoveryRun, getYoutubeDiscoveryRecommendationBundle, getYoutubeDiscoveryRunQuery, getYoutubeDiscoveryTriageBundle, parseYoutubeDiscoveryTriageAssessment, persistYoutubeDiscoveryCandidates, persistYoutubeDiscoveryEligibility, persistYoutubeDiscoveryEnrichment, persistYoutubeDiscoveryRecommendation, persistYoutubeDiscoveryTriage, refreshYoutubeDiscoverySystemProposals, retainYoutubeDiscoveryRecords, retryYoutubeDiscoveryCandidateJob, retryYoutubeDiscoveryRun, scheduleYoutubeDiscoveryDueRuns, selectYoutubeDiscoveryTriageModel, YoutubeDiscoveryTriageBundleReadError, type YoutubeDiscoveryCandidateJobSafeErrorCode, type YoutubeDiscoveryRunSafeErrorCode } from "@xuyenviet/database";
+import { cancelYoutubeDiscoveryCandidateJobIfDisabled, cancelYoutubeDiscoveryRunIfDisabled, claimNextYoutubeDiscoveryCandidateJob, claimNextYoutubeDiscoveryRun, claimYoutubeDiscoveryPlanning, completeYoutubeDiscoveryTriage, finishYoutubeDiscoveryCandidateJob, finishYoutubeDiscoveryRun, getYoutubeDiscoveryRecommendationBundle, getYoutubeDiscoveryRunQuery, getYoutubeDiscoveryTriageBundle, parseYoutubeDiscoveryTriageAssessment, persistYoutubeDiscoveryCandidates, persistYoutubeDiscoveryEligibility, persistYoutubeDiscoveryEnrichment, persistYoutubeDiscoveryRecommendation, persistYoutubeDiscoveryTriage, reconcileYoutubeDiscoveryKnowledgeHandoffs, refreshYoutubeDiscoverySystemProposals, retainYoutubeDiscoveryRecords, retryYoutubeDiscoveryCandidateJob, retryYoutubeDiscoveryRun, scheduleYoutubeDiscoveryDueRuns, selectYoutubeDiscoveryTriageModel, YoutubeDiscoveryTriageBundleReadError, type YoutubeDiscoveryCandidateJobSafeErrorCode, type YoutubeDiscoveryRunSafeErrorCode } from "@xuyenviet/database";
 import type { WorkerPollObservation } from "@xuyenviet/contracts";
-import { createUnavailableAiAskDiscoveryQuerySignalPort, createUnavailableKnowledgeDiscoveryQuerySignalPort, type AiAskDiscoveryQuerySignalPort, type DiscoveryQuerySignalPortResult, type KnowledgeDiscoveryQuerySignalPort, type YoutubeCaptureEligibilityPort } from "@xuyenviet/domain";
+import { createUnavailableAiAskDiscoveryQuerySignalPort, createUnavailableKnowledgeDiscoveryQuerySignalPort, type AdminYoutubeDiscoveryDependencies, type AiAskDiscoveryQuerySignalPort, type DiscoveryQuerySignalPortResult, type KnowledgeDiscoveryQuerySignalPort, type YoutubeCaptureEligibilityPort } from "@xuyenviet/domain";
 import { searchYoutubeVideos } from "./youtube-search";
 import { enrichYoutubeVideo, enrichYoutubeVideoDetails, fetchYoutubeVideoMetadata } from "./youtube-enrichment";
 
@@ -22,8 +22,10 @@ const youtubeEnrichmentDetails: typeof enrichYoutubeVideoDetails = enrichYoutube
 let youtubeTriageCompletion: typeof completeYoutubeDiscoveryTriage = completeYoutubeDiscoveryTriage;
 let youtubeTriagePersistence: typeof persistYoutubeDiscoveryTriage = persistYoutubeDiscoveryTriage;
 let youtubeDataApiKey: string | undefined;
+let youtubeKnowledgeHandoff: NonNullable<AdminYoutubeDiscoveryDependencies["knowledgeHandoff"]> = { async submit() { return "reconciling"; }, async lookup() { return "reconciling"; } };
 
 export async function runYoutubeDiscoveryPoll(workerId: string): Promise<WorkerPollObservation> {
+  await reconcileYoutubeDiscoveryKnowledgeHandoffs(youtubeKnowledgeHandoff);
   const planning = await claimYoutubeDiscoveryPlanning(workerId);
   if (planning) {
     const outcome = await refreshYoutubeDiscoverySystemProposals(planning, await Promise.all([readPlanningPort(knowledgePlanningPort), readPlanningPort(aiAskPlanningPort)]));
@@ -57,7 +59,7 @@ async function executeQueryRun(claim: NonNullable<Awaited<ReturnType<typeof clai
     const controller = new AbortController(); let timeout: ReturnType<typeof setTimeout> | undefined;
     let result: Awaited<ReturnType<typeof youtubeSearch>>;
     try {
-      result = await Promise.race([youtubeSearch(run.queryText, youtubeDataApiKey, undefined, controller.signal), new Promise<never>((_, reject) => { timeout = setTimeout(() => { controller.abort(); reject(new Error("search_timeout")); }, executionStageTimeoutOverrideMs ?? executionStageTimeoutMs); })]);
+      result = await Promise.race([youtubeSearch(run.queryText, youtubeDataApiKey, undefined, controller.signal, async () => { const active = await cancelYoutubeDiscoveryRunIfDisabled(claim); if (active === "cancelled") throw new Error("query_cancelled"); if (active !== "active") throw new Error("persistence_contended"); }), new Promise<never>((_, reject) => { timeout = setTimeout(() => { controller.abort(); reject(new Error("search_timeout")); }, executionStageTimeoutOverrideMs ?? executionStageTimeoutMs); })]);
     } finally { if (timeout) clearTimeout(timeout); }
     stage = "persist_candidates";
     const persisted = await persistYoutubeDiscoveryCandidates(claim, result);
@@ -66,6 +68,7 @@ async function executeQueryRun(claim: NonNullable<Awaited<ReturnType<typeof clai
     const disposition = await finishYoutubeDiscoveryRun(claim);
     return observationFor("query_run", claim, disposition === "completed" ? "success" : disposition === "cancelled" ? "success" : "contended");
   } catch (error) {
+    if (error instanceof Error && error.message === "query_cancelled") return observationFor("query_run", claim, "success");
     code = error instanceof Error && error.message === "search_timeout" ? "search_timeout" : error instanceof Error && error.message === "search_transient" ? "search_transient" : "stage_transient";
     const disposition = await retryYoutubeDiscoveryRun(claim, null, undefined, code);
     return observationFor("query_run", claim, disposition === "retrying" ? "retry" : disposition === "failed" ? "failure" : disposition === "cancelled" ? "success" : "contended", code, stage);
@@ -174,6 +177,7 @@ export function setYoutubeDiscoveryExecutionStageForTest(stage: (() => Promise<D
 export function setYoutubeDiscoveryExecutionTimeoutForTest(timeoutMs: number | undefined) { executionStageTimeoutOverrideMs = timeoutMs; }
 export function bindYoutubeDiscoveryPlanningPorts(knowledge: KnowledgeDiscoveryQuerySignalPort, aiAsk: AiAskDiscoveryQuerySignalPort) { knowledgePlanningPort = knowledge; aiAskPlanningPort = aiAsk; }
 export function bindYoutubeDiscoveryExecutionPorts(eligibility: YoutubeCaptureEligibilityPort, search: typeof searchYoutubeVideos = searchYoutubeVideos, apiKey?: string) { youtubeCaptureEligibilityPort = eligibility; youtubeSearch = search; youtubeDataApiKey = apiKey?.trim() || undefined; }
+export function bindYoutubeDiscoveryKnowledgeHandoff(handoff: NonNullable<AdminYoutubeDiscoveryDependencies["knowledgeHandoff"]>) { youtubeKnowledgeHandoff = handoff; }
 export function setYoutubeDiscoveryPlanningPortsForTest(knowledge: ((signal?: AbortSignal) => Promise<DiscoveryQuerySignalPortResult>) | undefined, aiAsk: ((signal?: AbortSignal) => Promise<DiscoveryQuerySignalPortResult>) | undefined) { bindYoutubeDiscoveryPlanningPorts(knowledge ? { readSignals: knowledge } : createUnavailableKnowledgeDiscoveryQuerySignalPort(), aiAsk ? { readSignals: aiAsk } : createUnavailableAiAskDiscoveryQuerySignalPort()); }
 export function setYoutubeDiscoveryEnrichmentForTest(enrichment: typeof enrichYoutubeVideo | undefined) {
   youtubeEnrichment = enrichment ?? enrichYoutubeVideo;

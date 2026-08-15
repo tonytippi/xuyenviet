@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, test } from "vitest";
 import { and, eq, sql } from "drizzle-orm";
 import type { RequestPrincipal } from "@xuyenviet/contracts";
+import { readFile } from "node:fs/promises";
+import { resolve } from "node:path";
 
 import { auditEvents, claimNextYoutubeDiscoveryRun, claimYoutubeDiscoveryPlanning, createKnowledgeDiscoveryQuerySignalPort, createPostgresAdminYoutubeDiscoveryPort, createSystemAuditActor, createUserAuditActor, createYoutubeDiscoveryPolicyVersion, createYoutubeDiscoveryQueryProposal, createYoutubeDiscoveryRun, knowledgeCards, knowledgeRecommendations, refreshYoutubeDiscoverySystemProposals, scheduleYoutubeDiscoveryDueRuns, youtubeDiscoveryPlanningLeases, youtubeDiscoveryPolicyVersions, youtubeDiscoveryQueryProposals, youtubeDiscoveryRuns } from "@xuyenviet/database";
 
@@ -12,12 +14,12 @@ describe.sequential("YouTube Discovery foundation persistence", () => {
   });
 
   test("enforces one current immutable policy version and exact run snapshots", async () => {
-    const policy = await createYoutubeDiscoveryPolicyVersion({ version: 1, isCurrent: true, actor: createSystemAuditActor("system-youtube-discovery") }, testDb);
+    const policy = await createYoutubeDiscoveryPolicyVersion({ version: 1, isCurrent: true, policy: { queryBuilderVersion: 1 }, actor: createSystemAuditActor("system-youtube-discovery") }, testDb);
     await seedTestOperator();
     const query = await createYoutubeDiscoveryQueryProposal({ origin: "operator", reason: "coverage_gap", priority: 50, queryText: "Đà Lạt đường đèo", cadenceMinutes: 1440, actor: createUserAuditActor({ userId: "operator", email: "operator@example.com" }) }, testDb);
     const run = await createYoutubeDiscoveryRun({ policyVersionId: policy.id, queryProposalId: query.id }, testDb);
 
-    const nextPolicy = await createYoutubeDiscoveryPolicyVersion({ version: 2, isCurrent: true, actor: createSystemAuditActor("system-youtube-discovery") }, testDb);
+    const nextPolicy = await createYoutubeDiscoveryPolicyVersion({ version: 2, isCurrent: true, policy: { queryBuilderVersion: 1 }, actor: createSystemAuditActor("system-youtube-discovery") }, testDb);
     await expect(testDb.update(youtubeDiscoveryPolicyVersions).set({ retentionDays: 90 }).where(eq(youtubeDiscoveryPolicyVersions.id, policy.id))).rejects.toThrow();
     await expect(testDb.execute(sql`insert into youtube_discovery_runs (id, policy_version_id, state) values ('missing-policy', 'missing-policy', 'queued')`)).rejects.toThrow();
     await expect(createYoutubeDiscoveryRun({ policyVersionId: policy.id }, testDb)).rejects.toThrow("current policy version");
@@ -32,6 +34,18 @@ describe.sequential("YouTube Discovery foundation persistence", () => {
       { actorClass: "system", actorSystem: "system-youtube-discovery", actorUserId: null, actorEmail: null, targetType: "youtube_discovery_run", afterSummary: JSON.stringify({ policyVersionId: policy.id, state: "queued" }) },
     ]));
     expect(audits.find((audit) => audit.targetType === "youtube_discovery_query_proposal")?.afterSummary).not.toContain("coverage_gap");
+  });
+
+  test("upgrades a current query-builder-v1 policy to an immutable v2 policy", async () => {
+    const legacy = await createYoutubeDiscoveryPolicyVersion({ version: 1, isCurrent: true, policy: { queryBuilderVersion: 1 }, actor: createSystemAuditActor("system-youtube-discovery") }, testDb);
+    const migration = await readFile(resolve(process.cwd(), "drizzle/migrations/0072_discovery_activate_vietnamese_query_builder.sql"), "utf8");
+
+    await testDb.execute(sql.raw(migration));
+
+    await expect(testDb.select({ id: youtubeDiscoveryPolicyVersions.id, version: youtubeDiscoveryPolicyVersions.version, isCurrent: youtubeDiscoveryPolicyVersions.isCurrent, queryBuilderVersion: youtubeDiscoveryPolicyVersions.queryBuilderVersion }).from(youtubeDiscoveryPolicyVersions).orderBy(youtubeDiscoveryPolicyVersions.version)).resolves.toEqual([
+      { id: legacy.id, version: 1, isCurrent: false, queryBuilderVersion: 1 },
+      { id: expect.any(String), version: 2, isCurrent: true, queryBuilderVersion: 2 },
+    ]);
   });
 
   test("rolls back a policy insert when its audit row cannot be persisted", async () => {
@@ -57,9 +71,9 @@ describe.sequential("YouTube Discovery foundation persistence", () => {
 
   test("rejects disabled queries and invalid policy or query persistence", async () => {
     const policy = await createYoutubeDiscoveryPolicyVersion({ version: 1, isCurrent: true, actor: createSystemAuditActor("system-youtube-discovery") }, testDb);
-    const query = await createYoutubeDiscoveryQueryProposal({ origin: "system", reason: "coverage_gap", priority: 1, queryText: "Da Lat kinh nghiệm cung đường đi ô tô", enabled: false, cadenceMinutes: 15, actor: createSystemAuditActor("system-youtube-discovery"), systemSignal: { reason: "coverage_gap", geography: "Da Lat", taxonomy: "route", priority: 50 } }, testDb);
+    const query = await createYoutubeDiscoveryQueryProposal({ origin: "system", reason: "coverage_gap", priority: 1, queryText: "Da Lat kinh nghiệm hành trình cung đường đi ô tô", enabled: false, cadenceMinutes: 15, actor: createSystemAuditActor("system-youtube-discovery"), systemSignal: { reason: "coverage_gap", geography: "Da Lat", taxonomy: "route", priority: 50 } }, testDb);
 
-    expect(query).toMatchObject({ priority: 50, cadenceMinutes: policy.cadenceMinutes, queryText: "Da Lat kinh nghiệm cung đường đi ô tô" });
+    expect(query).toMatchObject({ priority: 50, cadenceMinutes: policy.cadenceMinutes, queryText: "Da Lat kinh nghiệm hành trình cung đường đi ô tô" });
 
     await expect(createYoutubeDiscoveryRun({ policyVersionId: policy.id, queryProposalId: query.id }, testDb)).rejects.toThrow("enabled query proposal");
     await expect(testDb.execute(sql`insert into youtube_discovery_policy_versions (id, version, is_current, enabled, minimum_candidate_score, priority_score_weight, freshness_score_weight, cadence_minutes, retention_days, comment_signal_ttl_days, max_concurrent_runs, max_retry_attempts, retry_delay_minutes) values ('invalid-policy', 2, false, true, 0.5, 0.6, 0.4, 14, 180, 30, 1, 3, 15)`)).rejects.toThrow();
@@ -68,8 +82,8 @@ describe.sequential("YouTube Discovery foundation persistence", () => {
 
   test("anchors direct enabled system proposals and rejects prohibited persistence shapes", async () => {
     const policy = await createYoutubeDiscoveryPolicyVersion({ version: 1, isCurrent: true, policy: { cadenceMinutes: 15 }, actor: createSystemAuditActor("system-youtube-discovery") }, testDb);
-    const proposal = await createYoutubeDiscoveryQueryProposal({ origin: "system", reason: "coverage_gap", priority: 1, queryText: "Da Lat kinh nghiệm cung đường đi ô tô", cadenceMinutes: 15, actor: createSystemAuditActor("system-youtube-discovery"), systemSignal: { reason: "coverage_gap", geography: "Da Lat", taxonomy: "route", priority: 50 } }, testDb);
-    expect(proposal).toMatchObject({ enabled: true, cadenceMinutes: policy.cadenceMinutes, queryText: "Da Lat kinh nghiệm cung đường đi ô tô", scheduleAnchorAt: expect.any(Date), nextDueAt: expect.any(Date) });
+    const proposal = await createYoutubeDiscoveryQueryProposal({ origin: "system", reason: "coverage_gap", priority: 1, queryText: "Da Lat kinh nghiệm hành trình cung đường đi ô tô", cadenceMinutes: 15, actor: createSystemAuditActor("system-youtube-discovery"), systemSignal: { reason: "coverage_gap", geography: "Da Lat", taxonomy: "route", priority: 50 } }, testDb);
+    expect(proposal).toMatchObject({ enabled: true, cadenceMinutes: policy.cadenceMinutes, queryText: "Da Lat kinh nghiệm hành trình cung đường đi ô tô", scheduleAnchorAt: expect.any(Date), nextDueAt: expect.any(Date) });
     expect(proposal.nextDueAt!.getTime()).toBeGreaterThan(proposal.scheduleAnchorAt!.getTime());
     await expect(createYoutubeDiscoveryQueryProposal({ origin: "system", reason: "coverage_gap", priority: 50, queryText: "Da Lat route", cadenceMinutes: 15, actor: createSystemAuditActor("system-youtube-discovery"), systemSignal: { reason: "coverage_gap", geography: "Da Lat", taxonomy: "route", priority: 50 } }, testDb)).rejects.toThrow("Invalid YouTube Discovery query proposal");
     await expect(testDb.execute(sql`insert into youtube_discovery_query_proposals (id, origin, reason, priority, query_text, enabled, cadence_minutes, target_digest, safe_signal_summary) values ('prohibited-system', 'system', 'coverage_gap', 50, 'https://source.example/?token=secret', true, 60, ${"a".repeat(64)}, 'coverage_gap')`)).rejects.toThrow();
@@ -80,7 +94,7 @@ describe.sequential("YouTube Discovery foundation persistence", () => {
 
   test("rejects direct system creation when the current policy is disabled", async () => {
     await createYoutubeDiscoveryPolicyVersion({ version: 1, isCurrent: true, policy: { enabled: false }, actor: createSystemAuditActor("system-youtube-discovery") }, testDb);
-    await expect(createYoutubeDiscoveryQueryProposal({ origin: "system", reason: "coverage_gap", priority: 1, queryText: "Da Lat kinh nghiệm cung đường đi ô tô", cadenceMinutes: 15, actor: createSystemAuditActor("system-youtube-discovery"), systemSignal: { reason: "coverage_gap", geography: "Da Lat", taxonomy: "route", priority: 50 } }, testDb)).rejects.toThrow("enabled current policy version");
+    await expect(createYoutubeDiscoveryQueryProposal({ origin: "system", reason: "coverage_gap", priority: 1, queryText: "Da Lat kinh nghiệm hành trình cung đường đi ô tô", cadenceMinutes: 15, actor: createSystemAuditActor("system-youtube-discovery"), systemSignal: { reason: "coverage_gap", geography: "Da Lat", taxonomy: "route", priority: 50 } }, testDb)).rejects.toThrow("enabled current policy version");
     await expect(testDb.select().from(youtubeDiscoveryQueryProposals)).resolves.toEqual([]);
   });
 
@@ -96,11 +110,12 @@ describe.sequential("YouTube Discovery foundation persistence", () => {
     expect(audits[0]!.afterSummary).not.toContain("Da Lat");
   });
 
-  test("schedules a newly planned system proposal immediately, then advances its regular cadence", async () => {
+  test("schedules a due newly planned system proposal, then advances its regular cadence", async () => {
     await createYoutubeDiscoveryPolicyVersion({ version: 1, isCurrent: true, policy: { cadenceMinutes: 15 }, actor: createSystemAuditActor("system-youtube-discovery") }, testDb);
     const claim = await claimYoutubeDiscoveryPlanning("discovery-a", testDb);
 
     await expect(refreshYoutubeDiscoverySystemProposals(claim!, [{ status: "available", signals: [{ reason: "coverage_gap", geography: "Da Lat", taxonomy: "route", priority: 70 }] }], testDb)).resolves.toBe("completed");
+    await testDb.update(youtubeDiscoveryQueryProposals).set({ scheduleAnchorAt: new Date(0), nextDueAt: new Date(1) });
     await expect(scheduleYoutubeDiscoveryDueRuns(testDb)).resolves.toBe(1);
 
     const [proposal] = await testDb.select({ scheduleAnchorAt: youtubeDiscoveryQueryProposals.scheduleAnchorAt, nextDueAt: youtubeDiscoveryQueryProposals.nextDueAt }).from(youtubeDiscoveryQueryProposals);
@@ -120,12 +135,12 @@ describe.sequential("YouTube Discovery foundation persistence", () => {
     await testDb.update(youtubeDiscoveryPlanningLeases).set({ nextRunAt: new Date(0) }).where(eq(youtubeDiscoveryPlanningLeases.id, "youtube-discovery-planning"));
     const second = await claimYoutubeDiscoveryPlanning("discovery-b", testDb);
     expect(await refreshYoutubeDiscoverySystemProposals(second!, [signals], testDb)).toBe("completed");
-    await expect(testDb.select({ queryText: youtubeDiscoveryQueryProposals.queryText, targetDigest: youtubeDiscoveryQueryProposals.targetDigest, safeSignalSummary: youtubeDiscoveryQueryProposals.safeSignalSummary }).from(youtubeDiscoveryQueryProposals)).resolves.toEqual([{ queryText: "Da Lat kinh nghiệm cung đường đi ô tô", targetDigest: expect.stringMatching(/^[a-f0-9]{64}$/), safeSignalSummary: "coverage_gap" }]);
+    await expect(testDb.select({ queryText: youtubeDiscoveryQueryProposals.queryText, targetDigest: youtubeDiscoveryQueryProposals.targetDigest, safeSignalSummary: youtubeDiscoveryQueryProposals.safeSignalSummary }).from(youtubeDiscoveryQueryProposals)).resolves.toEqual([{ queryText: "Da Lat kinh nghiệm hành trình cung đường đi ô tô", targetDigest: expect.stringMatching(/^[a-f0-9]{64}$/), safeSignalSummary: "coverage_gap" }]);
   });
 
   test("refreshes only the system proposal when its policy snapshots a new query builder version", async () => {
     await seedTestOperator();
-    await createYoutubeDiscoveryPolicyVersion({ version: 1, isCurrent: true, actor: createSystemAuditActor("system-youtube-discovery") }, testDb);
+    await createYoutubeDiscoveryPolicyVersion({ version: 1, isCurrent: true, policy: { queryBuilderVersion: 1 }, actor: createSystemAuditActor("system-youtube-discovery") }, testDb);
     const signal = { status: "available" as const, signals: [{ reason: "coverage_gap" as const, geography: "Da Lat", taxonomy: "route", priority: 70 }] };
     const firstClaim = await claimYoutubeDiscoveryPlanning("discovery-a", testDb);
     await refreshYoutubeDiscoverySystemProposals(firstClaim!, [signal], testDb);
@@ -144,7 +159,7 @@ describe.sequential("YouTube Discovery foundation persistence", () => {
   });
 
   test("keeps the admitted run query snapshot when a later builder refreshes its proposal", async () => {
-    await createYoutubeDiscoveryPolicyVersion({ version: 1, isCurrent: true, actor: createSystemAuditActor("system-youtube-discovery") }, testDb);
+    await createYoutubeDiscoveryPolicyVersion({ version: 1, isCurrent: true, policy: { queryBuilderVersion: 1 }, actor: createSystemAuditActor("system-youtube-discovery") }, testDb);
     const signal = { status: "available" as const, signals: [{ reason: "coverage_gap" as const, geography: "Da Lat", taxonomy: "route", priority: 70 }] };
     const firstClaim = await claimYoutubeDiscoveryPlanning("discovery-a", testDb);
     await refreshYoutubeDiscoverySystemProposals(firstClaim!, [signal], testDb);
@@ -193,7 +208,7 @@ describe.sequential("YouTube Discovery foundation persistence", () => {
     const first = await claimYoutubeDiscoveryPlanning("discovery-a", testDb);
     await refreshYoutubeDiscoverySystemProposals(first!, [{ status: "available", signals: [{ reason: "coverage_gap", geography: "Da Lat", taxonomy: "route", priority: 70 }] }], testDb);
     const [before] = await testDb.select().from(youtubeDiscoveryQueryProposals);
-    const secondProposal = await createYoutubeDiscoveryQueryProposal({ origin: "system", reason: "freshness_risk", priority: 1, queryText: "Da Lat thông tin mới kinh nghiệm du lịch tự lái", cadenceMinutes: 15, actor: createSystemAuditActor("system-youtube-discovery"), systemSignal: { reason: "freshness_risk", geography: "Da Lat", taxonomy: "weather", priority: 60 } }, testDb);
+    const secondProposal = await createYoutubeDiscoveryQueryProposal({ origin: "system", reason: "freshness_risk", priority: 1, queryText: "Da Lat thông tin hành trình mới kinh nghiệm du lịch tự lái", cadenceMinutes: 15, actor: createSystemAuditActor("system-youtube-discovery"), systemSignal: { reason: "freshness_risk", geography: "Da Lat", taxonomy: "weather", priority: 60 } }, testDb);
     await testDb.update(youtubeDiscoveryQueryProposals).set({ scheduleAnchorAt: new Date(0), nextDueAt: new Date(1) }).where(sql`${youtubeDiscoveryQueryProposals.origin} = 'system'`);
     await createYoutubeDiscoveryPolicyVersion({ version: 2, isCurrent: true, policy: { cadenceMinutes: 60 }, actor: createSystemAuditActor("system-youtube-discovery") }, testDb);
     const after = await testDb.select({ id: youtubeDiscoveryQueryProposals.id, cadenceMinutes: youtubeDiscoveryQueryProposals.cadenceMinutes, nextDueAt: youtubeDiscoveryQueryProposals.nextDueAt }).from(youtubeDiscoveryQueryProposals).where(sql`${youtubeDiscoveryQueryProposals.id} in (${before!.id}, ${secondProposal.id})`);
@@ -286,7 +301,7 @@ describe.sequential("YouTube Discovery foundation persistence", () => {
     await expect(testDb.select({ origin: youtubeDiscoveryQueryProposals.origin, reason: youtubeDiscoveryQueryProposals.reason, queryText: youtubeDiscoveryQueryProposals.queryText, targetDigest: youtubeDiscoveryQueryProposals.targetDigest, safeSignalSummary: youtubeDiscoveryQueryProposals.safeSignalSummary }).from(youtubeDiscoveryQueryProposals).where(eq(youtubeDiscoveryQueryProposals.id, system!.id))).resolves.toEqual([{
       origin: system!.origin,
       reason: system!.reason,
-      queryText: "Da Lat kinh nghiệm cung đường đi ô tô",
+      queryText: "Da Lat kinh nghiệm hành trình cung đường đi ô tô",
       targetDigest: system!.targetDigest,
       safeSignalSummary: system!.safeSignalSummary,
     }]);
@@ -301,7 +316,7 @@ describe.sequential("YouTube Discovery foundation persistence", () => {
       reason: "coverage_gap",
       priority: 70,
       operatorPriorityOverride: 70,
-      queryText: "Da Lat kinh nghiệm cung đường đi ô tô",
+      queryText: "Da Lat kinh nghiệm hành trình cung đường đi ô tô",
       targetDigest: system!.targetDigest,
       safeSignalSummary: "coverage_gap",
     }]);

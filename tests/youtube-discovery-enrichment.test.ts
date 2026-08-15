@@ -26,7 +26,7 @@ describe("YouTube Discovery enrichment adapter", () => {
     const languageVideo = JSON.parse(JSON.stringify(video)) as { items: Array<{ snippet: Record<string, unknown>; contentDetails: Record<string, unknown> }> };
     languageVideo.items[0].snippet.channelId = undefined;
     languageVideo.items[0].snippet.defaultLanguage = "vi-VN";
-    languageVideo.items[0].contentDetails.defaultAudioLanguage = "en-US";
+    languageVideo.items[0].snippet.defaultAudioLanguage = "en-US";
     await expect(fetchYoutubeVideoMetadata("abcDEF12345", "secret", async () => new Response(JSON.stringify(languageVideo)))).resolves.toMatchObject({ defaultLanguage: "vi-vn", defaultAudioLanguage: "en-us", channelId: undefined });
   });
 

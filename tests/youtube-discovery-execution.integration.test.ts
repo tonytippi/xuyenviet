@@ -588,6 +588,31 @@ describe.sequential("YouTube Discovery run execution", () => {
     await expect(testDb.select({ targetId: auditEvents.targetId, afterSummary: auditEvents.afterSummary }).from(auditEvents).where(eq(auditEvents.targetType, "youtube_discovery_foreign_fallback"))).resolves.toEqual([{ targetId: run.id, afterSummary: JSON.stringify({ policyVersionId: policy.id, fallbackCount: 2 }) }]);
   });
 
+  test("does not finalize foreign fallback from failed or policy-revoked candidate jobs", async () => {
+    await seedTestOperator();
+    const policy = await createYoutubeDiscoveryPolicyVersion({ version: 1, isCurrent: true, policy: { maxRetryAttempts: 0 }, actor: createSystemAuditActor("system-youtube-discovery") }, testDb);
+    const proposal = await createYoutubeDiscoveryQueryProposal({ origin: "operator", reason: "operator_request", priority: 50, queryText: "Da Lat route", cadenceMinutes: 15, actor: createUserAuditActor({ userId: "operator", email: "operator@example.com" }) }, testDb);
+    const run = await createYoutubeDiscoveryRun({ policyVersionId: policy.id, queryProposalId: proposal.id }, testDb);
+    const search = (await claimNextYoutubeDiscoveryRun({ workerId: "fallback-failed-search" }, testDb)).claim!;
+    await persistYoutubeDiscoveryCandidates(search, [{ videoId: "abcDEF12345", canonicalUrl: "https://www.youtube.com/watch?v=abcDEF12345", resultOrdinal: 0, searchTranche: "medium" }], testDb);
+    await finishYoutubeDiscoveryRun(search, testDb);
+    const failed = (await claimNextYoutubeDiscoveryCandidateJob({ workerId: "fallback-failed-job" }, testDb)).claim!;
+    await persistYoutubeDiscoveryEligibility(failed, { videoId: failed.videoId, durationSeconds: 180, defaultAudioLanguage: "en" }, testDb);
+    expect(await retryYoutubeDiscoveryCandidateJob(failed, "enrichment_transient", "enrichment", testDb)).toBe("failed");
+    await expect(testDb.select({ reason: youtubeDiscoveryAppearances.eligibilityReason }).from(youtubeDiscoveryAppearances).where(eq(youtubeDiscoveryAppearances.runId, run.id))).resolves.toEqual([{ reason: "non_vietnamese" }]);
+
+    const revokedRun = await createYoutubeDiscoveryRun({ policyVersionId: policy.id, queryProposalId: proposal.id }, testDb);
+    const revokedSearch = (await claimNextYoutubeDiscoveryRun({ workerId: "fallback-revoked-search" }, testDb)).claim!;
+    await persistYoutubeDiscoveryCandidates(revokedSearch, [{ videoId: "defGHI67890", canonicalUrl: "https://www.youtube.com/watch?v=defGHI67890", resultOrdinal: 0, searchTranche: "medium" }], testDb);
+    await finishYoutubeDiscoveryRun(revokedSearch, testDb);
+    const revoked = (await claimNextYoutubeDiscoveryCandidateJob({ workerId: "fallback-revoked-job" }, testDb)).claim!;
+    await persistYoutubeDiscoveryEligibility(revoked, { videoId: revoked.videoId, durationSeconds: 180, defaultAudioLanguage: "en" }, testDb);
+    await createYoutubeDiscoveryPolicyVersion({ version: 2, isCurrent: true, actor: createSystemAuditActor("system-youtube-discovery") }, testDb);
+    expect(await finishYoutubeDiscoveryCandidateJob(revoked, testDb)).toBe("cancelled");
+    await expect(testDb.select({ reason: youtubeDiscoveryAppearances.eligibilityReason }).from(youtubeDiscoveryAppearances).where(eq(youtubeDiscoveryAppearances.runId, revokedRun.id))).resolves.toEqual([{ reason: "non_vietnamese" }]);
+    await expect(testDb.select().from(auditEvents).where(eq(auditEvents.targetType, "youtube_discovery_foreign_fallback"))).resolves.toEqual([]);
+  });
+
   test("keeps fallback disabled, run-local, and limited to exact eligible duration", async () => {
     await seedTestOperator();
     const disabled = await createYoutubeDiscoveryPolicyVersion({ version: 1, isCurrent: true, policy: { allowForeignFallback: false }, actor: createSystemAuditActor("system-youtube-discovery") }, testDb);

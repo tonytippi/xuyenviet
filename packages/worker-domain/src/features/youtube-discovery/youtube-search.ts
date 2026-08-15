@@ -5,9 +5,11 @@ const endpoint = "https://www.googleapis.com/youtube/v3/search";
 const maxResults = 25;
 const maxResponseBytes = 64 * 1024;
 
-export async function searchYoutubeVideos(queryText: string, apiKey: string, fetchImpl: typeof fetch = fetch, signal?: AbortSignal): Promise<YoutubeSearchResult[]> {
+export async function searchYoutubeVideos(queryText: string, apiKey: string, fetchImpl: typeof fetch = fetch, signal?: AbortSignal, beforeRequest?: () => Promise<void>): Promise<YoutubeSearchResult[]> {
   if (!apiKey.trim()) throw new Error("youtube_search_configuration");
+  await beforeRequest?.();
   const medium = await searchTranche(queryText, apiKey, "medium", fetchImpl, signal);
+  await beforeRequest?.();
   const long = await searchTranche(queryText, apiKey, "long", fetchImpl, signal);
   const seen = new Set<string>();
   const results: Array<YoutubeSearchResult & { searchTranche: "medium" | "long" }> = [];

@@ -63,6 +63,14 @@ context:
 - [x] [Review][Patch] Quality measurement includes non-primary `consider` recommendations [packages/database/src/admin-youtube-discovery.ts:257]
 - [x] [Review][Patch] Review metadata projection lacks persisted-data integration coverage [tests/youtube-discovery-review.integration.test.ts:100]
 - [x] [Review][Patch] Gate-failure quality aggregates lack projection-boundary coverage [tests/youtube-discovery-action-required.integration.test.ts:76]
+- [x] [Review][Patch] Move persisted Accept reconciliation to a Worker or explicit server-command lifecycle while keeping `listReview()` and `getReview()` select-only; restore submitted/duplicate/failed recovery and the 12 reconciliation integration cases [packages/database/src/admin-youtube-discovery.ts:24]
+- [x] [Review][Patch] Activate query-builder version 2 for the current/default Vietnamese-first policy and execute-test the upgrade path so valid candidates can enter primary projections [drizzle/migrations/0070_discovery_vietnamese_eligibility.sql:24]
+- [x] [Review][Patch] Read YouTube `snippet.defaultAudioLanguage` and correct the adapter fixture so explicit foreign audio is gated before downstream work [packages/worker-domain/src/features/youtube-discovery/youtube-enrichment.ts:36]
+- [x] [Review][Patch] Use every new-policy `consider` recommendation as the Vietnamese-fit denominator instead of filtering numerator and denominator identically [packages/database/src/admin-youtube-discovery.ts:257]
+- [x] [Review][Patch] Require real Vietnamese-language evidence instead of admitting a video from one accented character or a Vietnam place name [packages/domain/src/youtube-discovery/policy.ts:103]
+- [x] [Review][Patch] Prevent foreign-fallback finalization after failed/cancelled jobs or revoked policy writes [packages/database/src/youtube-discovery/index.ts:312]
+- [x] [Review][Patch] Recheck the active run/policy before the second `long` YouTube search tranche [packages/worker-domain/src/features/youtube-discovery/youtube-search.ts:10]
+- [x] [Review][Patch] Deduplicate foreign fallback by canonical candidate before limiting results and rendering URL-keyed cards [packages/database/src/admin-youtube-discovery.ts:42]
 
 **Acceptance Criteria:**
 - Given một new-policy `vi` hoặc `likely_vi` candidate vào primary review, when operator xem row và inspector, then metadata/label/query/reason safe được hiển thị bằng tiếng Việt và nêu rõ metrics chỉ là review context, không là correctness/evidence/capture/publication proof.

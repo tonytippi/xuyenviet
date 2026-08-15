@@ -29,7 +29,7 @@ export type YoutubeDiscoveryPolicy = Readonly<{
 }>;
 
 export const defaultYoutubeDiscoveryPolicy: YoutubeDiscoveryPolicy = Object.freeze({
-  queryBuilderVersion: 1,
+  queryBuilderVersion: 2,
   languageClassifierVersion: 1,
   minimumUsefulDurationSeconds: 180,
   allowForeignFallback: true,
@@ -102,7 +102,12 @@ function primaryLanguage(value: string | undefined): string | undefined {
 
 function vietnameseText(value: string): boolean {
   const text = value.normalize("NFKC").toLocaleLowerCase("vi-VN").slice(0, 2_800);
-  return /[ăâđêôơư]|\b(đường|kinh nghiệm|hành trình|du lịch|lái xe|việt nam|đà lạt|phượt|cung đường)\b/.test(text);
+  // Place names and a lone accented character only show that a video is about
+  // Vietnam. Require multiple Vietnamese lexical signals before inferring that
+  // the content itself is in Vietnamese.
+  const vocabulary = new Set(["đường", "kinh", "nghiệm", "hành", "trình", "du", "lịch", "lái", "xe", "phượt", "cung", "đèo", "chuyến", "khám", "phá", "hướng", "dẫn", "ngày", "qua", "tới", "cho", "với", "và", "của", "một"]);
+  const signals = (text.match(/\p{L}+/gu) ?? []).filter((token) => vocabulary.has(token));
+  return new Set(signals).size >= 2;
 }
 
 export const youtubeDiscoveryRecommendationValues = ["skip", "defer", "consider"] as const;

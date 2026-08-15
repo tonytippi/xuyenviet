@@ -1,7 +1,7 @@
 import { runWorkerAdapter } from "@xuyenviet/worker-domain/adapters";
 import { consoleOperationalTelemetrySink, type OperationalTelemetrySink, type WorkerPollObservation } from "@xuyenviet/contracts";
-import { closeDatabaseClient, createAiAskDiscoveryQuerySignalPort, createKnowledgeDiscoveryQuerySignalPort, createYoutubeCaptureEligibilityPort } from "@xuyenviet/database";
-import { bindYoutubeDiscoveryExecutionPorts, bindYoutubeDiscoveryPlanningPorts } from "@xuyenviet/worker-domain";
+import { closeDatabaseClient, createAiAskDiscoveryQuerySignalPort, createKnowledgeDiscoveryQuerySignalPort, createPostgresAdminKnowledgeIntakePort, createYoutubeCaptureEligibilityPort } from "@xuyenviet/database";
+import { bindYoutubeDiscoveryExecutionPorts, bindYoutubeDiscoveryKnowledgeHandoff, bindYoutubeDiscoveryPlanningPorts } from "@xuyenviet/worker-domain";
 import { closeSync, constants, openSync, writeSync } from "node:fs";
 import { extname, isAbsolute, normalize, resolve, sep } from "node:path";
 
@@ -31,6 +31,7 @@ async function main() {
       createAiAskDiscoveryQuerySignalPort(),
     );
     bindYoutubeDiscoveryExecutionPorts(createYoutubeCaptureEligibilityPort(), undefined, youtubeDataApiKey);
+    bindYoutubeDiscoveryKnowledgeHandoff(createPostgresAdminKnowledgeIntakePort().handoff);
     const observation = await runWorkerAdapter(process.argv.slice(2), { telemetry: testTelemetryFileSink() ?? actionableTelemetrySink });
     writeDiscoveryDiagnostic(observation);
   } catch {

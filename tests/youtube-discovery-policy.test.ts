@@ -9,6 +9,7 @@ describe("YouTube Discovery policy", () => {
     expect(defaultYoutubeDiscoveryPolicy.retentionDays).toBe(180);
     expect(defaultYoutubeDiscoveryPolicy.commentSignalTtlDays).toBeLessThan(defaultYoutubeDiscoveryPolicy.retentionDays);
     expect(defaultYoutubeDiscoveryPolicy.minimumUsefulDurationSeconds).toBe(180);
+    expect(defaultYoutubeDiscoveryPolicy.queryBuilderVersion).toBe(2);
   });
 
   test("classifies duration before bounded Vietnamese language eligibility", () => {
@@ -21,6 +22,8 @@ describe("YouTube Discovery policy", () => {
     expect(evaluateYoutubeDiscoveryEligibility(defaultYoutubeDiscoveryPolicy, { durationSeconds: 180, defaultAudioLanguage: "en-US", defaultLanguage: "vi-VN" })).toMatchObject({ languageFit: "non_vi", reason: "non_vietnamese", primaryEligible: false });
     expect(evaluateYoutubeDiscoveryEligibility(defaultYoutubeDiscoveryPolicy, { durationSeconds: 180, title: "kinh nghiệm đường đèo" })).toMatchObject({ languageFit: "likely_vi", reason: "eligible_vietnamese", primaryEligible: true });
     expect(evaluateYoutubeDiscoveryEligibility(defaultYoutubeDiscoveryPolicy, { durationSeconds: 180, title: "road trip tips" })).toMatchObject({ languageFit: "unknown", reason: "language_unknown", primaryEligible: false });
+    expect(evaluateYoutubeDiscoveryEligibility(defaultYoutubeDiscoveryPolicy, { durationSeconds: 180, title: "Việt Nam Travel Guide" })).toMatchObject({ languageFit: "unknown", reason: "language_unknown", primaryEligible: false });
+    expect(evaluateYoutubeDiscoveryEligibility(defaultYoutubeDiscoveryPolicy, { durationSeconds: 180, title: "Đà Lạt road trip – café guide" })).toMatchObject({ languageFit: "unknown", reason: "language_unknown", primaryEligible: false });
   });
 
   test("accepts the migrated legacy classifier version without enabling classification", () => {

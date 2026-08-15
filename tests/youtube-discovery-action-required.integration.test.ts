@@ -55,7 +55,7 @@ describe.sequential("YouTube Discovery action-required queue", () => {
     expect(review.items.map((item) => item.recommendationId)).toEqual([primaryRecommendationId]);
     expect(actions.items.some((item) => item.actionId === fallbackRecommendationId)).toBe(false);
     expect(fallbackProjection.items).toEqual([expect.objectContaining({ eligibilityReason: "foreign_fallback", languageFit: "non_vi", queryText: "Da Lat route" })]);
-    expect(health.quality).toMatchObject({ foreignFallback: 1, vietnameseConsider: 1, considered: 1, vietnameseFitPercent: 100, durationViolations: 0 });
+    expect(health.quality).toMatchObject({ foreignFallback: 1, vietnameseConsider: 1, considered: 2, vietnameseFitPercent: 50, durationViolations: 0 });
     expect(mission.quality).toEqual(health.quality);
     expect(await queueWriteSnapshot()).toEqual(before);
   });
@@ -70,10 +70,24 @@ describe.sequential("YouTube Discovery action-required queue", () => {
     const [projection, health] = await Promise.all([createPostgresAdminYoutubeDiscoveryPort(undefined, testDb).listForeignFallback(), createPostgresAdminYoutubeDiscoveryPort(undefined, testDb).healthOverview()]);
 
     expect(projection.items).toEqual([]);
-    expect(health.quality).toMatchObject({ foreignFallback: 0, vietnameseConsider: 0, considered: 0, vietnameseFitPercent: null, durationViolations: 1 });
+    expect(health.quality).toMatchObject({ foreignFallback: 0, vietnameseConsider: 0, considered: 1, vietnameseFitPercent: 0, durationViolations: 1 });
   });
 
-  test("reports each new-policy gate failure separately without admitting it to Vietnamese-first measurement", async () => {
+  test("projects only the latest fallback appearance for a canonical candidate", async () => {
+    const { policy, proposal } = await queueFixture();
+    await createConsiderCandidate(policy.id, proposal.id, "fallbackdup");
+    await createConsiderCandidate(policy.id, proposal.id, "fallbackdup");
+    const [candidate] = await testDb.select({ id: youtubeDiscoveryCandidates.id }).from(youtubeDiscoveryCandidates).where(eq(youtubeDiscoveryCandidates.videoId, "fallbackdup"));
+    if (!candidate) throw new Error("expected duplicate fallback candidate");
+    await testDb.update(youtubeDiscoveryAppearances).set({ languageFit: "non_vi", eligibilityReason: "foreign_fallback" }).where(eq(youtubeDiscoveryAppearances.candidateId, candidate.id));
+
+    const projection = await createPostgresAdminYoutubeDiscoveryPort(undefined, testDb).listForeignFallback();
+
+    expect(projection.items).toHaveLength(1);
+    expect(projection.items[0]).toMatchObject({ canonicalUrl: "https://www.youtube.com/watch?v=fallbackdup", languageFit: "non_vi", eligibilityReason: "foreign_fallback" });
+  });
+
+  test("reports each new-policy gate failure and keeps it in the all-consider quality denominator", async () => {
     const { policy, proposal } = await queueFixture();
     const primaryRecommendationId = await createConsiderCandidate(policy.id, proposal.id, "qualityprimary");
     const cases = [{ reason: "too_short", videoId: "qualityshort" }, { reason: "duration_unknown", videoId: "qualityduration" }, { reason: "non_vietnamese", videoId: "qualitynonvi" }, { reason: "language_unknown", videoId: "qualityunknown" }] as const;
@@ -86,7 +100,7 @@ describe.sequential("YouTube Discovery action-required queue", () => {
 
     const health = await createPostgresAdminYoutubeDiscoveryPort(undefined, testDb).healthOverview();
 
-    expect(health.quality).toMatchObject({ tooShort: 1, durationUnknown: 1, nonVietnamese: 1, languageUnknown: 1, vietnameseConsider: 1, considered: 1, vietnameseFitPercent: 100, durationViolations: 2 });
+    expect(health.quality).toMatchObject({ tooShort: 1, durationUnknown: 1, nonVietnamese: 1, languageUnknown: 1, vietnameseConsider: 1, considered: 5, vietnameseFitPercent: 20, durationViolations: 2 });
     expect(primaryRecommendationId).toBeTruthy();
   });
 

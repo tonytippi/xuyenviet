@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import type { RequestPrincipal } from "@xuyenviet/contracts";
 import { and, eq } from "drizzle-orm";
-import { aiGatewayModels, auditEvents, claimNextYoutubeDiscoveryRun, createPostgresAdminYoutubeDiscoveryPort, createSystemAuditActor, createUserAuditActor, createYoutubeDiscoveryPolicyVersion, createYoutubeDiscoveryQueryProposal, createYoutubeDiscoveryRun, getYoutubeDiscoveryRecommendationBundle, persistYoutubeDiscoveryCandidates, persistYoutubeDiscoveryEnrichment, persistYoutubeDiscoveryRecommendation, persistYoutubeDiscoveryTriage, retainYoutubeDiscoveryRecords, selectYoutubeDiscoveryTriageModel, users, youtubeDiscoveryCandidateReviewStates, youtubeDiscoveryCandidates, youtubeDiscoveryKnowledgeHandoffs, youtubeDiscoveryRecommendations } from "@xuyenviet/database";
+import { aiGatewayModels, auditEvents, claimNextYoutubeDiscoveryCandidateJob, claimNextYoutubeDiscoveryRun, createPostgresAdminYoutubeDiscoveryPort, createSystemAuditActor, createUserAuditActor, createYoutubeDiscoveryPolicyVersion, createYoutubeDiscoveryQueryProposal, createYoutubeDiscoveryRun, finishYoutubeDiscoveryCandidateJob, finishYoutubeDiscoveryRun, getYoutubeDiscoveryRecommendationBundle, persistYoutubeDiscoveryCandidates, persistYoutubeDiscoveryEnrichment, persistYoutubeDiscoveryRecommendation, persistYoutubeDiscoveryTriage, reconcileYoutubeDiscoveryKnowledgeHandoffs, retainYoutubeDiscoveryRecords, selectYoutubeDiscoveryTriageModel, users, youtubeDiscoveryAppearances, youtubeDiscoveryCandidateReviewStates, youtubeDiscoveryCandidates, youtubeDiscoveryKnowledgeHandoffs, youtubeDiscoveryRecommendations } from "@xuyenviet/database";
 import { resetTestDatabase, seedTestOperator, testDb } from "./helpers/db";
 
 const principal: RequestPrincipal = { userId: "operator", email: "operator@example.com", roles: ["operator"], sessionId: "accept-session", authorizationVersion: 1 };
@@ -16,6 +16,7 @@ describe.sequential("YouTube Discovery Accept reconciliation", () => {
     const intake = handoff("reconciling");
     const port = createPostgresAdminYoutubeDiscoveryPort(undefined, testDb, intake);
 
+    await reconcileYoutubeDiscoveryKnowledgeHandoffs(intake, testDb);
     await expect(port.listReview(principal, null)).resolves.toMatchObject({ items: [{ recommendationId: review.recommendationId, actionAvailability: "reconciling" }] });
     await expect(port.getReview(principal, review.recommendationId)).resolves.toMatchObject({ actionAvailability: "reconciling" });
     await expect(port.acceptReview(principal, review.recommendationId)).resolves.toEqual({ outcome: "reconciling" });
@@ -30,6 +31,7 @@ describe.sequential("YouTube Discovery Accept reconciliation", () => {
     const intake = handoff("submitted");
     const port = createPostgresAdminYoutubeDiscoveryPort(undefined, testDb, intake);
 
+    await reconcileYoutubeDiscoveryKnowledgeHandoffs(intake, testDb);
     await expect(port.listReview(principal, null)).resolves.toEqual({ items: [], nextCursor: null });
     await expect(port.getReview(principal, review.recommendationId)).resolves.toBeNull();
     await expect(decisionState(review)).resolves.toBe("accepted");
@@ -52,6 +54,7 @@ describe.sequential("YouTube Discovery Accept reconciliation", () => {
     const intake = handoff("duplicate");
     const port = createPostgresAdminYoutubeDiscoveryPort(undefined, testDb, intake);
 
+    await reconcileYoutubeDiscoveryKnowledgeHandoffs(intake, testDb);
     await expect(port.getReview(principal, review.recommendationId)).resolves.toBeNull();
     await expect(decisionState(review)).resolves.toBe("accepted");
     await expect(testDb.select({ id: auditEvents.id, afterSummary: auditEvents.afterSummary }).from(auditEvents).where(eq(auditEvents.targetId, review.recommendationId))).resolves.toEqual([{ id: expect.any(String), afterSummary: JSON.stringify({ decision: "accepted", intakeOutcome: "duplicate" }) }]);
@@ -65,6 +68,7 @@ describe.sequential("YouTube Discovery Accept reconciliation", () => {
     const intake = handoff("failed");
     const port = createPostgresAdminYoutubeDiscoveryPort(undefined, testDb, intake);
 
+    await reconcileYoutubeDiscoveryKnowledgeHandoffs(intake, testDb);
     await expect(port.listReview(principal, null)).resolves.toMatchObject({ items: [{ recommendationId: review.recommendationId, actionAvailability: "available" }] });
     await expect(decisionState(review)).resolves.toBe("pending");
     await expect(testDb.select().from(youtubeDiscoveryKnowledgeHandoffs).where(eq(youtubeDiscoveryKnowledgeHandoffs.candidateId, review.candidateId))).resolves.toEqual([]);
@@ -105,6 +109,7 @@ describe.sequential("YouTube Discovery Accept reconciliation", () => {
     const intake = { lookup: vi.fn().mockResolvedValue("missing"), submit: vi.fn().mockResolvedValue("submitted") };
     const port = createPostgresAdminYoutubeDiscoveryPort(undefined, testDb, intake);
 
+    await reconcileYoutubeDiscoveryKnowledgeHandoffs(intake, testDb);
     await expect(port.listReview(secondPrincipal, null)).resolves.toMatchObject({ items: [{ recommendationId: review.recommendationId, actionAvailability: "reconciling" }] });
     expect(intake.lookup).toHaveBeenCalledWith("missing-reference");
     expect(intake.submit).not.toHaveBeenCalled();
@@ -156,10 +161,13 @@ describe.sequential("YouTube Discovery Accept reconciliation", () => {
     await testDb.update(youtubeDiscoveryCandidates).set({ updatedAt: new Date(0) }).where(eq(youtubeDiscoveryCandidates.id, review.candidateId));
     expect(await retainYoutubeDiscoveryRecords(testDb)).toBe(0);
     await expect(testDb.select().from(youtubeDiscoveryKnowledgeHandoffs).where(eq(youtubeDiscoveryKnowledgeHandoffs.candidateId, review.candidateId))).resolves.toHaveLength(1);
-    const port = createPostgresAdminYoutubeDiscoveryPort(undefined, testDb, handoff("submitted"));
+    const intake = handoff("submitted");
+    const port = createPostgresAdminYoutubeDiscoveryPort(undefined, testDb, intake);
+    await reconcileYoutubeDiscoveryKnowledgeHandoffs(intake, testDb);
     await expect(port.listReview(principal, null)).resolves.toEqual({ items: [], nextCursor: null });
     await expect(decisionState(review)).resolves.toBe("accepted");
     await expect(testDb.select({ id: auditEvents.id }).from(auditEvents).where(eq(auditEvents.targetId, review.recommendationId))).resolves.toHaveLength(1);
+    await testDb.update(youtubeDiscoveryCandidates).set({ updatedAt: new Date(0) }).where(eq(youtubeDiscoveryCandidates.id, review.candidateId));
     expect(await retainYoutubeDiscoveryRecords(testDb)).toBe(1);
     await expect(testDb.select().from(youtubeDiscoveryKnowledgeHandoffs).where(eq(youtubeDiscoveryKnowledgeHandoffs.candidateId, review.candidateId))).resolves.toEqual([]);
   });
@@ -176,15 +184,20 @@ async function seedReview() {
   const claim = (await claimNextYoutubeDiscoveryRun({ workerId: "accept-reconciliation" }, testDb)).claim!;
   const videoId = "abcDEF12345";
   await persistYoutubeDiscoveryCandidates(claim, [{ videoId, canonicalUrl: `https://www.youtube.com/watch?v=${videoId}`, resultOrdinal: 0, searchTranche: "medium" }], testDb);
-  await persistYoutubeDiscoveryEnrichment(claim, { videoId, signals: [] }, testDb);
+  await finishYoutubeDiscoveryRun(claim, testDb);
+  const candidateClaim = (await claimNextYoutubeDiscoveryCandidateJob({ workerId: "accept-reconciliation-candidate" }, testDb)).claim;
+  if (!candidateClaim) throw new Error("expected candidate claim");
+  await persistYoutubeDiscoveryEnrichment(candidateClaim, { videoId, durationSeconds: 180, defaultAudioLanguage: "vi", signals: [] }, testDb);
+  await testDb.update(youtubeDiscoveryAppearances).set({ languageFit: "vi", durationFit: "eligible", eligibilityReason: "eligible_vietnamese", queryBuilderVersion: 2, languageClassifierVersion: 1, minimumUsefulDurationSeconds: 180 }).where(eq(youtubeDiscoveryAppearances.runId, claim.id));
   await testDb.insert(aiGatewayModels).values({ id: "accept-model", gatewayModelName: "test/accept", displayLabel: "Accept", purpose: "youtube_discovery_triage", active: true, defaultForPurpose: true, supportsTextInput: true, supportsExtraction: true, pricingUnitTokens: 1_000_000 });
   const model = (await selectYoutubeDiscoveryTriageModel(testDb))!;
   const [candidate] = await testDb.select({ id: youtubeDiscoveryCandidates.id, canonicalUrl: youtubeDiscoveryCandidates.canonicalUrl }).from(youtubeDiscoveryCandidates).where(eq(youtubeDiscoveryCandidates.videoId, videoId));
   if (!candidate) throw new Error("expected candidate");
-  await persistYoutubeDiscoveryTriage(claim, { candidateId: candidate.id, status: "succeeded", assessment: { relevanceScore: 1, expectedValueScore: 1, freshnessFitScore: 1, commercialRiskScore: 0, duplicateRiskScore: 0, signals: [] }, model, provider: "ai_gateway", modelName: model.gatewayModelName, latencyMs: 1 }, testDb);
-  const bundle = await getYoutubeDiscoveryRecommendationBundle(claim, videoId, testDb);
+  await persistYoutubeDiscoveryTriage(candidateClaim, { candidateId: candidate.id, status: "succeeded", assessment: { relevanceScore: 1, expectedValueScore: 1, freshnessFitScore: 1, commercialRiskScore: 0, duplicateRiskScore: 0, signals: [] }, model, provider: "ai_gateway", modelName: model.gatewayModelName, latencyMs: 1 }, testDb);
+  const bundle = await getYoutubeDiscoveryRecommendationBundle(candidateClaim, videoId, testDb);
   if (typeof bundle === "string") throw new Error("expected recommendation bundle");
-  await persistYoutubeDiscoveryRecommendation(claim, bundle, "eligible", Date.now() + 60_000, testDb);
+  await persistYoutubeDiscoveryRecommendation(candidateClaim, bundle, "eligible", Date.now() + 60_000, testDb);
+  await finishYoutubeDiscoveryCandidateJob(candidateClaim, testDb);
   const [recommendation] = await testDb.select({ id: youtubeDiscoveryRecommendations.id }).from(youtubeDiscoveryRecommendations).where(eq(youtubeDiscoveryRecommendations.candidateId, candidate.id));
   if (!recommendation) throw new Error("expected recommendation");
   return { candidateId: candidate.id, canonicalUrl: candidate.canonicalUrl, recommendationId: recommendation.id };

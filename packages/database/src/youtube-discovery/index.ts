@@ -284,7 +284,7 @@ export async function recoverExpiredYoutubeDiscoveryCandidateJobs(database: Disc
     for (const row of expired) {
       const [job] = await transaction.execute(sql`update youtube_discovery_candidate_jobs job set state = case when not exists (select 1 from youtube_discovery_policy_versions policy where policy.is_current = true and policy.enabled = true) then 'cancelled' when job.attempt_count > job.max_retry_attempts then 'failed' else 'queued' end, claimed_by = null, claimed_at = null, lease_expires_at = null, fencing_token = null, next_run_at = clock_timestamp(), terminal_at = case when not exists (select 1 from youtube_discovery_policy_versions policy where policy.is_current = true and policy.enabled = true) or job.attempt_count > job.max_retry_attempts then clock_timestamp() else null end, terminal_outcome = case when not exists (select 1 from youtube_discovery_policy_versions policy where policy.is_current = true and policy.enabled = true) then 'cancelled' when job.attempt_count > job.max_retry_attempts then 'failed' else null end, safe_error_code = case when not exists (select 1 from youtube_discovery_policy_versions policy where policy.is_current = true and policy.enabled = true) then 'policy_revoked' when job.attempt_count > job.max_retry_attempts then 'lease_retry_exhausted' else null end, incident_category = case when job.attempt_count > job.max_retry_attempts then 'execution_terminal' else null end where job.id = ${row.id} and job.state = 'running' and job.lease_expires_at <= clock_timestamp() returning id, state, attempt_count as "attemptCount", policy_version_id as "policyVersionId", safe_error_code as "safeErrorCode"`) as Array<{ id: string; state: "queued" | "failed" | "cancelled"; attemptCount: number; policyVersionId: string; safeErrorCode: YoutubeDiscoveryCandidateJobSafeErrorCode | null }>;
       if (!job) { contended = true; continue; }
-      count += 1; if (job.state !== "queued") { terminalCount += 1; await finalizeYoutubeDiscoveryForeignFallback(transaction, job.id); await recordCandidateJobTerminalAudit(transaction, job.id, job.state, job.attemptCount, job.safeErrorCode, job.policyVersionId); }
+      count += 1; if (job.state !== "queued") { terminalCount += 1; await recordCandidateJobTerminalAudit(transaction, job.id, job.state, job.attemptCount, job.safeErrorCode, job.policyVersionId); }
     }
     return { count, terminalCount, contended };
   });
@@ -309,7 +309,7 @@ export async function retryYoutubeDiscoveryCandidateJob(claim: YoutubeDiscoveryC
     const error = outcome === "cancelled" ? "policy_revoked" : outcome === "failed" && safeErrorCode === "stage_transient" ? "retry_exhausted" : safeErrorCode;
     const category = outcome === "cancelled" ? null : outcome === "failed" ? incidentCategory ?? "execution_terminal" : incidentCategory;
     const [updated] = await transaction.update(youtubeDiscoveryCandidateJobs).set({ state: outcome, claimedBy: null, claimedAt: null, leaseExpiresAt: null, fencingToken: null, nextRunAt: outcome === "retrying" ? sql`clock_timestamp() + ${getYoutubeDiscoveryRetryDelayMinutes(job.retryDelayMinutes, job.attemptCount)} * interval '1 minute'` : sql`clock_timestamp()`, terminalAt: outcome === "retrying" ? null : sql`clock_timestamp()`, terminalOutcome: outcome === "retrying" ? null : outcome, safeErrorCode: error, incidentCategory: category, lastSafeStage }).where(activeCandidateJobClaim(claim)).returning({ id: youtubeDiscoveryCandidateJobs.id });
-    if (updated && outcome !== "retrying") { await finalizeYoutubeDiscoveryForeignFallback(transaction, updated.id); await recordCandidateJobTerminalAudit(transaction, updated.id, outcome, job.attemptCount, error, claim.policyVersionId); }
+    if (updated && outcome !== "retrying") await recordCandidateJobTerminalAudit(transaction, updated.id, outcome, job.attemptCount, error, claim.policyVersionId);
     return updated ? outcome : "contended";
   });
 }
@@ -320,20 +320,20 @@ async function transitionYoutubeDiscoveryCandidateJob(claim: YoutubeDiscoveryCan
     if (guard === "contended") return "contended";
     const outcome = guard === "cancelled" ? "cancelled" : requested;
     const [updated] = await transaction.update(youtubeDiscoveryCandidateJobs).set({ state: outcome, claimedBy: null, claimedAt: null, leaseExpiresAt: null, fencingToken: null, terminalAt: sql`clock_timestamp()`, terminalOutcome: outcome, safeErrorCode: outcome === "cancelled" ? "policy_revoked" : null, incidentCategory: null }).where(activeCandidateJobClaim(claim)).returning({ id: youtubeDiscoveryCandidateJobs.id });
-    if (updated) { await finalizeYoutubeDiscoveryForeignFallback(transaction, updated.id); await recordCandidateJobTerminalAudit(transaction, updated.id, outcome, claim.attemptCount, outcome === "cancelled" ? "policy_revoked" : null, claim.policyVersionId); }
+    if (updated) { if (outcome === "completed") await finalizeYoutubeDiscoveryForeignFallback(transaction, updated.id); await recordCandidateJobTerminalAudit(transaction, updated.id, outcome, claim.attemptCount, outcome === "cancelled" ? "policy_revoked" : null, claim.policyVersionId); }
     return updated ? outcome : "contended";
   });
 }
 
 /** The final terminal job serializes the run-local fallback decision behind its run lock. */
 async function finalizeYoutubeDiscoveryForeignFallback(transaction: DiscoveryWriter, jobId: string) {
-  const [job] = await transaction.execute(sql`select run_id as "runId", policy_version_id as "policyVersionId" from youtube_discovery_candidate_jobs where id = ${jobId}`) as Array<{ runId: string; policyVersionId: string }>;
+  const [job] = await transaction.execute(sql`select run_id as "runId", policy_version_id as "policyVersionId" from youtube_discovery_candidate_jobs where id = ${jobId} and state = 'completed'`) as Array<{ runId: string; policyVersionId: string }>;
   if (!job) return;
-  const [run] = await transaction.execute(sql`select query_proposal_id as "queryProposalId" from youtube_discovery_runs where id = ${job.runId} for update`) as Array<{ queryProposalId: string | null }>;
+  const [run] = await transaction.execute(sql`select run.query_proposal_id as "queryProposalId" from youtube_discovery_runs run join youtube_discovery_query_proposals proposal on proposal.id = run.query_proposal_id and proposal.enabled = true where run.id = ${job.runId} for update of run`) as Array<{ queryProposalId: string | null }>;
   if (!run?.queryProposalId) return;
-  const [policy] = await transaction.execute(sql`select language_classifier_version as "languageClassifierVersion", allow_foreign_fallback as "allowForeignFallback" from youtube_discovery_policy_versions where id = ${job.policyVersionId} for update`) as Array<{ languageClassifierVersion: number; allowForeignFallback: boolean }>;
+  const [policy] = await transaction.execute(sql`select language_classifier_version as "languageClassifierVersion", allow_foreign_fallback as "allowForeignFallback" from youtube_discovery_policy_versions where id = ${job.policyVersionId} and is_current = true and enabled = true for update`) as Array<{ languageClassifierVersion: number; allowForeignFallback: boolean }>;
   if (policy?.languageClassifierVersion !== 1 || !policy.allowForeignFallback) return;
-  const [unfinished] = await transaction.execute(sql`select 1 as one from youtube_discovery_candidate_jobs where run_id = ${job.runId} and state not in ('completed', 'failed', 'cancelled') limit 1`) as Array<{ one: number }>;
+  const [unfinished] = await transaction.execute(sql`select 1 as one from youtube_discovery_candidate_jobs where run_id = ${job.runId} and state <> 'completed' limit 1`) as Array<{ one: number }>;
   if (unfinished) return;
   const [qualified] = await transaction.execute(sql`select 1 as one from youtube_discovery_appearances where run_id = ${job.runId} and duration_fit = 'eligible' and language_fit in ('vi', 'likely_vi') limit 1`) as Array<{ one: number }>;
   if (qualified) return;
