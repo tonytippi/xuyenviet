@@ -33,7 +33,7 @@
 #   - done: Completed
 
 generated: 2026-07-25
-last_updated: 08-14-2026
+last_updated: 08-15-2026
 project: xuyenviet
 project_key: NOKEY
 tracking_system: file-system
@@ -462,7 +462,7 @@ development_status:
   # 2026-08-14: BMad code review repaired tranche contract/caller regressions, deterministic persistence ordering, and immutable review-query provenance. Unit tests (349), typecheck, lint (0 errors; pre-existing warnings), and diff check pass. Integration runner ignores supplied file filters and timed out in unrelated existing tests; no Story 22.1 integration assertion failed before timeout.
   22-1-generate-vietnamese-first-discovery-queries: done
   22-2-gate-language-and-useful-duration-before-ai-triage: done
-  22-3-surface-video-evidence-and-prove-vietnamese-first-quality: backlog
+  22-3-surface-video-evidence-and-prove-vietnamese-first-quality: review
   epic-22-retrospective: optional
 
   # 2026-08-13: Canonical dispatch lives at _bmad-output/specs/spec-epic-21.

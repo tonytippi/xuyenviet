@@ -3,7 +3,7 @@ import { eq, sql } from "drizzle-orm";
 import { adminYoutubeDiscoveryActionRequiredPageSize, parseAdminYoutubeDiscoveryActionRequiredCursor, type AdminYoutubeDiscoveryActionRequiredCursor, type RequestPrincipal } from "@xuyenviet/contracts";
 import { YoutubeDiscoveryActionRequiredCursorValidationError } from "@xuyenviet/domain";
 
-import { aiGatewayModels, auditEvents, cancelYoutubeDiscoveryRunIfDisabled, claimNextYoutubeDiscoveryRun, createPostgresAdminYoutubeDiscoveryPort, createSystemAuditActor, createUserAuditActor, createYoutubeDiscoveryMissionActionFrontier, createYoutubeDiscoveryPolicyVersion, createYoutubeDiscoveryQueryProposal, createYoutubeDiscoveryRun, finishYoutubeDiscoveryRun, getYoutubeDiscoveryRecommendationBundle, knowledgeCards, knowledgeRecommendations, persistYoutubeDiscoveryCandidates, persistYoutubeDiscoveryEnrichment, persistYoutubeDiscoveryRecommendation, persistYoutubeDiscoveryTriage, retryYoutubeDiscoveryRun, selectYoutubeDiscoveryTriageModel, youtubeDiscoveryCandidateReviewStates, youtubeDiscoveryCandidates, youtubeDiscoveryPolicyVersions, youtubeDiscoveryQueryProposals, youtubeDiscoveryRecommendations, youtubeDiscoveryRuns } from "@xuyenviet/database";
+import { aiGatewayModels, auditEvents, cancelYoutubeDiscoveryRunIfDisabled, claimNextYoutubeDiscoveryRun, createPostgresAdminYoutubeDiscoveryPort, createSystemAuditActor, createUserAuditActor, createYoutubeDiscoveryMissionActionFrontier, createYoutubeDiscoveryPolicyVersion, createYoutubeDiscoveryQueryProposal, createYoutubeDiscoveryRun, finishYoutubeDiscoveryRun, getYoutubeDiscoveryRecommendationBundle, knowledgeCards, knowledgeRecommendations, persistYoutubeDiscoveryCandidates, persistYoutubeDiscoveryEnrichment, persistYoutubeDiscoveryRecommendation, persistYoutubeDiscoveryTriage, retryYoutubeDiscoveryRun, selectYoutubeDiscoveryTriageModel, youtubeDiscoveryAppearances, youtubeDiscoveryCandidateReviewStates, youtubeDiscoveryCandidates, youtubeDiscoveryPolicyVersions, youtubeDiscoveryQueryProposals, youtubeDiscoveryRecommendations, youtubeDiscoveryRuns } from "@xuyenviet/database";
 import { resetTestDatabase, seedTestOperator, testDb } from "./helpers/db";
 
 const principal: RequestPrincipal = { userId: "operator", email: "operator@example.com", roles: ["operator"], sessionId: "action-queue-session", authorizationVersion: 1 };
@@ -38,6 +38,39 @@ describe.sequential("YouTube Discovery action-required queue", () => {
     expect(health.throughput.windowHours).toBe(24);
     expect(health.backlog).toEqual(expect.objectContaining({ pending: 1, deferred: 0, oldestDeferredAt: null, deferredAge: "unavailable" }));
     expect(await queueWriteSnapshot()).toEqual(before);
+  });
+
+  test("keeps foreign fallback out of primary work while reporting bounded policy-scoped quality without writes", async () => {
+    const { policy, proposal } = await queueFixture();
+    const primaryRecommendationId = await createConsiderCandidate(policy.id, proposal.id, "primaryquality");
+    const fallbackRecommendationId = await createConsiderCandidate(policy.id, proposal.id, "fallbackquality");
+    const [fallback] = await testDb.select({ appearanceId: youtubeDiscoveryRecommendations.appearanceId }).from(youtubeDiscoveryRecommendations).where(eq(youtubeDiscoveryRecommendations.id, fallbackRecommendationId));
+    if (!fallback) throw new Error("expected fallback appearance");
+    await testDb.update(youtubeDiscoveryAppearances).set({ languageFit: "non_vi", eligibilityReason: "foreign_fallback" }).where(eq(youtubeDiscoveryAppearances.id, fallback.appearanceId));
+    const before = await queueWriteSnapshot();
+    const port = createPostgresAdminYoutubeDiscoveryPort(undefined, testDb);
+
+    const [review, actions, fallbackProjection, health, mission] = await Promise.all([port.listReview(principal, null), port.listActionRequired(principal, null), port.listForeignFallback(), port.healthOverview(), port.missionFunnel()]);
+
+    expect(review.items.map((item) => item.recommendationId)).toEqual([primaryRecommendationId]);
+    expect(actions.items.some((item) => item.actionId === fallbackRecommendationId)).toBe(false);
+    expect(fallbackProjection.items).toEqual([expect.objectContaining({ eligibilityReason: "foreign_fallback", languageFit: "non_vi", queryText: "Da Lat route" })]);
+    expect(health.quality).toMatchObject({ foreignFallback: 1, vietnameseConsider: 1, considered: 2, vietnameseFitPercent: 50, durationViolations: 0 });
+    expect(mission.quality).toEqual(health.quality);
+    expect(await queueWriteSnapshot()).toEqual(before);
+  });
+
+  test("excludes fallback without its immutable minimum-duration evidence", async () => {
+    const { policy, proposal } = await queueFixture();
+    const fallbackRecommendationId = await createConsiderCandidate(policy.id, proposal.id, "fallbacknoduration");
+    const [fallback] = await testDb.select({ appearanceId: youtubeDiscoveryRecommendations.appearanceId }).from(youtubeDiscoveryRecommendations).where(eq(youtubeDiscoveryRecommendations.id, fallbackRecommendationId));
+    if (!fallback) throw new Error("expected fallback appearance");
+    await testDb.update(youtubeDiscoveryAppearances).set({ languageFit: "non_vi", eligibilityReason: "foreign_fallback", durationFit: "eligible", durationSeconds: null }).where(eq(youtubeDiscoveryAppearances.id, fallback.appearanceId));
+
+    const [projection, health] = await Promise.all([createPostgresAdminYoutubeDiscoveryPort(undefined, testDb).listForeignFallback(), createPostgresAdminYoutubeDiscoveryPort(undefined, testDb).healthOverview()]);
+
+    expect(projection.items).toEqual([]);
+    expect(health.quality).toMatchObject({ foreignFallback: 0, vietnameseConsider: 0, considered: 1, vietnameseFitPercent: 0, durationViolations: 1 });
   });
 
   test("uses typed incident escalation and clearance while excluding non-actionable runs", async () => {
@@ -272,8 +305,10 @@ async function createConsiderCandidate(policyVersionId: string, queryProposalId:
   const claim = (await claimNextYoutubeDiscoveryRun({ workerId: `candidate-${videoId}` }, testDb)).claim;
   if (!claim) throw new Error("expected candidate run claim");
   await persistYoutubeDiscoveryCandidates(claim, [{ videoId, canonicalUrl: `https://www.youtube.com/watch?v=${videoId}`, resultOrdinal: 0, searchTranche: "medium" }], testDb);
-  await persistYoutubeDiscoveryEnrichment(claim, { videoId, signals: [] }, testDb);
-  await testDb.insert(aiGatewayModels).values({ id: `model-${videoId}`, gatewayModelName: `test/${videoId}`, displayLabel: "Action queue", purpose: "youtube_discovery_triage", active: true, defaultForPurpose: true, supportsTextInput: true, supportsExtraction: true, pricingUnitTokens: 1_000_000 });
+  await persistYoutubeDiscoveryEnrichment(claim, { videoId, title: "Đường đèo Việt Nam", durationSeconds: 180, defaultAudioLanguage: "vi", signals: [] }, testDb);
+  await testDb.update(youtubeDiscoveryAppearances).set({ languageFit: "vi", durationFit: "eligible", eligibilityReason: "eligible_vietnamese", queryBuilderVersion: 2, languageClassifierVersion: 1, minimumUsefulDurationSeconds: 180 }).where(eq(youtubeDiscoveryAppearances.runId, claim.id));
+  const existingModel = await testDb.select({ id: aiGatewayModels.id }).from(aiGatewayModels).where(eq(aiGatewayModels.purpose, "youtube_discovery_triage"));
+  if (!existingModel.length) await testDb.insert(aiGatewayModels).values({ id: `model-${videoId}`, gatewayModelName: `test/${videoId}`, displayLabel: "Action queue", purpose: "youtube_discovery_triage", active: true, defaultForPurpose: true, supportsTextInput: true, supportsExtraction: true, pricingUnitTokens: 1_000_000 });
   const model = await selectYoutubeDiscoveryTriageModel(testDb);
   const [candidate] = await testDb.select({ id: youtubeDiscoveryCandidates.id }).from(youtubeDiscoveryCandidates).where(eq(youtubeDiscoveryCandidates.videoId, videoId));
   if (!model || !candidate) throw new Error("expected candidate triage fixture");

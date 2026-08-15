@@ -5,7 +5,7 @@ import { asc, desc, eq, sql } from "drizzle-orm";
 import { parseAdminYoutubeDiscoveryBrowseCursor, parseAdminYoutubeDiscoveryReviewCursor, type RequestPrincipal } from "@xuyenviet/contracts";
 import { YoutubeDiscoveryBrowseCursorValidationError, YoutubeDiscoveryReviewCursorValidationError } from "@xuyenviet/domain";
 
-import { aiGatewayModels, auditEvents, claimNextYoutubeDiscoveryRun, createPostgresAdminYoutubeDiscoveryPort, createSystemAuditActor, createUserAuditActor, createYoutubeDiscoveryPolicyVersion, createYoutubeDiscoveryQueryProposal, createYoutubeDiscoveryRun, finishYoutubeDiscoveryRun, getYoutubeDiscoveryRecommendationBundle, persistYoutubeDiscoveryCandidates, persistYoutubeDiscoveryEnrichment, persistYoutubeDiscoveryRecommendation, persistYoutubeDiscoveryTriage, selectYoutubeDiscoveryTriageModel, youtubeDiscoveryCandidateReviewStates, youtubeDiscoveryCandidates, youtubeDiscoveryKnowledgeHandoffs, youtubeDiscoveryRecommendations } from "@xuyenviet/database";
+import { aiGatewayModels, auditEvents, claimNextYoutubeDiscoveryRun, createPostgresAdminYoutubeDiscoveryPort, createSystemAuditActor, createUserAuditActor, createYoutubeDiscoveryPolicyVersion, createYoutubeDiscoveryQueryProposal, createYoutubeDiscoveryRun, finishYoutubeDiscoveryRun, getYoutubeDiscoveryRecommendationBundle, persistYoutubeDiscoveryCandidates, persistYoutubeDiscoveryEnrichment, persistYoutubeDiscoveryRecommendation, persistYoutubeDiscoveryTriage, selectYoutubeDiscoveryTriageModel, youtubeDiscoveryAppearances, youtubeDiscoveryCandidateReviewStates, youtubeDiscoveryCandidates, youtubeDiscoveryKnowledgeHandoffs, youtubeDiscoveryRecommendations } from "@xuyenviet/database";
 import { resetTestDatabase, seedTestOperator, testDb } from "./helpers/db";
 
 describe.sequential("YouTube Discovery review read model", () => {
@@ -27,7 +27,8 @@ describe.sequential("YouTube Discovery review read model", () => {
     if (!model) throw new Error("expected review triage model");
 
     for (const videoId of videos) {
-      await persistYoutubeDiscoveryEnrichment(claim, { videoId, signals: [] }, testDb);
+       await persistYoutubeDiscoveryEnrichment(claim, { videoId, title: "Đường đèo Việt Nam", durationSeconds: 180, defaultAudioLanguage: "vi", signals: [] }, testDb);
+       await testDb.update(youtubeDiscoveryAppearances).set({ languageFit: "vi", durationFit: "eligible", eligibilityReason: "eligible_vietnamese", queryBuilderVersion: 2, languageClassifierVersion: 1, minimumUsefulDurationSeconds: 180 }).where(eq(youtubeDiscoveryAppearances.runId, claim.id));
       const [candidate] = await testDb.select({ id: youtubeDiscoveryCandidates.id }).from(youtubeDiscoveryCandidates).where(eq(youtubeDiscoveryCandidates.videoId, videoId));
       if (!candidate) throw new Error(`expected persisted candidate for ${videoId}`);
       await persistYoutubeDiscoveryTriage(claim, { candidateId: candidate.id, status: "succeeded", assessment: { relevanceScore: 1, expectedValueScore: 1, freshnessFitScore: 1, commercialRiskScore: 0, duplicateRiskScore: 0, signals: [] }, model, provider: "ai_gateway", modelName: model.gatewayModelName, latencyMs: 1 }, testDb);

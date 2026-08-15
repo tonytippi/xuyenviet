@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, test } from "vitest";
 import { eq, sql } from "drizzle-orm";
 import { parseAdminYoutubeDiscoveryMissionCandidateCursor } from "@xuyenviet/contracts";
-import { auditEvents, claimNextYoutubeDiscoveryRun, createPostgresAdminYoutubeDiscoveryPort, createSystemAuditActor, createUserAuditActor, createYoutubeDiscoveryPolicyVersion, createYoutubeDiscoveryQueryProposal, createYoutubeDiscoveryRun, finishYoutubeDiscoveryRun, getYoutubeDiscoveryRecommendationBundle, persistYoutubeDiscoveryCandidates, persistYoutubeDiscoveryEnrichment, persistYoutubeDiscoveryRecommendation, persistYoutubeDiscoveryTriage, selectYoutubeDiscoveryTriageModel, youtubeDiscoveryCandidateReviewStates, youtubeDiscoveryKnowledgeHandoffs, youtubeDiscoveryQueryProposals, youtubeDiscoveryRecommendations, youtubeDiscoveryRuns, aiGatewayModels, youtubeDiscoveryCandidates } from "@xuyenviet/database";
+import { auditEvents, claimNextYoutubeDiscoveryRun, createPostgresAdminYoutubeDiscoveryPort, createSystemAuditActor, createUserAuditActor, createYoutubeDiscoveryPolicyVersion, createYoutubeDiscoveryQueryProposal, createYoutubeDiscoveryRun, finishYoutubeDiscoveryRun, getYoutubeDiscoveryRecommendationBundle, persistYoutubeDiscoveryCandidates, persistYoutubeDiscoveryEnrichment, persistYoutubeDiscoveryRecommendation, persistYoutubeDiscoveryTriage, selectYoutubeDiscoveryTriageModel, youtubeDiscoveryAppearances, youtubeDiscoveryCandidateReviewStates, youtubeDiscoveryKnowledgeHandoffs, youtubeDiscoveryQueryProposals, youtubeDiscoveryRecommendations, youtubeDiscoveryRuns, aiGatewayModels, youtubeDiscoveryCandidates } from "@xuyenviet/database";
 import { resetTestDatabase, seedTestOperator, testDb } from "./helpers/db";
 
 const actionId = "mission-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
@@ -13,7 +13,7 @@ describe.sequential("YouTube Discovery Mission projections", () => {
   test("keeps durable Mission lineage, selects the latest run, deduplicates candidates, combines operator queries, and never writes on projections", async () => {
     await seedTestOperator();
     const policy = await createYoutubeDiscoveryPolicyVersion({ version: 1, isCurrent: true, actor: createSystemAuditActor("system-youtube-discovery") }, testDb);
-    const system = await createYoutubeDiscoveryQueryProposal({ origin: "system", reason: "coverage_gap", priority: 1, queryText: "Da Lat route", cadenceMinutes: 15, actor: createSystemAuditActor("system-youtube-discovery"), systemSignal: { reason: "coverage_gap", geography: "Da Lat", taxonomy: "route", priority: 50 } }, testDb);
+    const system = await createYoutubeDiscoveryQueryProposal({ origin: "system", reason: "coverage_gap", priority: 1, queryText: "Da Lat kinh nghiệm cung đường đi ô tô", cadenceMinutes: 15, actor: createSystemAuditActor("system-youtube-discovery"), systemSignal: { reason: "coverage_gap", geography: "Da Lat", taxonomy: "route", priority: 50 } }, testDb);
     await testDb.update(youtubeDiscoveryQueryProposals).set({ missionActionId: actionId }).where(eq(youtubeDiscoveryQueryProposals.id, system.id));
     const operator = await createYoutubeDiscoveryQueryProposal({ origin: "operator", reason: "operator_request", priority: 20, queryText: "Da Lat lake", cadenceMinutes: 60, actor: createUserAuditActor({ userId: "operator", email: "operator@example.com" }) }, testDb);
     const first = await completeCandidate(policy.id, system.id, "missioncandidate");
@@ -64,7 +64,7 @@ describe.sequential("YouTube Discovery Mission projections", () => {
 });
 
 async function createSystemMissionQuery(missionActionId: string, taxonomy: "route" | "place") {
-  const query = await createYoutubeDiscoveryQueryProposal({ origin: "system", reason: "coverage_gap", priority: 50, queryText: `Da Lat ${taxonomy}`, cadenceMinutes: 15, actor: createSystemAuditActor("system-youtube-discovery"), systemSignal: { reason: "coverage_gap", geography: "Da Lat", taxonomy, priority: 50 } }, testDb);
+  const query = await createYoutubeDiscoveryQueryProposal({ origin: "system", reason: "coverage_gap", priority: 50, queryText: taxonomy === "route" ? "Da Lat kinh nghiệm cung đường đi ô tô" : "Da Lat kinh nghiệm điểm dừng chân", cadenceMinutes: 15, actor: createSystemAuditActor("system-youtube-discovery"), systemSignal: { reason: "coverage_gap", geography: "Da Lat", taxonomy, priority: 50 } }, testDb);
   await testDb.update(youtubeDiscoveryQueryProposals).set({ missionActionId }).where(eq(youtubeDiscoveryQueryProposals.id, query.id));
   return query;
 }
@@ -74,7 +74,8 @@ async function completeCandidate(policyVersionId: string, queryProposalId: strin
   const claim = (await claimNextYoutubeDiscoveryRun({ workerId: "mission-candidate" }, testDb)).claim;
   if (!claim) throw new Error("expected claim");
   await persistYoutubeDiscoveryCandidates(claim, [{ videoId, canonicalUrl: `https://www.youtube.com/watch?v=${videoId}`, resultOrdinal: 0, searchTranche: "medium" }], testDb);
-  await persistYoutubeDiscoveryEnrichment(claim, { videoId, signals: [] }, testDb);
+  await persistYoutubeDiscoveryEnrichment(claim, { videoId, title: "Đường đèo Việt Nam", durationSeconds: 180, defaultAudioLanguage: "vi", signals: [] }, testDb);
+  await testDb.update(youtubeDiscoveryAppearances).set({ languageFit: "vi", durationFit: "eligible", eligibilityReason: "eligible_vietnamese", queryBuilderVersion: 2, languageClassifierVersion: 1, minimumUsefulDurationSeconds: 180 }).where(eq(youtubeDiscoveryAppearances.runId, claim.id));
   const existingModel = await testDb.select({ id: aiGatewayModels.id }).from(aiGatewayModels).where(eq(aiGatewayModels.purpose, "youtube_discovery_triage"));
   if (!existingModel.length) await testDb.insert(aiGatewayModels).values({ id: "mission-model", gatewayModelName: "test/mission", displayLabel: "Mission", purpose: "youtube_discovery_triage", active: true, defaultForPurpose: true, supportsTextInput: true, supportsExtraction: true, pricingUnitTokens: 1_000_000 });
   const model = await selectYoutubeDiscoveryTriageModel(testDb); const [candidate] = await testDb.select({ id: youtubeDiscoveryCandidates.id }).from(youtubeDiscoveryCandidates).where(eq(youtubeDiscoveryCandidates.videoId, videoId));

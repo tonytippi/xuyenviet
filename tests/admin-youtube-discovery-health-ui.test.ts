@@ -1,5 +1,8 @@
 import { readFile } from "node:fs/promises";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, test } from "vitest";
+import { YoutubeDiscoveryHealthQuality } from "../apps/admin/app/knowledge/youtube-discovery/health/health";
 
 describe("admin YouTube Discovery Health UI boundary", () => {
   test("uses typed safe Health responses and never renders route input", async () => {
@@ -65,5 +68,16 @@ describe("admin YouTube Discovery Health UI boundary", () => {
     expect(detail).toContain('try { groupId = decodeURIComponent(actionId); } catch');
     expect(detail).toContain('/^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}:(provider_rate_limited|triage_schema_invalid|execution_terminal)$/.test(groupId)');
     expect(detail).not.toContain("Mã tham chiếu: {actionId}");
+  });
+
+  test("renders the bounded Vietnamese-first quality proof", () => {
+    const html = renderToStaticMarkup(createElement(YoutubeDiscoveryHealthQuality, { quality: { tooShort: 2, durationUnknown: 3, nonVietnamese: 4, languageUnknown: 5, foreignFallback: 6, vietnameseConsider: 8, considered: 10, vietnameseFitPercent: 80, durationViolations: 0 } }));
+    for (const text of ["Chất lượng ưu tiên tiếng Việt", "80%", "Mẫu: 8/10", "Ngưỡng yêu cầu: 80% (đạt)", "Nguồn ngoại ngữ bổ sung: 6", "Quá ngắn: 2", "chưa rõ thời lượng: 3", "không phải tiếng Việt: 4", "chưa rõ ngôn ngữ: 5", "vi phạm thời lượng: 0"]) expect(html).toContain(text);
+  });
+
+  test("announces when the Vietnamese-first threshold is not met", () => {
+    const html = renderToStaticMarkup(createElement(YoutubeDiscoveryHealthQuality, { quality: { tooShort: 0, durationUnknown: 0, nonVietnamese: 0, languageUnknown: 0, foreignFallback: 0, vietnameseConsider: 7, considered: 10, vietnameseFitPercent: 70, durationViolations: 1 } }));
+    expect(html).toContain("Mẫu: 7/10");
+    expect(html).toContain("Ngưỡng yêu cầu: 80% (chưa đạt)");
   });
 });

@@ -1,6 +1,8 @@
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, test } from "vitest";
 import { parseAdminYoutubeDiscoveryMissionCoveragePage } from "@xuyenviet/contracts";
-import { validateMissionQueryDraft } from "../apps/admin/app/knowledge/youtube-discovery/mission/mission";
+import { YoutubeDiscoveryMissionQuality, validateMissionQueryDraft } from "../apps/admin/app/knowledge/youtube-discovery/mission/mission";
 
 describe("Mission UI interaction boundary", () => {
   test("rejects unsafe responses before presentation", () => {
@@ -14,5 +16,16 @@ describe("Mission UI interaction boundary", () => {
     expect(validateMissionQueryDraft({ queryText: "Đèo Prenn", priority: "25", cadenceMinutes: "60" }, true)).toEqual({});
     expect(validateMissionQueryDraft({ queryText: "Đèo Prenn", priority: "25", cadenceMinutes: "10081" }, true)).toEqual({ cadenceMinutes: "Chu kỳ phải từ 15 đến 10080 phút." });
     expect(validateMissionQueryDraft({ queryText: "Đèo Prenn", priority: "", cadenceMinutes: "60" }, false)).toEqual({ priority: "Ưu tiên phải từ 1 đến 100." });
+  });
+
+  test("renders the bounded Vietnamese-first quality proof", () => {
+    const html = renderToStaticMarkup(createElement(YoutubeDiscoveryMissionQuality, { quality: { tooShort: 2, durationUnknown: 3, nonVietnamese: 4, languageUnknown: 5, foreignFallback: 6, vietnameseConsider: 8, considered: 10, vietnameseFitPercent: 80, durationViolations: 0 } }));
+    for (const text of ["Chất lượng ưu tiên tiếng Việt", "80%", "Mẫu: 8/10", "Ngưỡng yêu cầu: 80% (đạt)", "Nguồn ngoại ngữ bổ sung: 6", "Video quá ngắn: 2", "chưa rõ thời lượng: 3", "không phải tiếng Việt: 4", "chưa rõ ngôn ngữ: 5", "vi phạm thời lượng: 0"]) expect(html).toContain(text);
+  });
+
+  test("announces when the Vietnamese-first threshold is not met", () => {
+    const html = renderToStaticMarkup(createElement(YoutubeDiscoveryMissionQuality, { quality: { tooShort: 0, durationUnknown: 0, nonVietnamese: 0, languageUnknown: 0, foreignFallback: 0, vietnameseConsider: 7, considered: 10, vietnameseFitPercent: 70, durationViolations: 1 } }));
+    expect(html).toContain("Mẫu: 7/10");
+    expect(html).toContain("Ngưỡng yêu cầu: 80% (chưa đạt)");
   });
 });

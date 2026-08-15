@@ -12,6 +12,7 @@ describe("admin YouTube Discovery review UI boundary", () => {
       penalty: { commercial_risk: expect.any(String), duplicate_risk: expect.any(String) },
       signal: { recent_discussion: expect.any(String), stale_or_changed_warning: expect.any(String), practical_question_demand: expect.any(String), creator_responsiveness: expect.any(String), commercial_risk: expect.any(String), contradictory_discussion: expect.any(String) },
       priorCaptureOutcome: { eligible: expect.any(String), already_compatible: expect.any(String), unavailable: expect.any(String) },
+       languageFit: { vi: expect.any(String), likely_vi: expect.any(String) }, eligibilityReason: { eligible_vietnamese: expect.any(String) }, fallbackLanguageFit: { non_vi: expect.any(String), unknown: expect.any(String) }, fallbackReason: { foreign_fallback: expect.any(String) },
        accept: { pending: expect.any(String), reconciling: "Đang kiểm tra kết quả thêm URL", submitted: "URL đã được gửi vào hàng đợi nạp Knowledge. Việc này chưa xác nhận trạng thái xử lý tiếp theo.", duplicate: "URL này đã có trong hàng đợi nạp Knowledge hoặc đã được lưu trước đó. Việc này chưa xác nhận trạng thái xử lý tiếp theo.", failed: expect.any(String) }, defer: { pending: expect.any(String), deferred: expect.any(String), failed: expect.any(String) }, skip: { pending: expect.any(String), skipped: expect.any(String), failed: expect.any(String) },
     });
   });
@@ -79,7 +80,7 @@ describe("admin YouTube Discovery review UI boundary", () => {
     expect(source).toContain('if (queue.items.length === 0) { setIsReconciling(false); setNeedsDecisionRefresh(false); focusQueueAfterDecision.current = true; setShowDetail(false); setQueueFocusToken((current) => current + 1); return; }');
     expect(source).toContain('if (!retainReconciliation) { focusSelectedRowAfterDecision.current = true; setShowDetail(false); }');
     expect(source).toContain('choose(queue.items[0], true, retainReconciliation);');
-    expect(source).toContain('item.publishedAt ? new Intl.DateTimeFormat("vi-VN").format(new Date(item.publishedAt)) : "Chưa rõ ngày đăng"');
+    expect(source).toContain('published(item.publishedAt)');
     expect(source).toContain('setIsReconciling(true); setNeedsDecisionRefresh(true); setStatus("Đang làm mới trạng thái quyết định."); void refreshAfterDecision(recommendationId, requestId, true).catch(() => setStatus("Không thể làm mới trạng thái quyết định."));');
     expect(source).toContain('{needsDecisionRefresh ? <button className="mt-4 min-h-11 rounded border px-4 font-semibold" onClick={() => void retryDecisionRefresh()} type="button">Làm mới trạng thái quyết định</button> : null}');
     expect(source).toContain('</div></div> : <p className="mt-4 text-slate-600">Chọn một ứng viên để xem chi tiết.</p>}{needsDecisionRefresh ?');
@@ -97,6 +98,9 @@ describe("admin YouTube Discovery review UI boundary", () => {
     expect(source).toContain('useState<AdminYoutubeDiscoveryBrowseFilter>("consider")');
     expect(source).toContain('if (loadingBrowseMore.current || nextCursor !== browseCursor) return;');
     expect(source).toContain('++browseGeneration.current; loadingBrowseMore.current = false; setBrowseItems([]); setBrowseCursor(null);');
+    expect(source).toContain('Nguồn ngoại ngữ bổ sung');
+    expect(source).toContain('/v1/admin/knowledge/youtube-discovery/fallback');
+    expect(source).toContain('không thuộc hàng đợi ưu tiên, xếp hạng hoặc hành động xem xét');
   });
 
   test("uses the main Discovery route for URL review and exposes Health", async () => {
@@ -109,7 +113,7 @@ describe("admin YouTube Discovery review UI boundary", () => {
     expect(nav).not.toContain('Việc cần xử lý Discovery');
     expect(page).toContain('import { YoutubeDiscoveryReview } from "../youtube-discovery-review/review";');
     expect(review).toContain('>Youtube Discovery</h1>');
-    expect(review).toContain('href="/knowledge/youtube-discovery/health">Health Discovery</Link>');
+    expect(review).toContain('href="/knowledge/youtube-discovery/health">Sức khỏe Discovery</Link>');
     expect(review).toContain('returnUrl: `${window.location.origin}/knowledge/youtube-discovery`');
   });
 
