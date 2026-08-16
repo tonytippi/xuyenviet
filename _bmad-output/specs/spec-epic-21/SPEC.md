@@ -11,85 +11,90 @@ companions:
 sources: []
 ---
 
-> **Canonical contract.** This SPEC and the files in `companions:` are the complete, preservation-validated contract for what to build, test, and validate. Source documents referenced inside the companions remain the owners of their detailed architecture, UX, fixture, and release-gate rules.
+> **Canonical contract.** This SPEC and its companions are the complete dispatch
+> contract for Epic 21. The superseded sixteen-story plan is historical only.
 
-# Epic 21: Context-Complete, Trip-Aware Planning And Conversion
+# Epic 21: Clean-Break Trip-Aware Planning And Conversion
 
 ## Why
 
-Travelers need XuyenViet to complete material planning context without leaking values between scopes, distinguish saved Trip authority from exploration, ground route-sensitive guidance in applicable evidence, and convert useful chat context into a reviewable Trip without copying the transcript or mutating the applied plan prematurely. The mandate is to replace legacy card-count retrieval behavior safely while preserving rollback, privacy, provenance, and operational control.
+Travelers need concise multi-turn clarification, clear separation between applied Trip
+state and exploratory ideas, route-aware evidence organized by required planning need,
+and an explicit path from useful chat context to a reviewable Trip proposal. There are
+no production users or durable traveler data, so the smallest safe implementation is a
+direct replacement of legacy card-count behavior on a guarded disposable database.
 
 ## Capabilities
 
 - **CAP-1 — Versioned planning-context profiles**
-  - **intent:** The system can define the material fields and scope rules for each typed planning deliverable.
-  - **success:** Readiness is evaluated per deliverable instance and pinned profile version, with deterministic ancestry and precedence and no cross-scope leakage.
+  - **Intent:** Define material fields and compatible scopes for each planning deliverable.
+  - **Success:** Typed code-owned profiles validate deterministically without cross-scope leakage.
 - **CAP-2 — Durable scoped clarification**
-  - **intent:** Travelers can accumulate valid clarification answers across turns without losing or silently replacing them.
-  - **success:** State advances monotonically behind content and attempt fences, and stale, foreign, deleted, or incomparable values cannot become current.
+  - **Intent:** Preserve relevant traveler answers across turns.
+  - **Success:** One bounded session document accumulates fenced values without stale overwrite.
 - **CAP-3 — Bounded clarification preflight**
-  - **intent:** The system can ask only unresolved material questions before producing a main answer.
-  - **success:** A profiled turn performs at most one planning attempt and one extraction attempt; a blocked turn terminalizes replayably without retrieval, web, main-answer, prompt-render, or answer-provenance artifacts.
-- **CAP-4 — Explicit planning modes and authority**
-  - **intent:** Travelers can distinguish the applied current plan from hypothetical changes, pending proposals, validation, and unscoped questions.
-  - **success:** Mode resolution is deterministic, applied Trip state remains the only current-plan authority, and only the owner Apply command changes it.
+  - **Intent:** Ask only unresolved material questions before answering.
+  - **Success:** Blocked turns terminalize replayably and create no main-answer effects.
+- **CAP-4 — Explicit planning modes**
+  - **Intent:** Distinguish applied Trip state from exploration, proposals, and unscoped answers.
+  - **Success:** Mode resolution is deterministic and only applied Trip state is current authority.
 - **CAP-5 — Canonical route paths and coverage**
-  - **intent:** Route guidance can rely on an owner-selected path or an explicit product coverage projection.
-  - **success:** Free text and model output never create durable route authority; stale, partial, ambiguous, and unsupported paths fail safely with traveler-visible limitations.
+  - **Intent:** Ground route advice in owner-confirmed paths or supported product coverage.
+  - **Success:** Exact, partial, ambiguous, unsupported, and stale routes fail safely; free text creates no authority.
 - **CAP-6 — Required-need evidence packing**
-  - **intent:** Retrieval can cover consequential planning needs instead of optimizing for related-card volume.
-  - **success:** Scope-first candidate generation, fact-level contributions, bounded prioritization, and final-render coverage keep missing needs visible even when duplicate or unrelated evidence exists.
-- **CAP-7 — Replayable scoped web verification**
-  - **intent:** Freshness-sensitive or conflicted needs can be verified for the exact relevant place, route, and time.
-  - **success:** Queries minimize private context, decisions pin replay dependencies and scope, and provider failure preserves the uncovered need rather than manufacturing live authority.
+  - **Intent:** Cover consequential planning needs rather than optimize related-card volume.
+  - **Success:** Fact-level selection keeps every uncovered need explicit regardless of card count.
+- **CAP-7 — Scoped web verification**
+  - **Intent:** Verify changing facts for the exact relevant place, route, and time.
+  - **Success:** Minimized queries and persisted provenance preserve gaps when evidence is unsafe or unavailable.
 - **CAP-8 — Atomic answer finalization**
-  - **intent:** The system can publish one internally consistent terminal result for each AI Ask command.
-  - **success:** Prepared artifacts, Usage, messages, provenance, retrieval state, and failure outcomes finalize through one fence and owner transactions with no partial or competing state.
+  - **Intent:** Publish one internally consistent terminal AI Ask result.
+  - **Success:** Existing fences commit message, Usage, provenance, and one bounded retrieval snapshot without partial state.
 - **CAP-9 — Persistent chat-to-Trip opportunity**
-  - **intent:** Travelers can keep one current `Chuyển thành chuyến đi` opportunity available across navigation until they act or the context changes.
-  - **success:** The server owns a stable opportunity and latest eligible manifest; newer pending turns disable conversion, and only explicit dismissal records a decline fence.
+  - **Intent:** Keep one current conversion opportunity available while chat context remains eligible.
+  - **Success:** Existing recommendation state is recomputed as `eligible`, `accepted`, `dismissed`, or `invalidated` without a manifest or workflow lifecycle.
 - **CAP-10 — Reviewable Trip conversion**
-  - **intent:** Travelers can convert the latest eligible ordinary-chat planning context into a Trip proposal for review.
-  - **success:** Conversion creates a separate Trip, primary conversation, and pending typed proposal without transcript or provider-content copying and without pre-Apply mutation.
+  - **Intent:** Convert explicit chat planning values into a proposal for owner review.
+  - **Success:** A separate Trip and pending typed proposal are created without transcript copying or pre-Apply mutation.
 - **CAP-11 — Deletion invalidation**
-  - **intent:** Deleting a conversation or Trip can stop its planning material from influencing future behavior.
-  - **success:** All reconstructable owner-derived state is synchronously invalidated while any retained audit or evaluation data is bounded and non-reconstructable.
-- **CAP-12 — Qualification infrastructure**
-  - **intent:** Feedback, evaluation, and release actors can qualify retrieval versions using durable profiles, runs, policies, and cutover records.
-  - **success:** Infrastructure supports reproducible qualification and controlled transitions without collecting approval evidence or activating production reads implicitly.
-- **CAP-13 — Comparable shadow evidence**
-  - **intent:** Product owners can decide on v6 activation from an exact, reviewed, non-authoritative evidence window.
-  - **success:** A persisted comparable report satisfies duration and count requirements and receives the designated Feedback or Eval and Product Owner approvals without changing production authority.
-- **CAP-14 — Qualified read-policy cutover**
-  - **intent:** Authorized operators can activate v6 retrieval for an explicitly named target only after qualification.
-  - **success:** A target-specific compare-and-set transition binds the approved report, actor, policy, environment, and runnable rollback; failed preflight leaves the prior authority unchanged.
-- **CAP-15 — Behavioral retirement of card count**
-  - **intent:** Web verification can respond to missing or changing needs rather than a legacy number of cards.
-  - **success:** Required-need behavior becomes authoritative only after COMP-01 through COMP-06 and the executable closure evidence receive the required retirement approval.
-- **CAP-16 — Physical compatibility cleanup**
-  - **intent:** Operators can remove expired legacy compatibility after it is no longer needed for safe rollback.
-  - **success:** Cleanup occurs only after the rollback window, passing cleanup report, no unresolved incident, Product Owner approval, and a persisted transition to a qualified v6 rollback target.
+  - **Intent:** Stop deleted planning material from influencing future behavior.
+  - **Success:** Owner deletion removes reconstructable derived state transactionally and cannot be reversed by stale work.
+- **CAP-17 — Clean-break direct activation**
+  - **Intent:** Replace card-count retrieval with one required-need path before launch.
+  - **Success:** The active system has no count or rollout-control authority and recovers through guarded reset/migrate/seed while data is disposable.
+
+CAP-12 through CAP-16 are retired and must not be reused. They described qualification,
+shadow, read-policy cutover, staged retirement, and compatibility-cleanup machinery that
+is disproportionate before users or durable data exist.
 
 ## Constraints
 
-- Follow the exact per-story Given/When/Then criteria, tasks, paths, commands, dependency checks, and `Block If` rules in `story-contracts.md`; story descriptions in `stories.yaml` are dispatch inventory, not substitutes for those contracts.
-- Execute stories only in this order: `21-1 → 21-2 → 21-3 → 21-4 → 21-5 → 21-6 → 21-7 → 21-8 → 21-9 → 21-10 → 21-13 → 21-11 → 21-14 → 21-15 → 21-12 → 21-16`.
-- Pin every relevant profile, policy, comparator, schema, content, Trip, proposal, route-registry, retrieval, parser, resolver, prompt, model, and evaluator identity, or record its explicit absence.
-- Use the existing modular-monolith ownership, PostgreSQL and forward-only Drizzle migrations, NestJS admission, Worker runtime, AI Gateway purposes, and owner ports. Add no parallel endpoint, service, queue, cache, feature flag, model purpose, or environment authority.
-- Only applied Trip state and owner-confirmed canonical paths are current authority. Prose, confidence, identifiers, text similarity, model output, pending proposals, and card counts cannot manufacture authority.
-- Prepared and terminal AI Ask state share one command fence and owner transaction boundaries; stale, retried, deleted, or failed work cannot become visible.
-- External evidence, human approvals, actor authorization, target identity, and rollback-window expiry are genuine fail-closed gates. Local fixtures or passing code cannot substitute for them.
-- Use `pnpm test:unit` for infrastructure-free tests and serial `pnpm test:integration` for PostgreSQL-backed tests. Tests needing clean tables call `resetTestDatabase()` locally; baseline verification is `pnpm lint`, `pnpm typecheck`, and `pnpm build`.
-- `sprint-status.yaml` remains the sprint-level tracker. `stories.yaml` contains no status, and each generated story spec under `stories/` owns only that build-auto run's execution state and evidence.
+- Execute only in this order: `21-1 → 21-2 → 21-3 → 21-4 → 21-5 → 21-6 → 21-7 → 21-8`.
+- Add at most one new table: `planning_context_sessions`, storing one bounded JSON document per active conversation/session.
+- Reuse `assistant_retrieval_decisions` for one bounded required-need/evidence/web/render snapshot. Reuse existing conversation/message, Trip/recommendation/proposal, AI Ask command, Usage, provenance, feedback, and audit storage.
+- Planning profiles, required-need definitions, and supported-route registry/coverage are validated versioned code constants, not database tables.
+- Use exactly one Epic 21 migration: `drizzle/migrations/0073_clean_break_trip_aware_planning.sql`, finalized in Story 21.1 and never amended by later stories. Migrations `0066` through `0072` already exist.
+- Use flat bounded session slots, four planning modes, a static route manifest, four required-need outcomes, and four recommendation states. Add no generic graph, claim, workflow, evaluation, release, or finalization framework.
+- Add no backfill, dual write, shadow execution, read mode, read-policy row, gate profile, evaluation run, cutover record, cleanup report, feature flag, parallel endpoint, new service, queue, cache, Worker kind, model purpose, or environment authority.
+- Clean break is legal only on an explicitly disposable target. Use the repository's guarded `pnpm db:reset` flow. If durable user data or a non-disposable environment is discovered, stop and require expand-migrate-contract design.
+- Before durable data exists, recovery is code rollback plus guarded reset/migrate/seed; there is no legacy runtime fallback.
+- Preserve modular-monolith ownership, owner authorization, idempotency, version fences, atomic finalization, deletion boundaries, and stored provenance.
+- Use `pnpm test:unit` for infrastructure-free tests and serial `pnpm test:integration` for PostgreSQL tests. Baseline verification is `pnpm lint`, `pnpm typecheck`, and `pnpm build`.
+- `stories.yaml` is dispatch inventory only. `sprint-status.yaml` remains the sprint tracker; the orchestrator changes only the currently dispatched story.
 
 ## Non-goals
 
-- Running multiple Epic 21 stories concurrently or bypassing predecessor completion.
-- Treating local tests, fixtures, simulated evidence, or implementation assignment as production approval, actor authorization, target selection, or elapsed rollback time.
-- Creating a second chat-to-Trip endpoint, a second proposal contract, a new service boundary, or a new environment-based retrieval authority.
-- Copying ordinary-chat transcript or provider content into a Trip, or applying proposal values before owner confirmation.
-- Making `stories.yaml` a second sprint tracker or pre-marking all stories `ready-for-dev` merely because they are dispatchable.
+- Production-grade migration of unknown existing traveler data.
+- Runtime A/B comparison, shadow traffic, numeric release cohorts, human approval persistence, or reversible read-policy cutover.
+- A generalized workflow engine, evaluation platform, route-registry service, or second source of truth.
+- Copying raw chat, assistant prose, prompts, provider payloads, assumptions, or unresolved values into a Trip.
+- Running Epic 21 stories concurrently or marking all stories ready before their predecessor completes.
+- Creating a custom clean-break scanner or automatically resetting a database during final verification.
 
-## Success signal
+## Success Signal
 
-All sixteen stories complete sequentially through folder-plus-ID dispatch, with every automated and gated acceptance criterion evidenced in its generated story spec, `sprint-status.yaml` synchronized without regression, v6 retrieval activated only from an approved persisted policy, and legacy compatibility removed only after its safe-cleanup gates pass.
+All eight stories complete sequentially through folder-plus-ID dispatch. The disposable
+target resets, migrates through `0073`, and seeds successfully; all canonical fixtures,
+focused unit and serial integration tests, lint, typecheck, and build pass; active code,
+config, tests, scripts, and runbooks contain no card-count threshold or rollout-control
+authority; and `sprint-status.yaml` is synchronized after each story.

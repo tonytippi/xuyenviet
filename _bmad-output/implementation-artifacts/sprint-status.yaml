@@ -1,5 +1,5 @@
 # generated: 2026-07-25
-# last_updated: 08-14-2026 (Story 22.2 independent code review repairs complete.)
+# last_updated: 08-16-2026 15:23 (Epic 21 split into eight minimal clean-break stories.)
 # project: xuyenviet
 # project_key: NOKEY
 # tracking_system: file-system
@@ -33,7 +33,7 @@
 #   - done: Completed
 
 generated: 2026-07-25
-last_updated: 08-15-2026
+last_updated: 08-16-2026 15:23
 project: xuyenviet
 project_key: NOKEY
 tracking_system: file-system
@@ -53,8 +53,9 @@ development_status:
   3-4-establish-source-version-ingestion-job-claiming: done
   3-5-run-the-source-version-ai-ingestion-pipeline: done
   3-6-recover-ingestion-jobs-without-stale-publication: done
-  3-7-validate-evidence-and-independently-judge-publication: superseded-by-3-5
-  3-8-relate-evidence-preserve-conditions-and-handle-conflicts: superseded-by-3-5
+  # Superseded by completed Story 3.5; normalized to the supported terminal vocabulary.
+  3-7-validate-evidence-and-independently-judge-publication: done
+  3-8-relate-evidence-preserve-conditions-and-handle-conflicts: done
   3-9-operate-the-ai-recommended-review-and-sampling-queue: done
   3-10-propagate-source-removal-and-state-changes-to-search-eligibility: done
   3-11-report-active-evidence-grounded-seed-coverage: done
@@ -265,7 +266,8 @@ development_status:
   # 2026-08-01 final Epic 12 closure review of a66bfa4..884fdd7: the release advisory lock moved from the target database to the maintenance database, losing interoperability with the established target-database lock namespace. No code was modified during review.
   # 2026-08-01 final closure repair: db:migrate holds advisory lock 918_040_004 in the application target database, restoring serialization with legacy runners. Disposable reset coordinates target then maintenance before target destruction and relies on its explicit no-runtime-overlap prerequisite after database recreation. Serial DATABASE_URL_TEST migration/lock regressions passed (2 files, 33 tests); typecheck and diff check passed; lint had 0 errors and 5 pre-existing warnings. Final synchronous review is clean. All Epic 12 stories are confirmed done.
   # 2026-08-01 scope correction approved by the product owner: db:reset is restricted to disposable local/test maintenance targets and is not an overlapping-runtime release protocol. Its existing explicit no-runtime-overlap preflight remains required; a durable cross-recreation runtime-admission fence is out of scope. Story 12.3 is closed on its implemented migration-gate, matrix, and rollback contract.
-  12-3-gate-schema-changes-for-overlapping-runtimes: superseded-by-ad-3-forward-drizzle-migrations
+  # Superseded by AD-3 forward Drizzle migrations; normalized to the supported terminal vocabulary.
+  12-3-gate-schema-changes-for-overlapping-runtimes: done
   epic-12-retrospective: optional
 
   # Story 13.1 approved identity handoff: API Identity owns OAuth state/code exchange
@@ -466,28 +468,19 @@ development_status:
   22-3-surface-video-evidence-and-prove-vietnamese-first-quality: done
   epic-22-retrospective: optional
 
-  # 2026-08-13: Canonical dispatch lives at _bmad-output/specs/spec-epic-21.
-  # stories.yaml defines dependency order but owns no status. The orchestrator
-  # syncs this tracker after each folder+ID build-auto run; all stories remain
-  # backlog until dispatched sequentially. Story 21.13 separates deletion,
-  # 21.14 evidence, 21.15 cutover, and 21.16 G3 cleanup.
+  # 2026-08-16: Product Owner approved a clean-break rebaseline before users or
+  # durable traveler data exist. Canonical dispatch remains in spec-epic-21,
+  # now as eight small sequential stories. stories.yaml owns no status; the
+  # orchestrator updates only the currently dispatched story.
   epic-21: backlog
-  21-1-define-versioned-planning-context-profiles-and-scope-rules: backlog
-  21-2-persist-scoped-multi-turn-clarification-state-safely: backlog
-  21-3-run-bounded-preflight-clarification-before-main-answers: backlog
-  21-4-preserve-applied-trip-authority-across-planning-modes: backlog
-  21-5-preserve-canonical-trip-paths-and-supported-route-coverage: backlog
-  21-6-retrieve-and-pack-evidence-by-required-planning-need: backlog
-  21-7-verify-fresh-external-facts-through-replayable-web-scope: backlog
-  21-8-finalize-planning-evidence-atomically: backlog
-  21-9-keep-a-current-chat-to-trip-opportunity-available: backlog
-  21-10-convert-the-latest-eligible-context-into-a-reviewable-trip: backlog
-  21-11-establish-v6-retrieval-qualification-infrastructure: backlog
-  21-12-retire-the-legacy-card-count-trigger-behaviorally: backlog
-  21-13-invalidate-planning-evidence-on-conversation-and-trip-deletion: backlog
-  21-14-collect-and-approve-v6-shadow-qualification-evidence: backlog
-  21-15-cut-over-v6-retrieval-through-qualified-read-policy: backlog
-  21-16-physically-remove-expired-legacy-card-count-compatibility: backlog
+  21-1-add-minimal-planning-session-storage: backlog
+  21-2-collect-multi-turn-clarification: backlog
+  21-3-resolve-planning-mode-and-applied-trip-authority: backlog
+  21-4-preserve-canonical-route-authority: backlog
+  21-5-retrieve-by-required-need-and-remove-card-count: backlog
+  21-6-verify-fresh-facts-and-finalize-through-existing-ai-ask: backlog
+  21-7-convert-eligible-chat-context-into-a-reviewable-trip: backlog
+  21-8-delete-planning-data-and-verify-the-clean-break: backlog
   epic-21-retrospective: optional
 
 action_items:

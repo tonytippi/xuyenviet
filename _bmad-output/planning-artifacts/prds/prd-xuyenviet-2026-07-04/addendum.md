@@ -26,6 +26,7 @@
 - Quality monitoring samples active claims without becoming a publication gate. Every `needs_operator` outcome retains its required quality-control obligation separately from actionable operator work; sampling rate and cohort configuration belong to the Community Knowledge architecture/evaluation contract.
 - Direct Facebook-derived quotes and captured text are operator-only in the public MVP. Traveler surfaces may show a XuyenViet-authored paraphrase and practical verification guidance. A canonical source link may appear only when the source is public without authentication or group membership, passes URL-safety policy, and has no validated removal request. The published content-removal contact hides a credible affected link during validation and routes a validated request through source removal and dependent-card re-evaluation. Public direct-quote display remains deferred until a separately approved rights and display policy exists.
 - Trip Planning Foundation is the implemented product baseline: single-owner structured itinerary, trip constraints, one primary conversation, basic Trip Home, and user-confirmed change proposals with history. Later route-aware retrieval work must preserve this ownership and confirmation model.
+- Epic 21 is a disposable-data clean break. Until real shared/customer data exists, the project will reset/reseed the explicitly confirmed target and replace legacy card-count retrieval directly; it will not build shadow comparison, runtime read modes, gate-profile persistence, cutover records, or legacy rollback machinery.
 - Trip Home focus policy: pending expiring proposal, pending proposal, defined confirmed-item gap, next dated planned/confirmed leg, then preparation. Explicit lifecycle phases and on-trip today focus remain deferred.
 - `confirmed` means owner confirmation or a supplied real constraint, not booking/provider validation; booking and availability remain out of scope.
 - Proposal application uses aggregate/item version fences and structural preconditions; a stale proposal applies nothing and returns a safe refresh-required result.
@@ -37,16 +38,16 @@ All ten product change requests are approved at outcome level. No PCR is deferre
 
 | PCR | Disposition | PRD references | Architecture/Evaluation follow-up |
 |---|---|---|---|
-| `PCR-01` | Approved | FR-31, FR-61, FR-62; §10.4; SC-10; AC-11, AC-31 | Required-need vocabulary, coverage evaluation, and compatibility-trigger retirement |
+| `PCR-01` | Approved | FR-31, FR-61, FR-62; §10.4; SC-10; AC-11, AC-31 | Required-need vocabulary, coverage evaluation, and direct replacement of count authority |
 | `PCR-02` | Approved | FR-65; §10.4; SC-11; AC-32 | Freshness classes, approved live-data authority, and safety evaluation cohorts |
 | `PCR-03` | Approved | UJ-5; FR-63, FR-64; AC-30 | Route-resolution representation, reason codes, and fixtures |
 | `PCR-04` | Approved | FR-62; SC-10; AC-31 | Evidence/response budgets, prioritization, and coverage measurement |
-| `PCR-05` | Approved | FR-16O–Q; §10.7; AC-29 | Canonical Trip path schema, proposal operations, migration, rollback, and stale-reference recovery |
+| `PCR-05` | Approved | FR-16O–Q; §10.7; AC-29 | Canonical Trip path schema, proposal operations, clean-break migration, and stale-reference recovery |
 | `PCR-06` | Approved | UJ-5; FR-63; §11; AC-30 | Supported-coverage assertions and traveler-facing coverage projection |
 | `PCR-07` | Approved | FR-35; §10.4; AC-11 | Replayable web-scope resolution, query minimization, and provenance mapping |
 | `PCR-08` | Approved | UJ-4; FR-16M–P, FR-30; §10.7; SC-9, SC-12; AC-28 | Planning-mode decision, pinned Trip/proposal context, and mode fixtures |
 | `PCR-09` | Approved | FR-15; §10.1; AC-8, AC-33 | Deletion transaction, replacement flow, derived-state invalidation, and retention policy |
-| `PCR-10` | Approved | §10.5; SC-8–12; AC-28–33 | Versioned evaluation cohorts and numeric gate profile |
+| `PCR-10` | Approved | §10.5; SC-8–12; AC-28–33 | Executable deterministic fixtures, focused integration verification, and guarded disposable-target reset/reseed |
 
 ## Roadmap v6.2 Production Journey Traceability
 
@@ -75,7 +76,7 @@ The roadmap's production journeys are preserved by the following PRD-owned outco
 - Conversation transcript retention must follow the final PRD and privacy notice; do not treat earlier debugging-retention assumptions as active requirements unless a later privacy decision reinstates them.
 - Architecture must define the Trip Project aggregate boundary, primary-conversation migration, owner-scoped plan/proposal commands, proposal expiry/conflict handling, audit history, and deletion propagation for all derived Trip Planning data.
 - Architecture AD-29, AD-30, and AD-35 now define the approved canonical Trip leg-path representation, owner-confirmed proposal operations, migration behavior, supported-coverage resolution, and safe stale-reference recovery. Free-text route labels remain query aids and cannot grant durable route authority.
-- The former broad-query `< 3 relevant cards` web-search trigger may remain only as a temporary compatibility behavior. It is retired when the required-need vocabulary and Architecture contract are approved, the versioned evaluation profile includes broad-query compatibility and missing-need cohorts, shadow evaluation passes the approved non-regression gates for the agreed evidence window, and the Product Owner approves production cutover from the recorded evaluation report. Architecture/Evaluation owns numeric thresholds and evidence-window length; the Product Owner owns retirement approval.
+- The former broad-query `< 3 relevant cards` web-search trigger is removed in the Epic 21 clean break. Required-need coverage becomes authoritative in the same deployment after deterministic fixtures, focused unit/integration tests, and the guarded disposable-target reset/reseed pass. Production-grade shadow/cutover/rollback policy is deferred until durable shared/customer data creates a real migration requirement.
 - Weather, location, Google Maps/Places/Routes, booking/OTA data, dynamic provider snapshots, budget, checklists, travel vault, collaboration, and notifications remain deferred from the Trip Planning Foundation tranche.
 
 ## Architecture Authority Handoff

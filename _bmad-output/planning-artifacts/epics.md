@@ -243,16 +243,16 @@ NFR-20: The Discovery control tower shall meet the project's operator accessibil
 - RTA-1: Retrieval owns one versioned required-need vocabulary and deterministic requirement-key identity; selection, rendering, provenance, and evaluation consume the same immutable contribution contract.
 - RTA-2: Coverage is recomputed from the final render manifest and returns `satisfied | missing | requires_verification | requires_clarification`; card count alone never establishes sufficiency.
 - RTA-3: Planning mode is explicit and pinned as current plan, explore change, validate proposal, or unscoped answer; only applied Trip state grants current-plan authority.
-- RTA-4: Canonical leg-path choices use immutable registry references and owner-confirmed proposal operations; stale references fail safely without automatic replacement.
-- RTA-5: Route resolution and coverage projection distinguish authoritative, partial, ambiguous, unsupported, and stale-path states and expose bounded traveler guidance without false live-routing authority.
-- RTA-6: Web use is replayable at atomic-fact level from minimized query plan through capture, fact assertion, scope decision, requirement contribution, render manifest, and answer provenance.
-- RTA-7: Conversation and Trip deletion synchronously invalidate reconstructable retrieval runs, web decisions, snapshots, manifests, projections, and production-evaluation membership across owning modules.
-- RTA-8: Feedback/Eval owns versioned fixtures, cohorts, numeric gate profiles, evidence windows, and release reports; critical safety limits are literal zero and material provenance correctness is literal one.
-- RTA-9: `v6_shadow` retains the legacy path as traveler-authoritative and runs a paired side-effect-free v6 comparison; cutover and rollback use one Retrieval-owned compare-and-swap read policy.
-- RTA-10: The historical fewer-than-three trigger is compatibility-only; `v6_active` triggers web work from uncovered or freshness-sensitive requirements, conflict, or explicit current verification, and G3 separates behavioral retirement from physical cleanup.
-- RTA-11: Profiled planning intents use server-owned multi-turn clarification: bounded `clarification_plan` and `clarification_extract` prompt stages propose structure and extract natural-language values, while deterministic profiles and Chat/Trips CAS state alone decide per-deliverable readiness before main synthesis.
-- RTA-12: Context and preferences are scoped through a versioned graph to journey, day range, leg, place, stay/group, meal, activity, or deliverable instance; explicit narrow values never leak to sibling scopes, and permitted assumptions are persisted and disclosed.
-- RTA-13: After an unscoped profiled request reaches a completed useful answer with durable ready planning context, Chat/Trips exposes one persistent owner-bound `Chuyển thành chuyến đi` opportunity. Not clicking is neutral; material completed context changes refresh or suspend its server-owned manifest, explicit dismissal alone creates a decline fence, and click revalidates the latest eligible bounded context rather than the originally displayed revision. Successful idempotent conversion atomically creates one Trip, its separate primary conversation, and an initial pending proposal without copying/replaying raw chat; only proposal Apply makes transferred values authoritative. `continueInTrip(...)` remains an existing-Trip scope switch with no context import.
+- RTA-4: Canonical leg-path choices use IDs from one static code-owned route manifest and owner-confirmed proposal operations; stale references fail safely without automatic replacement.
+- RTA-5: The pure route resolver distinguishes selected, complete, partial, ambiguous, unsupported, and stale states and exposes bounded traveler guidance without false live-routing authority.
+- RTA-6: Web use is traceable from one minimized need/scope query through the existing capture, bounded decision snapshot, and answer provenance.
+- RTA-7: Conversation and Trip deletion removes planning sessions, retrieval snapshots/provenance, recommendations, proposals, and other reconstructable owner-derived data through existing cascades plus only proven cleanup gaps.
+- RTA-8: Canonical fixtures plus unit, serial integration, lint, typecheck, and build checks are the executable release proof; Epic 21 adds no runtime qualification-profile or approval persistence.
+- RTA-9: One required-need retrieval path replaces the old card-count path directly on explicitly disposable targets; guarded reset/migrate/seed replaces shadow, read-policy, cutover, and compatibility modes.
+- RTA-10: Web work is triggered only by an uncovered or freshness-sensitive requirement, conflict, or explicit current verification; the count decision branch, config, tests, and active runbooks are removed while inert count telemetry may remain.
+- RTA-11: Profiled planning intents use one flat bounded session and at most one existing extraction call per traveler turn; a deterministic reducer decides readiness and asks one missing material question before main synthesis.
+- RTA-12: Explicit context values use only journey, leg, place, or stay scope; incompatible or contradictory same-scope values become missing/ambiguous and never leak across scopes or silently default.
+- RTA-13: After a useful unscoped answer contains explicit supported values, the existing recommendation aggregate projects `eligible`, `accepted`, `dismissed`, or `invalidated`. Not clicking is neutral; a later completed turn recomputes eligibility; accept idempotently creates one Trip, its separate primary conversation, and an initial pending proposal without copying raw chat; only proposal Apply makes transferred values authoritative. `continueInTrip(...)` remains an existing-Trip scope switch with no context import.
 
 ### v6.2 Outcome And Journey Requirements
 
@@ -576,9 +576,16 @@ FR-16J..FR-16L: Epic 21 - Persistent latest-context chat-to-Trip conversion and 
 FR-16M..FR-16Q: Epic 21 - Planning-mode authority, canonical paths, proposal-only mutation, and stale-path recovery.
 FR-30, FR-31, FR-35: Epic 21 - Mode-aware context priority, required-need web triggering, and replayable external verification.
 FR-61..FR-65: Epic 21 - Required-need coverage, capacity handling, supported-route projection, and warning freshness.
-RTA-1..RTA-13: Epic 21 - Architecture contracts, clarification gate, persistent conversion, evaluation, cutover, and retirement.
+RTA-1..RTA-13: Epic 21 - Architecture contracts, clarification, persistent conversion, executable verification, and direct clean-break activation.
 
-The following per-item projection is authoritative for implementation ownership. Fixture IDs come from `retrieval-trip-aware/fixtures.md`; cohort and gate names come from `retrieval-trip-aware/evaluation-and-release-gates.md`.
+> **Historical mapping superseded on 2026-08-16.** The table below records the former
+> sixteen-story rollout and is not implementation ownership. The canonical eight-story
+> mapping is: storage → Story 21.1; clarification → Story 21.2; planning mode → Story
+> 21.3; route authority → Story 21.4; required needs and count removal → Story 21.5;
+> web/finalization → Story 21.6; conversion → Story 21.7; deletion/verification → Story 21.8. Release proof is
+> `CLEAN-01` through `CLEAN-04`, not G0–G3.
+
+The following table is retained only as correction history.
 
 | Item | Responsible Story 21 ownership | Canonical fixture proof | Evaluation cohort / gate proof |
 |---|---|---|---|
@@ -1125,7 +1132,7 @@ As a traveler,
 I want current external information when active knowledge is insufficient or risky,
 So that changing road-trip details are handled honestly.
 
-**Contract status:** This story is the historical compatibility baseline. AD-38 and Stories 21.6, 21.7, and 21.12 own the target v6 contract; the acceptance criteria below are explicitly read-mode scoped and do not authorize permanent count-based fallback.
+**Contract status:** This story is a historical baseline. AD-38 and clean-break Story 21.7 own the active target; the obsolete read-mode criteria below are retained only as correction history and are not executable requirements.
 
 **Acceptance Criteria:**
 
@@ -3212,7 +3219,12 @@ So that convenience improvements cannot silently weaken traveler control, owner 
 **Then** the applicable unit and serial integration tests, `pnpm lint`, `pnpm typecheck`, and `pnpm build` pass
 **And** any environmental blocker is recorded exactly in the implementation artifact.
 
-## Epic 21: Context-Complete, Trip-Aware Planning And Conversion
+## Historical Appendix: Superseded Epic 21 Sixteen-Story Plan
+
+> **Superseded on 2026-08-16.** This section is retained only as correction history.
+> Its sixteen stories, shadow comparison, qualification infrastructure, read-policy
+> cutover, and compatibility-cleanup sequence are not dispatchable. The canonical
+> seven-story clean-break Epic 21 at the end of this file replaces it.
 
 Travelers can refine complex itinerary, route, lodging, food, and activity requests until the relevant scope has enough context; receive bounded route-aware answers that expose required gaps and freshness limits; and explicitly convert the latest useful chat context into a reviewable Trip without copying the chat or silently changing Trip state.
 
@@ -3220,7 +3232,7 @@ Travelers can refine complex itinerary, route, lodging, food, and activity reque
 
 **Authoritative implementation sequence:** `21.1 -> 21.2 -> 21.3 -> 21.4 -> 21.5 -> 21.6 -> 21.7 -> 21.8 -> 21.9 -> 21.10 -> 21.13 -> 21.11 -> 21.14 -> 21.15 -> 21.12 -> 21.16`. Story identifiers 21.13 through 21.16 were appended during course correction; numeric order and file position do not override this dependency chain.
 
-### Story 21.1: Define Versioned Planning Context Profiles And Scope Rules
+### Superseded Story 21.1: Define Versioned Planning Context Profiles And Scope Rules
 
 As a traveler,
 I want XuyenViet to recognize which details materially affect each part of my request,
@@ -3248,7 +3260,7 @@ So that it asks only relevant questions and does not apply one preference to the
 **Then** it pins the exact versions used
 **And** `CLAR-01`, `CLAR-07`, `CLAR-08`, `CLAR-13`, `CLAR-21`, `CLAR-22`, and `CLAR-23` remain executable canonical cases for FR-5, RTA-11, and RTA-12.
 
-### Story 21.2: Persist Scoped Multi-Turn Clarification State Safely
+### Superseded Story 21.2: Persist Scoped Multi-Turn Clarification State Safely
 
 As a traveler,
 I want my valid answers to accumulate across clarification turns,
@@ -3276,7 +3288,7 @@ So that XuyenViet asks only for missing details without losing, mixing, or silen
 **Then** readiness and answer claims remain per instance, independently ready work excludes blocked siblings, and the parent stays active until every instance is completed or abandoned
 **And** `CLAR-02`, `CLAR-03`, `CLAR-09`, `CLAR-11`, `CLAR-14`, `CLAR-24`, `CLAR-25`, and `CLAR-26` pass in unit and serial integration coverage for FR-5, RTA-11, and RTA-12.
 
-### Story 21.3: Run Bounded Preflight Clarification Before Main Answers
+### Superseded Story 21.3: Run Bounded Preflight Clarification Before Main Answers
 
 As a traveler,
 I want XuyenViet to ask follow-up questions until the relevant request is ready,
@@ -3310,7 +3322,7 @@ So that a detailed answer reflects my trip instead of making a convenient but us
 **Then** resolved information remains visible through calm conversational acknowledgement, only unresolved material questions are asked, focus returns predictably to the composer, and pending/error states use practical Vietnamese
 **And** `CLAR-01` through `CLAR-06`, `CLAR-15` through `CLAR-20`, and `CLAR-27` cover FR-5 and RTA-11 without exposing internal profile, model, command, or state names.
 
-### Story 21.4: Preserve Applied Trip Authority Across Planning Modes
+### Superseded Story 21.4: Preserve Applied Trip Authority Across Planning Modes
 
 As a traveler,
 I want XuyenViet to distinguish my current plan from ideas and pending changes,
@@ -3338,7 +3350,7 @@ So that exploratory advice cannot be mistaken for something already saved in my 
 **Then** safe invariant guidance plus one concise clarification is returned, or stale output is discarded/refreshed
 **And** `PM-01` through `PM-07`, SC-9, SC-12, and AC-28 pass without private Trip-context leakage.
 
-### Story 21.5: Preserve Canonical Trip Paths And Supported Route Coverage
+### Superseded Story 21.5: Preserve Canonical Trip Paths And Supported Route Coverage
 
 As a traveler,
 I want route advice to reflect the exact path I selected or the product's real supported coverage,
@@ -3366,7 +3378,7 @@ So that text similarity or a popular route cannot masquerade as authority for my
 **Then** it returns the corresponding `authoritative_selected`, `authoritative_complete`, `known_partial`, `ambiguous_paths`, `no_path`, or `stale_selected_path` state with bounded traveler guidance
 **And** `RP-01` through `RP-10`, FR-16O..Q, FR-63..64, AC-29, and AC-30 pass without claiming live navigation or nationwide coverage.
 
-### Story 21.6: Retrieve And Pack Evidence By Required Planning Need
+### Superseded Story 21.6: Retrieve And Pack Evidence By Required Planning Need
 
 As a traveler,
 I want answers to cover the important needs of my exact trip rather than merely include several related cards,
@@ -3404,7 +3416,7 @@ So that missing route, safety, family, vehicle, stop, or constraint guidance rem
 **Then** the first request is sufficient without count-only web fallback and the second keeps the gap despite its card count
 **And** `RN-01` through `RN-07`, lexical allowlist/source-metadata/order/bound/fallback fixtures, FR-61..62, SC-8, SC-10, and AC-31 pass, including literal-zero hard-off-route, unrelated-need satisfaction, source-metadata leakage, and critical hard-filter/cap false exclusion.
 
-### Story 21.7: Verify Fresh External Facts Through Replayable Web Scope
+### Superseded Story 21.7: Verify Fresh External Facts Through Replayable Web Scope
 
 As a traveler,
 I want changing external information to be checked for the exact place, route, and time it concerns,
@@ -3432,7 +3444,7 @@ So that an old or unrelated warning is not presented as live route authority.
 **Then** unchanged dependencies reproduce the same decision while changed dependencies create a new immutable projection
 **And** `WS-01` through `WS-07`, FR-35, FR-65, SC-11, and AC-32 pass with complete query-to-fact-to-render provenance.
 
-### Story 21.8: Finalize Planning Evidence Atomically
+### Superseded Story 21.8: Finalize Planning Evidence Atomically
 
 As a traveler,
 I want completed answers to remain internally consistent,
@@ -3455,7 +3467,7 @@ So that retries or failures cannot leave partial or competing terminal state beh
 **Then** it discards stale output or returns the existing terminal result without partial writes
 **And** prepared/finalized state remains unavailable as traveler content until the owning finalization transaction commits.
 
-### Story 21.9: Keep A Current Chat-To-Trip Opportunity Available
+### Superseded Story 21.9: Keep A Current Chat-To-Trip Opportunity Available
 
 **Dependency:** Complete Story 21.8's atomic planning-evidence finalization first; opportunity refresh extends that terminalization path.
 
@@ -3485,7 +3497,7 @@ So that I can continue refining the plan and convert it when I am ready.
 **Then** it uses the server projection, remains keyboard/touch accessible, refetches after terminal AI Ask events, and never infers eligibility solely from local streaming state
 **And** `TC-01` through `TC-05`, `TC-11` through `TC-16`, `TC-19`, and `TC-20` pass for FR-16J..L, PJ-01, and RTA-13.
 
-### Story 21.10: Convert The Latest Eligible Context Into A Reviewable Trip
+### Superseded Story 21.10: Convert The Latest Eligible Context Into A Reviewable Trip
 
 As a traveler,
 I want my current eligible chat context converted into a reviewable Trip proposal,
@@ -3513,7 +3525,7 @@ So that nothing is copied or applied until I explicitly approve the structured c
 **Then** the existing recommendation aggregate and accept/decline endpoints evolve from `decisionId` to `opportunityId`, share the existing proposal operation parser/validator/serializer, refetch after terminal AI Ask events, and add no parallel endpoint, Worker, service, cache, dependency, model purpose, or environment flag
 **And** `TC-06` through `TC-10`, `TC-13`, `TC-17`, and `TC-18` pass for FR-16J..L, PJ-01, and RTA-13.
 
-### Story 21.11: Establish V6 Retrieval Qualification Infrastructure
+### Superseded Story 21.11: Establish V6 Retrieval Qualification Infrastructure
 
 **Dependency:** Complete Story 21.13's deletion invalidation first so qualification profiles and shadow contracts can include the canonical deletion metrics and fixtures.
 
@@ -3543,7 +3555,7 @@ So that later evidence and activation cannot weaken route, context, provenance, 
 **Then** it cannot activate `v6_active`
 **And** `GATE-01` through `GATE-05` and `COMP-03` through `COMP-05` remain reproducible before Story 21.14 evidence collection and Story 21.15 cutover.
 
-### Story 21.13: Invalidate Planning Evidence On Conversation And Trip Deletion
+### Superseded Story 21.13: Invalidate Planning Evidence On Conversation And Trip Deletion
 
 **Dependency:** Complete Stories 21.8 and 21.10 first so finalization and conversion artifacts exist before their deletion behavior is implemented.
 
@@ -3568,7 +3580,7 @@ So that a deleted conversation or Trip cannot leave reconstructable state behind
 **Then** stale work cannot restore or mutate deleted state
 **And** `DEL-01` through `DEL-04`, `CLAR-10`, `CLAR-27`, FR-15, PCR-09, and AC-33 pass in serial integration tests.
 
-### Story 21.14: Collect And Approve V6 Shadow Qualification Evidence
+### Superseded Story 21.14: Collect And Approve V6 Shadow Qualification Evidence
 
 **Dependency:** Complete Story 21.11's qualification infrastructure first.
 
@@ -3588,7 +3600,7 @@ So that activation is based on one exact qualified window rather than local test
 **Then** their exact sign-off/decision is persisted against that report
 **And** approval grants no direct cutover authority.
 
-### Story 21.15: Cut Over V6 Retrieval Through Qualified Read Policy
+### Superseded Story 21.15: Cut Over V6 Retrieval Through Qualified Read Policy
 
 **Dependency:** Complete Story 21.14 with a passing Product Owner-approved report and runnable qualified rollback target first.
 
@@ -3608,7 +3620,7 @@ So that a failed gate or incident can safely retain or restore a known-safe auth
 **Then** the CAS uses the incident/failing evidence and a previously qualified runnable target without waiting for a new passing report
 **And** no traveler output is selected by the shadow path.
 
-### Story 21.12: Retire The Legacy Card-Count Trigger Behaviorally
+### Superseded Story 21.12: Retire The Legacy Card-Count Trigger Behaviorally
 
 As a traveler,
 I want web verification to respond to missing or changing planning needs rather than an arbitrary number of cards,
@@ -3643,7 +3655,7 @@ So that one exact answer is not over-searched and several irrelevant cards canno
 **Then** every RTA-1..RTA-13, PCR-01..PCR-10, FR-61..65, SC-8..12, AC-28..33, and PJ-01..06 mapping has executable evidence
 **And** any environmental blocker is recorded exactly rather than weakening or skipping a gate.
 
-### Story 21.16: Physically Remove Expired Legacy Card-Count Compatibility
+### Superseded Story 21.16: Physically Remove Expired Legacy Card-Count Compatibility
 
 **Dependency:** Complete Story 21.12's behavioral retirement first. This story remains independently blocked by its G3 cleanup prerequisites.
 
@@ -3662,3 +3674,306 @@ So that cleanup cannot strand the product without a known-safe recovery path.
 **When** Retrieval performs the approved CAS cleanup
 **Then** a repository-wide executable-reference check finds no active legacy card-count branch, schema default, config, runtime policy, test, or operator procedure
 **And** only the retained qualified v6 target remains runnable.
+
+## Historical Appendix: Superseded Seven-Story Clean-Break Draft
+
+> **Superseded on 2026-08-16.** Review found that the seven-story draft still bundled
+> clarification with planning mode, route authority with retrieval, and custom release
+> verification. The eight-story Epic 21 below is canonical.
+
+Travelers can clarify complex requests, receive route-aware answers based on required
+planning needs, and convert useful chat context into a reviewable Trip. Because no
+production user or durable traveler data exists, implementation replaces the old
+card-count path directly and uses guarded reset/migrate/seed instead of dual write,
+shadow comparison, read-policy cutover, or compatibility cleanup.
+
+**Implementation boundary:** The target must be explicitly disposable. If durable user
+data or a non-disposable environment is discovered, stop and produce an
+expand-migrate-contract change. Epic 21 may add at most one table,
+`planning_context_sessions`, and one migration,
+`0073_clean_break_trip_aware_planning.sql`.
+
+**Authoritative sequence:** `21.1 -> 21.2 -> 21.3 -> 21.4 -> 21.5 -> 21.6 -> 21.7`.
+
+### Superseded Draft Story 21.1: Establish One Clean-Break Planning Data Shape
+
+As a developer,
+I want one minimal planning data shape on a disposable database,
+So that later stories build on a single authority instead of compatibility machinery.
+
+**Acceptance Criteria:**
+
+**Given** the configured target is explicitly disposable
+**When** the guarded reset, migration, and seed flow runs
+**Then** migration `0073_clean_break_trip_aware_planning.sql` creates at most the one new `planning_context_sessions` table and reuses existing conversation, message, Trip, recommendation, retrieval-decision, Usage, provenance, feedback, and audit storage
+**And** no backfill, dual-write, shadow, read-policy, gate-profile, cutover, or rollback-control table is created.
+
+**Given** the target is not explicitly disposable or contains durable user data
+**When** clean-break admission runs
+**Then** it refuses destructive reset or migration
+**And** implementation stops for an expand-migrate-contract design.
+
+**Given** planning profiles, required needs, and supported route coverage are versioned
+**When** the server loads them
+**Then** they are validated typed code-owned constants rather than database authorities
+**And** `CLEAN-01` and `CLEAN-02` pass.
+
+### Superseded Draft Story 21.2: Clarify Context And Resolve Planning Mode
+
+As a traveler,
+I want the assistant to remember only relevant answers and distinguish saved plans from ideas,
+So that it asks concise questions without silently changing my Trip.
+
+**Acceptance Criteria:**
+
+**Given** a request lacks a material typed value
+**When** bounded clarification preflight runs
+**Then** one session JSON document advances behind conversation/message/version fences and asks only unresolved material questions
+**And** blocked clarification commits no retrieval, web, main-answer, or proposal effect.
+
+**Given** applied Trip state, a hypothetical change, a pending proposal, or no selected Trip applies
+**When** planning mode resolves
+**Then** it deterministically returns `current_plan`, `explore_change`, `validate_proposal`, or `unscoped_answer`
+**And** only applied Trip state is current-plan authority.
+
+**Given** extraction fails, retries, races, or receives stale evidence
+**When** the session reducer runs
+**Then** it fails safely and replayably without cross-scope leakage
+**And** `CLAR-01` through `CLAR-27` and `PM-01` through `PM-07` pass.
+
+### Superseded Draft Story 21.3: Apply Canonical Route And Required-Need Retrieval
+
+As a traveler,
+I want evidence selected for my exact route and important planning needs,
+So that several related cards cannot hide a safety or route gap.
+
+**Acceptance Criteria:**
+
+**Given** a Trip has an owner-confirmed canonical path or code-owned supported coverage
+**When** route applicability resolves
+**Then** exact, partial, ambiguous, stale, and unsupported states fail safely according to the typed registry
+**And** free text or model output never creates route authority.
+
+**Given** a ready request enters retrieval
+**When** candidates are selected and packed
+**Then** fact-level contributions satisfy deterministic required needs within bounded capacity
+**And** every uncovered need remains `missing`, `requires_verification`, or `requires_clarification` regardless of card count.
+
+**Given** the only required need has one applicable contribution
+**When** final coverage is computed
+**Then** no web call is made solely to reach three cards
+**And** `RP-01` through `RP-10`, `RN-01` through `RN-07`, `COMP-01`, and `COMP-02` pass.
+
+### Superseded Draft Story 21.4: Verify Fresh Facts And Finalize Answers Atomically
+
+As a traveler,
+I want changing facts checked for the exact place and time and answers committed once,
+So that retries cannot expose stale claims or partial state.
+
+**Acceptance Criteria:**
+
+**Given** a required need is missing, freshness-sensitive, conflicted, or explicitly current
+**When** scoped web verification runs
+**Then** it sends a minimized query, binds fact-level scope and capture provenance, and preserves gaps on provider failure
+**And** it never presents an old warning as live navigation or guaranteed safety.
+
+**Given** answer generation succeeds, fails, retries, or becomes stale
+**When** the existing AI Ask terminalization path runs
+**Then** message, Usage, provenance, and one bounded `assistant_retrieval_decisions` snapshot commit consistently behind existing fences
+**And** no new retrieval-run or finalization-control table is introduced.
+
+**Given** scoped web and finalization tests run
+**When** their persisted outputs are inspected
+**Then** `WS-01` through `WS-07` pass with no competing terminal result.
+
+### Superseded Draft Story 21.5: Convert Eligible Chat Context Into A Reviewable Trip
+
+As a traveler,
+I want to convert useful current chat context into a Trip proposal,
+So that I can review structured changes before applying them.
+
+**Acceptance Criteria:**
+
+**Given** an unscoped completed answer has supported explicit planning operations
+**When** conversion eligibility is projected
+**Then** one owner-bound opportunity remains available from existing recommendation storage
+**And** pending, ambiguous, stale, unsupported, or explicitly dismissed context is not actionable.
+
+**Given** the traveler accepts the latest eligible opportunity
+**When** the existing recommendation command executes idempotently
+**Then** one transaction creates one Trip, a separate primary conversation, and one pending typed proposal
+**And** no transcript, assistant prose, provider payload, assumption-only value, or applied Trip mutation is copied.
+
+**Given** conversion races refresh, dismissal, or deletion
+**When** existing owner/version fences run
+**Then** exactly one legal outcome commits
+**And** `TC-01` through `TC-20` pass.
+
+### Superseded Draft Story 21.6: Delete Planning Data Safely
+
+As a traveler,
+I want deleted conversations and Trips to stop influencing the assistant,
+So that reconstructable planning state does not survive its owner.
+
+**Acceptance Criteria:**
+
+**Given** an ordinary conversation, primary conversation, or Trip is deleted
+**When** existing owner deletion commands run
+**Then** planning-session JSON, retrieval-decision snapshots, conversion state, proposals, and derived content are invalidated in the same transaction
+**And** unrelated owned aggregates remain unchanged.
+
+**Given** deletion races answer finalization or conversion
+**When** version and ownership fences run
+**Then** stale work cannot restore deleted state
+**And** `DEL-01` through `DEL-04` pass in serial integration tests.
+
+### Superseded Draft Story 21.7: Activate Required-Need Retrieval And Remove Card Count
+
+As a product owner,
+I want the required-need path to replace card-count behavior directly,
+So that the product has one understandable retrieval authority before launch.
+
+**Acceptance Criteria:**
+
+**Given** Stories 21.1 through 21.6 are complete on a disposable target
+**When** focused fixtures, unit tests, serial integration tests, lint, typecheck, and build pass
+**Then** required-need retrieval is the only active path
+**And** no runtime gate, shadow comparison, read policy, cutover command, or legacy rollback mode is required.
+
+**Given** the direct activation change is inspected
+**When** active runtime, config, tests, scripts, and runbooks are scanned
+**Then** no card-count threshold or compatibility authority remains executable
+**And** `CLEAN-03`, `CLEAN-04`, `COMP-01`, and `COMP-02` pass.
+
+**Given** recovery is required before durable user data exists
+**When** the release is reverted
+**Then** recovery uses code rollback plus guarded reset/migrate/seed
+**And** discovery of durable data instead stops the clean-break workflow.
+
+## Epic 21: Minimal Clean-Break Trip-Aware Planning And Conversion
+
+Travelers can clarify a planning request, distinguish their applied Trip from ideas,
+receive route-aware evidence by required need, verify changing facts, and convert useful
+chat context into a reviewable Trip. Implementation uses one disposable-data migration,
+one planning-session table, existing owners, and no rollout control plane.
+
+**Boundary:** Stop if the target is not explicitly disposable or durable user data is
+found. Migration `0073_clean_break_trip_aware_planning.sql` is finalized in Story 21.1;
+later stories may not amend it or add another Epic 21 migration.
+
+**Sequence:** `21.1 -> 21.2 -> 21.3 -> 21.4 -> 21.5 -> 21.6 -> 21.7 -> 21.8`.
+
+### Story 21.1: Add Minimal Planning Session Storage
+
+As a developer, I want one bounded planning-session representation so later behavior
+has a small durable foundation.
+
+**Given** an explicitly disposable target
+**When** migration `0073` runs
+**Then** it adds only `planning_context_sessions` and reuses existing owners without unrelated schema cleanup
+**And** the session JSON is limited to intent, flat scoped slots, missing slots, status, source message IDs, and revision.
+
+### Story 21.2: Collect Multi-Turn Clarification
+
+As a traveler, I want the assistant to remember my explicit answers and ask only for
+the next missing material value.
+
+**Given** a supported request is incomplete
+**When** clarification preflight runs
+**Then** a small deterministic reducer updates the flat session and asks one concise question
+**And** blocked turns perform no retrieval, web search, or main-answer generation.
+
+**Given** extraction fails, retries, or becomes stale
+**When** the AI Ask command terminalizes
+**Then** safe guidance and Usage are recorded once
+**And** stale output cannot overwrite a newer revision.
+
+### Story 21.3: Resolve Planning Mode And Applied Trip Authority
+
+As a traveler, I want saved plans, hypothetical ideas, pending proposals, and private
+questions to remain clearly separate.
+
+**Given** a ready turn has authenticated scope and current intent
+**When** planning mode resolves
+**Then** it is exactly `current_plan`, `explore_change`, `validate_proposal`, or `unscoped_answer`
+**And** only the exact applied Trip snapshot is current-plan authority.
+
+**Given** the mode is ambiguous or a pinned version changes
+**When** final fences run
+**Then** the system asks one clarification or discards stale output
+**And** pending, hypothetical, foreign, or chat-only values never become applied state.
+
+### Story 21.4: Preserve Canonical Route Authority
+
+As a traveler, I want route advice grounded in the path I confirmed or the product's
+explicit supported coverage.
+
+**Given** a leg has an owner-confirmed path or matches the static supported manifest
+**When** route applicability resolves
+**Then** it returns selected, complete, partial, ambiguous, unsupported, or stale
+**And** labels, similarity, popularity, model output, and pending proposals create no authority.
+
+**Given** the owner applies set-path or clear-path
+**When** existing proposal Apply validates ownership and versions
+**Then** canonical references change atomically
+**And** no registry table, publisher, Worker, or runtime activation state is added.
+
+### Story 21.5: Retrieve By Required Need And Remove Card Count
+
+As a traveler, I want important planning needs covered even when many related cards
+miss the route or safety detail that matters.
+
+**Given** a ready turn enters retrieval
+**When** eligible facts are mapped to a small typed requirement list
+**Then** each need becomes `satisfied`, `missing`, `requires_verification`, or `requires_clarification`
+**And** one fact or leg cannot satisfy an unrelated need.
+
+**Given** one card satisfies every need or many cards omit one required need
+**When** fallback is decided
+**Then** count neither triggers unnecessary web search nor hides the gap
+**And** the fewer-than-three branch is removed with no compatibility mode; existing count columns may remain inert telemetry.
+
+### Story 21.6: Verify Fresh Facts And Finalize Through Existing AI Ask
+
+As a traveler, I want changing facts checked for the relevant place and time and the
+answer committed consistently.
+
+**Given** a need is missing, changing, conflicted, or explicitly current
+**When** existing web fallback runs
+**Then** it sends a minimized scoped query and preserves the gap on provider failure
+**And** the answer provides practical verification guidance.
+
+**Given** generation succeeds, fails, retries, or becomes stale
+**When** the existing AI Ask terminal transaction runs
+**Then** message, Usage, provenance, and bounded retrieval snapshot remain consistent
+**And** no run table, finalization framework, service, or queue is created.
+
+### Story 21.7: Convert Eligible Chat Context Into A Reviewable Trip
+
+As a traveler, I want explicit useful chat context converted into a proposal I can
+review before it changes my Trip.
+
+**Given** a completed unscoped answer has supported explicit planning values
+**When** existing recommendation state is projected
+**Then** it is simply `eligible`, `accepted`, `dismissed`, or `invalidated`
+**And** ambiguous, stale, unresolved, or assumption-only values are ineligible.
+
+**Given** the traveler accepts an eligible recommendation
+**When** the existing idempotent command runs
+**Then** one Trip, primary conversation, and pending typed proposal are created atomically
+**And** no transcript, provider payload, workflow engine, or pre-Apply mutation is introduced.
+
+### Story 21.8: Delete Planning Data And Verify The Clean Break
+
+As a traveler, I want deleted planning data to stop influencing the assistant; as the
+team, we want proof that only the simple clean-break path remains.
+
+**Given** a conversation or Trip is deleted
+**When** existing owner deletion commands run
+**Then** foreign-key cascades remove planning sessions and explicit cleanup closes only proven remaining gaps
+**And** unrelated owned data stays unchanged.
+
+**Given** Epic 21 implementation is complete
+**When** existing tests, lint, typecheck, build, and a scoped `rg` check run
+**Then** no card-count or rollout-control authority remains executable
+**And** no custom scanner, automatic database reset, generic invalidation framework, or migration edit is introduced.

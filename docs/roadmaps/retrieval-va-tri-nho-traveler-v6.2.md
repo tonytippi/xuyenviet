@@ -1,5 +1,17 @@
 # Lộ trình Retrieval & Trip-aware Planning Context - Phiên bản 6.2
 
+> **Clean-break override — 2026-08-16.** Epic 21 is now implemented before any
+> production user or durable traveler data exists. Product outcomes in this roadmap
+> remain authoritative, but all sections prescribing dual write, shadow comparison,
+> persisted qualification profiles, read policies, cutover records, compatibility
+> modes, or a legacy rollback window are superseded. The active implementation uses
+> one direct required-need path, at most one new planning-context table, one forward
+> migration (`0073_clean_break_trip_aware_planning.sql`), and the repository's guarded
+> reset/migrate/seed flow for explicitly disposable targets. If a non-disposable target
+> or durable user data is discovered, implementation must stop and return to an
+> expand-migrate-contract design. See AD-37/AD-38 and
+> `retrieval-trip-aware/evaluation-and-release-gates.md` for the active release contract.
+
 ## Trạng thái
 
 Đề xuất ngày 2026-08-11, kế thừa và rebaseline v6.1
