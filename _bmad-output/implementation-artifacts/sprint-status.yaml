@@ -472,8 +472,8 @@ development_status:
   # durable traveler data exist. Canonical dispatch remains in spec-epic-21,
   # now as eight small sequential stories. stories.yaml owns no status; the
   # orchestrator updates only the currently dispatched story.
-  epic-21: backlog
-  21-1-add-minimal-planning-session-storage: backlog
+  epic-21: in-progress
+  21-1-add-minimal-planning-session-storage: in-progress
   21-2-collect-multi-turn-clarification: backlog
   21-3-resolve-planning-mode-and-applied-trip-authority: backlog
   21-4-preserve-canonical-route-authority: backlog
