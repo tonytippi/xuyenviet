@@ -3,6 +3,7 @@ title: 'Add Minimal Planning Session Storage'
 type: 'feature'
 created: '2026-08-16'
 status: 'ready-for-dev'
+baseline_revision: '96bf4402dd04b4cef9fafdb1594e1a0beeb6f3d7'
 review_loop_iteration: 0
 followup_review_recommended: false
 context:
@@ -90,6 +91,8 @@ The product owner has approved the existing `DATABASE_URL_TEST` validation as su
 
 Status: ready-for-dev
 
+Accepted Story 21.1 integration evidence: `pnpm vitest run --project integration tests/planning-context.integration.test.ts` passed its two focused tests. This direct Vitest command is accepted evidence for this Story until `test:integration` forwards focused file filters correctly.
+
 Approved test-target policy: The product owner has explicitly approved the existing `DATABASE_URL_TEST` safety validation as sufficient for Epic 21 test migrations, `resetTestDatabase()` truncation, and serial integration tests. The target must remain distinct from application `DATABASE_URL` and pass the existing test-safe host/name checks. This approval does not weaken or change guards for application `DATABASE_URL` or production targets.
 
 ## Reconciliation Notes
@@ -99,3 +102,17 @@ Approved test-target policy: The product owner has explicitly approved the exist
 The previous terminal block is superseded by the explicit product-owner decision above. It is retained here for historical traceability:
 
 > Blocking condition: configured `DATABASE_URL_TEST` target is not explicitly disposable. `tests/helpers/env-file.ts` proves only URL/name/host safety, while `tests/integration-global-setup.ts` migrates the target and `tests/helpers/db.ts` truncates it. Existing identity-bound reset confirmation in `scripts/db-env.ts` and `scripts/db-reset.ts` identifies the application database `xuyenviet`, not `xuyenviet_test`. Stop for an expand-migrate-contract design; do not reset, migrate, truncate, seed, or implement.
+
+### 2026-08-16: Test-script argument-forwarding reconciliation
+
+The following package-script command remains recorded as reconciliation evidence. Its `--` separator prevents the focused file filter from reaching Vitest, so it runs the full serial integration suite instead of only the Story 21.1 test. That suite exceeded the 120-second limit with unrelated existing failures.
+
+```sh
+pnpm test:integration -- tests/planning-context.integration.test.ts
+```
+
+Under explicit product-owner authorization, the direct focused command below, which passed two tests, is the accepted integration evidence for Story 21.1 until the package script's filter forwarding is repaired. This is a test-script defect only and does not block Story 21.1.
+
+```sh
+pnpm vitest run --project integration tests/planning-context.integration.test.ts
+```
