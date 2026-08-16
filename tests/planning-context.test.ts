@@ -61,6 +61,8 @@ describe("planning clarification reducer", () => {
 
   test("does not profile ordinary questions and rejects invalid reducer input safely", () => {
     expect(reducePlanningClarification({ session: null, question: "Thời tiết hôm nay thế nào?", sourceMessageId: "message-1" })).toEqual({ kind: "not_applicable" });
+    expect(reducePlanningClarification({ session: null, question: "Đi đâu?", sourceMessageId: "message-1" })).toEqual({ kind: "not_applicable" });
+    expect(reducePlanningClarification({ session: null, question: "Gợi ý lịch trình road trip 5 ngày", sourceMessageId: "message-1" })).toEqual({ kind: "not_applicable" });
     expect(reducePlanningClarification({ session: null, question: "Đi Huế", sourceMessageId: "" })).toEqual({ kind: "retry" });
   });
 

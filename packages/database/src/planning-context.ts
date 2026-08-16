@@ -22,7 +22,7 @@ export type PlanningClarification =
 
 /** A bounded, code-owned profile for the only planning intent supported in this story. */
 export function isPlanningClarificationCandidate(question: string) {
-  return /(?:đi|đến|tới|du lịch|chuyến đi|lịch trình|road trip|phượt)/iu.test(question);
+  return /(?:tôi\s+muốn\s+(?:đi|đến|tới)|(?:đi|đến|tới)\s+(?!đâu(?:[\s,.!?]|$))[\p{L}]{2,}|du\s+lịch|chuyến\s+đi|phượt)/iu.test(question);
 }
 
 export function reducePlanningClarification(input: { session: PlanningContextSession | null; question: string; sourceMessageId: string }): PlanningClarification {

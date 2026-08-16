@@ -11,6 +11,7 @@ import { aiAskInitialAnswerPromptVersion, aiAskInitialAnswerPurpose, buildAiAskM
 import { persistAssistantAnswerProvenance, type AssistantMessageProvenanceItem } from "./provenance";
 import { conversations, messages, tripAnswerContextSnapshots } from "./schema";
 import { assembleContextPrioritySourceBundle, renderSourceBundlePromptSection } from "./source-bundle";
+import { resolveOwnedPlanningMode } from "./answer-context";
 import { writeAiUsageEvent } from "./usage";
 import { prepareOwnedPlanningClarification } from "./planning-context";
 
@@ -182,6 +183,17 @@ async function streamAnswer({
       emitAiAskTelemetry(telemetry, correlationId, command.commandId, "failure", 0, undefined, "ai_ask.clarification");
       return;
     }
+    const planningMode = await resolveOwnedPlanningMode({ userId: session.userId, conversationId: saved.conversationId, tripProjectId, question, sessionRevision: clarification.kind === "ready" ? clarification.session.revision : null });
+    if (planningMode.kind === "clarification") {
+      const finalization = await finalizeAiAskCommand(command.commandId, async (transaction, fencedCommand) => {
+        const [assistantMessage] = await transaction.insert(messages).values({ conversationId: fencedCommand.conversationId, userId: fencedCommand.userId, role: "assistant", content: planningMode.question }).returning({ id: messages.id });
+        await transaction.update(conversations).set({ updatedAt: new Date() }).where(eq(conversations.id, fencedCommand.conversationId));
+        await writeAiUsageEvent(transaction, { initiatedByUserId: fencedCommand.userId, executorSystem: "system-ai-orchestration", tripProjectId: fencedCommand.tripProjectId, conversationId: fencedCommand.conversationId, userMessageId: fencedCommand.userMessageId, assistantMessageId: assistantMessage.id, purpose: aiAskInitialAnswerPurpose, provider: "local", model: "planning-mode", promptVersion: "planning-mode-v1", status: "success", latencyMs: 0 });
+        return { assistantMessageId: assistantMessage.id, result: { type: "done" as const, conversationId: fencedCommand.conversationId, userMessage: saved!.userMessage, assistantMessage: { id: assistantMessage.id, content: planningMode.question } } };
+      }, { suppressFollowUps: true, revokeContextExtraction: true, planningExecutionRef: planningMode.executionRef });
+      await sink.emit(("discarded" in finalization ? finalization.result : await readAiAskCommandTerminalResult(command.commandId)) as StreamEvent);
+      return;
+    }
 
     let selectedModel: NonNullable<Awaited<ReturnType<typeof selectActiveAiGatewayModel>>> | null;
     try {
@@ -211,6 +223,8 @@ async function streamAnswer({
       userMessageId: saved.userMessage.id,
       webSearchUsageContext: { userId: session.userId, conversationId: saved.conversationId, userMessageId: saved.userMessage.id, tripProjectId: tripProjectId ?? null },
       abortSignal,
+      planningExecutionRef: planningMode.executionRef,
+      pendingProposal: planningMode.proposal,
     });
     const renderedSourceBundle = dependencies.buildSourceBundlePromptSection
       ? { section: dependencies.buildSourceBundlePromptSection(sourceBundle), tripContext: { version: 1 as const, aggregateVersion: null, included: [], excluded: [], conflicts: [], serialization: "{}", promptDigest: "0".repeat(64) }, promptUsage: { tripProjectFactIndexes: [], chatFactIndexes: [], knowledgeCardIds: [], webRanks: [], generalReasoningUsed: false, sourceHandles: [] } }
@@ -218,12 +232,15 @@ async function streamAnswer({
     const contextSection = renderedSourceBundle.section;
     const gatewayMessages = buildAiAskMessages({ question, history: saved.history, contextSection });
     const finalGatewayMessages = imageDataUrl ? attachImageToFinalUserMessage(gatewayMessages, imageDataUrl) : gatewayMessages;
+    const bufferedDeltas: string[] = [];
+    const protectDeltas = planningMode.executionRef.mode !== "unscoped_answer";
     const gatewayResult = await streamInitialAiAskAnswer({
       model: selectedModel.gatewayModelName,
       messages: finalGatewayMessages,
       abortSignal,
       onDelta: async (content) => {
-        await sink.emit({ type: "delta", content });
+        if (protectDeltas) bufferedDeltas.push(content);
+        else await sink.emit({ type: "delta", content });
       },
     });
 
@@ -301,7 +318,8 @@ async function streamAnswer({
     const savedTurn = saved;
     const assistantContent = ensureAiAskFreshnessWarning(gatewayResult.content, sourceBundle);
     if (assistantContent.appendedWarning && !assistantContent.replacedUnsafeContent) {
-      await sink.emit({ type: "delta", content: assistantContent.appendedWarning });
+      if (protectDeltas) bufferedDeltas.push(assistantContent.appendedWarning);
+      else await sink.emit({ type: "delta", content: assistantContent.appendedWarning });
     }
     const finalization = await finalizeAiAskCommand(command.commandId, async (transaction, fencedCommand) => {
         const [assistantMessage] = await transaction
@@ -361,14 +379,15 @@ async function streamAnswer({
         });
         const completed = { id: assistantMessage.id, content: assistantContent.content, provenance };
         return { assistantMessageId: assistantMessage.id, tripAnswerContextSnapshotId: snapshot.id, result: { type: "done" as const, conversationId: fencedCommand.conversationId, userMessage: savedTurn.userMessage, assistantMessage: completed }, completed };
-      });
+      }, { planningExecutionRef: planningMode.executionRef });
 
     if (!("discarded" in finalization)) {
+          for (const content of bufferedDeltas) await sink.emit({ type: "delta", content });
           await sink.emit(await readAiAskCommandTerminalResult(command.commandId) as StreamEvent);
     } else {
        await sink.emit(finalization.result as StreamEvent);
     }
-    emitAiAskTelemetry(telemetry, correlationId, command.commandId, "success", gatewayResult.latencyMs, gatewayResult.requestMetadata.providerRequestId ?? undefined);
+    emitAiAskTelemetry(telemetry, correlationId, command.commandId, "discarded" in finalization ? "failure" : "success", gatewayResult.latencyMs, gatewayResult.requestMetadata.providerRequestId ?? undefined);
   } catch {
     emitAiAskTelemetry(telemetry, correlationId, command.commandId, "failure", 0);
     console.error("AI Ask stream answer failed", {

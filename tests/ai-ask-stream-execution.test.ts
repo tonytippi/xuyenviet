@@ -3,7 +3,7 @@ import { eq } from "drizzle-orm";
 
 import { createAiAskStreamExecution } from "@xuyenviet/domain";
 import { createAiAskStreamExecutionPort, setAiAskStreamTestDependencies } from "../packages/database/src/ai-ask-stream-execution";
-import { aiAskCommands, aiGatewayModels, aiUsageEvents, assistantResponseProvenance, assistantRetrievalDecisions, conversations, domainOutbox, messages, planningContextSessions, publicMvpEvaluationResults, tripAnswerContextSnapshots, tripProjects, users } from "../packages/database/src/schema";
+import { aiAskCommands, aiGatewayModels, aiUsageEvents, assistantResponseProvenance, assistantRetrievalDecisions, conversations, domainOutbox, messages, planningContextSessions, publicMvpEvaluationResults, tripAnswerContextSnapshots, tripChangeProposals, tripProjects, users } from "../packages/database/src/schema";
 import { renderSourceBundlePromptSection, type ContextPrioritySourceBundle } from "../packages/database/src/source-bundle";
 
 import { resetTestDatabase, testDb } from "./helpers/db";
@@ -292,6 +292,60 @@ describe("AI Ask stream execution", () => {
     await expect(testDb.select().from(messages).where(eq(messages.role, "assistant"))).resolves.toEqual([]);
     await expect(testDb.select({ status: aiAskCommands.status }).from(aiAskCommands)).resolves.toEqual([{ status: "discarded" }]);
     await expect(testDb.select().from(publicMvpEvaluationResults)).resolves.toEqual([]);
+  });
+
+  test("discards generated output when the pinned planning session changes", async () => {
+    await seedUserAndModel();
+    const [project] = await testDb.insert(tripProjects).values({ userId: "user-1", title: "Huế" }).returning({ id: tripProjects.id });
+    const [conversation] = await testDb.insert(conversations).values({ userId: "user-1", tripProjectId: project.id }).returning({ id: conversations.id });
+    await testDb.update(tripProjects).set({ primaryConversationId: conversation.id }).where(eq(tripProjects.id, project.id));
+    await testDb.insert(planningContextSessions).values({ userId: "user-1", conversationId: conversation.id, revision: 1, payload: { intent: "trip_planning", slots: { origin: "Hà Nội", destination: "Huế", start_date: "2026-09-01", adults: "2" }, missingSlots: [], status: "ready", sourceMessageIds: ["seed"], revision: 1 } });
+    let releaseBundle!: () => void;
+    const bundleReady = new Promise<void>((resolve) => { releaseBundle = resolve; });
+    setAiAskStreamTestDependencies({ assembleContextPrioritySourceBundle: vi.fn().mockImplementation(async () => { await bundleReady; return sourceBundle(); }) });
+    mockGateway();
+
+    const admission = await port().admit({ question: "Kế hoạch hiện tại là gì?", idempotencyKey: "planning_session_race".padEnd(24, "x"), conversationId: conversation.id, tripProjectId: project.id }, principal(), "request-1", new AbortController().signal);
+    if (admission.kind !== "admitted") throw new Error("Expected admitted execution");
+    const iterator = admission.execution[Symbol.asyncIterator]();
+    await expect(iterator.next()).resolves.toMatchObject({ value: { type: "preparing" } });
+    await testDb.update(planningContextSessions).set({ revision: 2, payload: { intent: "trip_planning", slots: { origin: "Hà Nội", destination: "Huế", start_date: "2026-09-02", adults: "2" }, missingSlots: [], status: "ready", sourceMessageIds: ["seed", "changed"], revision: 2 } }).where(eq(planningContextSessions.conversationId, conversation.id));
+    releaseBundle();
+
+    expect((await collectIterator(iterator)).at(-1)).toMatchObject({ type: "error", code: "refresh_required" });
+    await expect(testDb.select().from(messages).where(eq(messages.role, "assistant"))).resolves.toEqual([]);
+    await expect(testDb.select().from(tripAnswerContextSnapshots)).resolves.toEqual([]);
+    await expect(testDb.select({ status: aiUsageEvents.status }).from(aiUsageEvents).where(eq(aiUsageEvents.purpose, "ai_ask_initial_answer"))).resolves.toEqual([]);
+  });
+
+  test.each(["dismissed", "applied", "updated"] as const)("discards generated output when the pinned proposal becomes %s", async (transition) => {
+    await seedUserAndModel();
+    const [project] = await testDb.insert(tripProjects).values({ userId: "user-1", title: "Huế" }).returning({ id: tripProjects.id });
+    const [conversation] = await testDb.insert(conversations).values({ userId: "user-1", tripProjectId: project.id }).returning({ id: conversations.id });
+    await testDb.update(tripProjects).set({ primaryConversationId: conversation.id }).where(eq(tripProjects.id, project.id));
+    await testDb.insert(planningContextSessions).values({ userId: "user-1", conversationId: conversation.id, revision: 1, payload: { intent: "trip_planning", slots: { origin: "Hà Nội", destination: "Huế", start_date: "2026-09-01", adults: "2" }, missingSlots: [], status: "ready", sourceMessageIds: ["seed"], revision: 1 } });
+    const [proposal] = await testDb.insert(tripChangeProposals).values({ userId: "user-1", tripProjectId: project.id, creatorClass: "owner_command", rationale: "Đổi điểm dừng", operations: [{ kind: "create-item" }], expectedAggregateVersion: 1 }).returning({ id: tripChangeProposals.id });
+    let releaseBundle!: () => void;
+    let assembled!: () => void;
+    const bundleReady = new Promise<void>((resolve) => { releaseBundle = resolve; });
+    const bundleAssembled = new Promise<void>((resolve) => { assembled = resolve; });
+    setAiAskStreamTestDependencies({ assembleContextPrioritySourceBundle: vi.fn().mockImplementation(async () => { assembled(); await bundleReady; return sourceBundle(); }) });
+    mockGateway();
+
+    const admission = await port().admit({ question: "Xem đề xuất này", idempotencyKey: `proposal_${transition}_race`.padEnd(24, "x"), conversationId: conversation.id, tripProjectId: project.id }, principal(), "request-1", new AbortController().signal);
+    if (admission.kind !== "admitted") throw new Error("Expected admitted execution");
+    const iterator = admission.execution[Symbol.asyncIterator]();
+    await expect(iterator.next()).resolves.toMatchObject({ value: { type: "preparing" } });
+    await bundleAssembled;
+    const changedAt = new Date();
+    await testDb.update(tripChangeProposals).set(transition === "updated" ? { rationale: "Đổi điểm dừng mới", updatedAt: changedAt } : { status: transition, terminalTimestamp: changedAt, updatedAt: changedAt }).where(eq(tripChangeProposals.id, proposal.id));
+    releaseBundle();
+
+    expect((await collectIterator(iterator)).at(-1)).toMatchObject({ type: "error", code: "refresh_required" });
+    await expect(testDb.select().from(messages).where(eq(messages.role, "assistant"))).resolves.toEqual([]);
+    await expect(testDb.select().from(tripAnswerContextSnapshots)).resolves.toEqual([]);
+    await expect(testDb.select().from(assistantResponseProvenance)).resolves.toEqual([]);
+    await expect(testDb.select({ status: aiUsageEvents.status }).from(aiUsageEvents).where(eq(aiUsageEvents.purpose, "ai_ask_initial_answer"))).resolves.toEqual([]);
   });
 
   test("serializes the port events as byte-compatible NDJSON without correlation in the body", async () => {

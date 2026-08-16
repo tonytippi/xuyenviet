@@ -24,6 +24,16 @@ export const planningSessionSlotNames = [
 export type PlanningSessionIntent = (typeof planningSessionIntents)[number];
 export type PlanningSessionStatus = (typeof planningSessionStatuses)[number];
 export type PlanningSessionSlotName = (typeof planningSessionSlotNames)[number];
+export const planningModes = ["current_plan", "explore_change", "validate_proposal", "unscoped_answer"] as const;
+export type PlanningMode = (typeof planningModes)[number];
+export type PlanningExecutionRef = {
+  mode: PlanningMode;
+  tripProjectId: string | null;
+  tripAggregateVersion: number | null;
+  proposalId: string | null;
+  proposalUpdatedAt: string | null;
+  sessionRevision: number | null;
+};
 export type PlanningContextSession = {
   intent: PlanningSessionIntent;
   slots: Partial<Record<PlanningSessionSlotName, string>>;
