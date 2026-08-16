@@ -45,7 +45,9 @@ const unitTests = [
     "tests/admin-youtube-discovery-contract.test.ts",
     "tests/admin-youtube-discovery-review-ui.test.ts",
     "tests/admin-youtube-discovery-health-ui.test.ts",
-    "tests/admin-youtube-discovery-mission-ui.test.ts",
+  "tests/admin-youtube-discovery-mission-ui.test.ts",
+  "tests/planning-context.test.ts",
+  "tests/drizzle-migration-plan.test.ts",
 ];
 
 export default defineConfig({

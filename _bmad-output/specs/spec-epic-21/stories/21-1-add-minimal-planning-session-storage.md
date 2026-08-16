@@ -2,7 +2,7 @@
 title: 'Add Minimal Planning Session Storage'
 type: 'feature'
 created: '2026-08-16'
-status: 'ready-for-dev'
+status: 'done'
 baseline_revision: '96bf4402dd04b4cef9fafdb1594e1a0beeb6f3d7'
 review_loop_iteration: 0
 followup_review_recommended: false
@@ -90,6 +90,20 @@ The product owner has approved the existing `DATABASE_URL_TEST` validation as su
 ## Auto Run Result
 
 Status: ready-for-dev
+
+### 2026-08-16: Recovery review and verification
+
+Status: done
+
+The permitted recovery reviewed the immediately preceding Story 21.1 work against this contract and repaired three verified validation/storage mismatches: non-plain `slots` values, payloads exceeding the database `8192`-byte limit, and revisions exceeding PostgreSQL `integer` range.
+
+Exact accepted verification command and outcome:
+
+```sh
+pnpm test:unit -- tests/planning-context.test.ts tests/drizzle-migration-plan.test.ts
+```
+
+Passed: 43 test files, 362 tests. Vitest completed in 3.21 seconds. Existing `operational_telemetry` failure log lines were emitted during test setup, but the command exited successfully.
 
 Accepted Story 21.1 integration evidence: `pnpm vitest run --project integration tests/planning-context.integration.test.ts` passed its two focused tests. This direct Vitest command is accepted evidence for this Story until `test:integration` forwards focused file filters correctly.
 

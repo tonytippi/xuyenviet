@@ -1190,6 +1190,28 @@ export const messages = pgTable(
   ],
 );
 
+export const planningContextSessions = pgTable(
+  "planning_context_sessions",
+  {
+    userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    conversationId: text("conversation_id").notNull(),
+    payload: jsonb("payload").$type<unknown>().notNull(),
+    revision: integer("revision").notNull(),
+    updatedAt: timestamp("updated_at", { mode: "date" }).defaultNow().notNull(),
+  },
+  (session) => [
+    primaryKey({ columns: [session.userId, session.conversationId] }),
+    foreignKey({
+      columns: [session.conversationId, session.userId],
+      foreignColumns: [conversations.id, conversations.userId],
+      name: "planning_context_sessions_conversation_owner_fk",
+    }).onDelete("cascade"),
+    index("planning_context_sessions_conversation_idx").on(session.conversationId),
+    check("planning_context_sessions_revision_check", sql`${session.revision} >= 1 and (${session.payload} ->> 'revision')::integer = ${session.revision}`),
+    check("planning_context_sessions_payload_check", sql`jsonb_typeof(${session.payload}) = 'object' and octet_length(${session.payload}::text) <= 8192`),
+  ],
+);
+
 export const messageImageAttachments = pgTable(
   "message_image_attachments",
   {
