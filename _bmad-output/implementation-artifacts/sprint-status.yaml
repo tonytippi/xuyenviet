@@ -473,7 +473,7 @@ development_status:
   # now as eight small sequential stories. stories.yaml owns no status; the
   # orchestrator updates only the currently dispatched story.
   epic-21: in-progress
-  21-1-add-minimal-planning-session-storage: in-progress
+  21-1-add-minimal-planning-session-storage: done
   21-2-collect-multi-turn-clarification: backlog
   21-3-resolve-planning-mode-and-applied-trip-authority: backlog
   21-4-preserve-canonical-route-authority: backlog
