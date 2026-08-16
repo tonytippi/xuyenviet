@@ -68,6 +68,33 @@ describe("AI Ask stream execution", () => {
     expect(telemetry.emit).toHaveBeenCalledWith(expect.objectContaining({ capability: "ai_ask.clarification", resultCode: "failure" }));
   });
 
+  test("records one local failure usage when clarification preflight throws", async () => {
+    await testDb.insert(users).values({ id: "user-1", email: "user-1@example.com" });
+    const [conversation] = await testDb.insert(conversations).values({ userId: "user-1" }).returning({ id: conversations.id });
+    const assemble = vi.fn();
+    setAiAskStreamTestDependencies({ assembleContextPrioritySourceBundle: assemble, prepareOwnedPlanningClarification: vi.fn().mockRejectedValue(new Error("CAS unavailable")) });
+
+    const events = await collect(await port().admit({ question: "Tôi muốn đi Huế", idempotencyKey: "clarification_throw_test".padEnd(24, "x"), conversationId: conversation.id }, principal(), "request-1", new AbortController().signal));
+
+    expect(events.at(-1)).toMatchObject({ type: "error", errorMessage: "Mình chưa thể ghi nhận thông tin chuyến đi. Vui lòng thử lại." });
+    expect(assemble).not.toHaveBeenCalled();
+    await expect(testDb.select({ status: aiUsageEvents.status, errorCode: aiUsageEvents.errorCode }).from(aiUsageEvents)).resolves.toEqual([{ status: "failure", errorCode: "planning_clarification_retry" }]);
+  });
+
+  test.each([
+    { image: undefined, expectedError: "No active streaming AI Ask model is configured." },
+    { image: { fileName: "photo.png", mimeType: "image/png" as const, byteSize: 3, bytes: new Uint8Array([1, 2, 3]) }, expectedError: "Selected AI model does not support streaming image input." },
+  ])("preserves the model configuration error when no compatible model is available", async ({ image, expectedError }) => {
+    await testDb.insert(users).values({ id: "user-1", email: "user-1@example.com" });
+    const [conversation] = await testDb.insert(conversations).values({ userId: "user-1" }).returning({ id: conversations.id });
+    if (image) await testDb.insert(aiGatewayModels).values({ id: "text-only-model", gatewayModelName: "test/text", displayLabel: "Text", purpose: "ai_ask_initial_answer", defaultForPurpose: true, supportsTextInput: true, supportsStreaming: true, supportsImageInput: false });
+
+    const events = await collect(await port().admit({ question: "Thời tiết hôm nay thế nào?", idempotencyKey: `model_configuration_${image ? "image" : "none"}`.padEnd(24, "x"), conversationId: conversation.id, image }, principal(), "request-1", new AbortController().signal));
+
+    expect(events.at(-1)).toMatchObject({ type: "error", errorMessage: expectedError });
+    await expect(testDb.select({ status: aiAskCommands.status }).from(aiAskCommands)).resolves.toEqual([{ status: "failed" }]);
+  });
+
   test("returns the retained refresh terminal when conversation deletion wins clarification finalization", async () => {
     await testDb.insert(users).values({ id: "user-1", email: "user-1@example.com" });
     const [conversation] = await testDb.insert(conversations).values({ userId: "user-1" }).returning({ id: conversations.id });

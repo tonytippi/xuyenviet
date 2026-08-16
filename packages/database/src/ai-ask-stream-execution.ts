@@ -156,7 +156,12 @@ async function streamAnswer({
 
     await sink.emit({ type: "preparing" });
 
-    const clarification = await dependencies.prepareOwnedPlanningClarification(session.userId, saved.conversationId, question, saved.userMessage.id);
+    let clarification: Awaited<ReturnType<typeof prepareOwnedPlanningClarification>>;
+    try {
+      clarification = await dependencies.prepareOwnedPlanningClarification(session.userId, saved.conversationId, question, saved.userMessage.id);
+    } catch {
+      clarification = { kind: "retry" };
+    }
     if (clarification.kind === "question") {
       const finalization = await finalizeAiAskCommand(command.commandId, async (transaction, fencedCommand) => {
         const [assistantMessage] = await transaction.insert(messages).values({ conversationId: fencedCommand.conversationId, userId: fencedCommand.userId, role: "assistant", content: clarification.question }).returning({ id: messages.id });
@@ -179,9 +184,21 @@ async function streamAnswer({
     }
 
     let selectedModel: NonNullable<Awaited<ReturnType<typeof selectActiveAiGatewayModel>>> | null;
-    try { selectedModel = await selectActiveAiGatewayModel({ purpose: aiAskInitialAnswerPurpose, requiredCapabilities: { textInput: true, streaming: true, imageInput: Boolean(imageDataUrl) } }); } catch { selectedModel = null; }
+    try {
+      selectedModel = await selectActiveAiGatewayModel({ purpose: aiAskInitialAnswerPurpose, requiredCapabilities: { textInput: true, streaming: true, imageInput: Boolean(imageDataUrl) } });
+    } catch {
+      const result: StreamEvent = { type: "error", conversationId: saved.conversationId, userMessage: saved.userMessage, errorMessage: "Không thể chuẩn bị luồng trả lời lúc này. Hãy thử lại sau." };
+      await sink.emit(await terminalizeAiAskCommand(command.commandId, "failed", result) as StreamEvent);
+      return;
+    }
     if (!selectedModel) {
-      await sink.emit(await terminalizeAiAskCommand(command.commandId, "failed", { type: "error", conversationId: saved.conversationId, userMessage: saved.userMessage, errorMessage: "Không thể chuẩn bị luồng trả lời lúc này. Hãy thử lại sau." }) as StreamEvent);
+      const result: StreamEvent = {
+        type: "error",
+        conversationId: saved.conversationId,
+        userMessage: saved.userMessage,
+        errorMessage: imageDataUrl ? "Selected AI model does not support streaming image input." : "No active streaming AI Ask model is configured.",
+      };
+      await sink.emit(await terminalizeAiAskCommand(command.commandId, "failed", result) as StreamEvent);
       return;
     }
 

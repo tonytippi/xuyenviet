@@ -107,6 +107,16 @@ deferred:
   - `[medium]` `[patch]` Add focused tests for no-model blocked clarification, partial admission/outbox suppression, retry Usage, deletion fence, stale CAS, and admission-to-preflight race cleanup.
   - `[low]` `[patch]` Preserve concise Vietnamese completion copy through existing composer state without introducing a clarification-specific client state machine.
 
+### 2026-08-16 — Follow-up review pass
+- intent_gap: 0
+- bad_spec: 0
+- patch: 2 (medium 2)
+- defer: 0
+- reject: 14
+- addressed_findings:
+  - `[medium]` `[patch]` Convert an exception thrown by clarification preflight into the existing safe Vietnamese retry terminal, with exactly one local failure Usage record and no source assembly.
+  - `[medium]` `[patch]` Restore the distinct retained AI Ask errors for no streaming model and for an image request with no image-capable streaming model; add stream-level regression coverage.
+
 ## Auto Run Result
 
 Status: done
@@ -126,11 +136,17 @@ Files changed:
 
 Review findings: 8 patches applied (high 2, medium 5, low 1); 1 item deferred; 7 findings rejected as duplicates, overly broad profile expansion, or non-story concerns. Follow-up review recommendation: `true` because this pass applied two high-severity patches (score: 16).
 
+Follow-up review findings: 2 patches applied (high 0, medium 2, low 0); 0 items deferred; 14 findings rejected as unsupported by the exact bounded contract, already guarded by the existing terminal fence, or outside this review-only Story 21.2 repair. Follow-up review recommendation: `true` (score: 6).
+
 Verification:
 - `pnpm test:unit -- tests/planning-context.test.ts tests/ai-ask-commands.test.ts tests/ai-ask-stream-execution.test.ts tests/traveler-ui-foundation.test.ts` -- passed, 43 files and 366 tests.
 - `pnpm exec vitest run --project integration tests/planning-clarification.integration.test.ts` -- passed, 1 file and 2 tests, using approved `DATABASE_URL_TEST`.
 - `pnpm typecheck` -- passed.
 - `pnpm build` -- passed; pre-existing admin `<img>` optimization warnings remain.
+- `pnpm test:unit -- tests/planning-context.test.ts tests/ai-ask-commands.test.ts tests/ai-ask-stream-execution.test.ts tests/traveler-ui-foundation.test.ts` -- passed, 43 files and 366 tests after the follow-up repairs.
+- `pnpm exec vitest run --project integration tests/planning-clarification.integration.test.ts` -- passed, 1 file and 2 tests, using approved `DATABASE_URL_TEST`; preserved as the focused integration evidence because the package wrapper does not forward its file argument.
+- `pnpm typecheck` -- passed after the follow-up repairs.
+- `pnpm build` -- passed after the follow-up repairs; pre-existing admin `<img>` optimization warnings remain.
 
 Residual risks:
 - The deterministic profile intentionally recognizes a narrow set of explicit origin/destination, ISO date, and adult-count forms; broader natural-language extraction is not inferred or delegated to a provider in this story.
