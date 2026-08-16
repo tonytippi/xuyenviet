@@ -475,7 +475,7 @@ development_status:
   epic-21: in-progress
   21-1-add-minimal-planning-session-storage: done
   21-2-collect-multi-turn-clarification: done
-  21-3-resolve-planning-mode-and-applied-trip-authority: backlog
+  21-3-resolve-planning-mode-and-applied-trip-authority: in-progress
   21-4-preserve-canonical-route-authority: backlog
   21-5-retrieve-by-required-need-and-remove-card-count: backlog
   21-6-verify-fresh-facts-and-finalize-through-existing-ai-ask: backlog
