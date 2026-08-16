@@ -112,12 +112,13 @@ export async function assembleContextPrioritySourceBundle({
 }): Promise<ContextPrioritySourceBundle> {
   const dependencies = getSourceBundleDependencies();
   const warnings: SourceBundleWarning[] = [];
+  const resolvedTripProjectId = planningExecutionRef ? planningExecutionRef.tripProjectId ?? undefined : tripProjectId;
   let answerContext: AnswerContextDigest = { version: 1, hasProjectScope: Boolean(tripProjectId), tripProjectId: null, aggregateVersion: null, primaryConversationId: null, anchors: [], planItems: [], constraints: null, currentConversationFacts: [], facts: [], conflicts: [] };
   let knowledge: KnowledgeSearchResult[] = [];
   let approvedKnowledgeCandidateCount = 0;
 
   const [answerContextResult, knowledgeResult] = await Promise.allSettled([
-    withTimeout(dependencies.loadAnswerContext({ userId, conversationId, tripProjectId: planningExecutionRef?.mode === "unscoped_answer" ? undefined : tripProjectId }), answerContextLoadTimeoutMs, "Answer context load timed out."),
+    withTimeout(dependencies.loadAnswerContext({ userId, conversationId, tripProjectId: resolvedTripProjectId }), answerContextLoadTimeoutMs, "Answer context load timed out."),
     withTimeout(dependencies.loadApprovedKnowledgeForAiAsk(question, { cardIds: knowledgeCardIds, evaluationFixtureCardIds }), approvedKnowledgeRetrievalTimeoutMs, "Approved knowledge retrieval timed out."),
   ]);
 
@@ -158,7 +159,7 @@ export async function assembleContextPrioritySourceBundle({
     warnings,
     policySummary: knowledgeResult.status === "fulfilled" ? knowledgeResult.value.policySummary : undefined,
   });
-  const web = await loadTriggeredWebSearch({ userId, conversationId, tripProjectId, userMessageId, webSearchUsageContext, question, retrievalDecision, warnings, abortSignal, dependencies });
+  const web = await loadTriggeredWebSearch({ userId, conversationId, tripProjectId: resolvedTripProjectId, userMessageId, webSearchUsageContext: webSearchUsageContext && { ...webSearchUsageContext, tripProjectId: resolvedTripProjectId ?? null }, question, retrievalDecision, warnings, abortSignal, dependencies });
 
   return {
     planningExecutionRef,

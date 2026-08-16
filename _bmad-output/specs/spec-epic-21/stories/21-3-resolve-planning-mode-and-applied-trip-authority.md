@@ -105,6 +105,16 @@ deferred:
   - `[medium]` `[patch]` Report a discarded finalization as failure telemetry rather than answer success.
   - `[medium]` `[patch]` Remove unused resolver imports and retain the narrow Story 21.2 candidate-routing correction only for generic-request regression prevention.
 
+### 2026-08-16 — Review pass
+- intent_gap: 0
+- bad_spec: 0
+- patch: 2 (high 1, medium 1)
+- defer: 0
+- reject: 13
+- addressed_findings:
+  - `[high]` `[patch]` Propagate only the resolved owner-validated Trip ID to source assembly and web usage, so an invalid selected scope remains fully unscoped downstream.
+  - `[medium]` `[patch]` Exclude expired pending proposals from validation-mode resolution and cover the expired-row regression with focused integration evidence.
+
 ## Design Notes
 
 Mode is a request-scoped, replayable decision rather than a second persisted aggregate. `current_plan` consumes the Trip snapshot already protected by aggregate/item/constraint versions. `explore_change` retains that snapshot only as a committed baseline, while `validate_proposal` pins a still-pending proposal. Every other value remains transient and cannot cross the finalization fence as applied state.
@@ -147,3 +157,24 @@ Verification:
 Residual risks:
 - Full `tests/ai-ask-stream-execution.test.ts` continues to expose nine pre-existing integration-harness failures; focused Story 21.3 cases pass and the defect is recorded above.
 - The package integration wrapper still fails to forward focused file arguments; direct configured Vitest project commands are preserved as Story evidence.
+
+### 2026-08-16 — Follow-up review result
+
+Follow-up review repaired two verified defects: invalid selected Trip scope could reach downstream source/web usage after resolution to `unscoped_answer`, and an expired row retaining `pending` status could be selected for `validate_proposal`. The resolver now supplies only its owner-validated reference to downstream assembly, and proposal selection matches the existing non-expired pending semantics.
+
+Files changed in follow-up:
+- `packages/database/src/ai-ask-stream-execution.ts` -- passes resolved Trip scope into source assembly and usage context.
+- `packages/database/src/source-bundle.ts` -- applies resolved scope consistently to answer-context and web-search usage paths.
+- `packages/database/src/answer-context.ts` -- filters expired proposals from pending validation candidates.
+- `tests/planning-mode.integration.test.ts` -- covers expired pending proposal exclusion.
+
+Review findings: 2 patches applied (high 1, medium 1); 0 items deferred; 13 items rejected as duplicate, non-defect, or verification-only suggestions. Follow-up review recommendation: `true` (high 1, medium 1; score 4).
+
+Verification:
+- `pnpm exec vitest run --project integration tests/planning-mode.test.ts` -- passed: 1 file, 9 tests, using approved `DATABASE_URL_TEST`.
+- `pnpm exec vitest run --project integration tests/planning-mode.integration.test.ts` -- passed: 1 file, 4 tests, using approved `DATABASE_URL_TEST`.
+- `pnpm exec vitest run --project integration tests/ai-ask-stream-execution.test.ts -t "pinned proposal becomes"` -- passed: 1 file, 3 tests, 25 skipped, using approved `DATABASE_URL_TEST`.
+- `pnpm typecheck` -- passed across root, web, admin, API, worker-domain, and worker.
+- `git diff --check` -- passed.
+
+Residual risks remain unchanged: the package integration wrapper does not forward focused file arguments, and the full legacy AI Ask stream harness retains its documented unrelated failures. Focused direct integration evidence remains accepted for Story 21.3.

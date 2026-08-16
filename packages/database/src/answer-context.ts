@@ -96,7 +96,7 @@ export async function resolveOwnedPlanningMode(input: { userId: string; conversa
   // Do not reveal whether an invalid project or proposal exists.
   if (!scope) return resolvePlanningMode({ tripProjectId: null, aggregateVersion: null, sessionRevision: input.sessionRevision, pendingProposals: [], question: input.question });
   const pendingProposals = await db.select({ id: tripChangeProposals.id, updatedAt: tripChangeProposals.updatedAt, rationale: tripChangeProposals.rationale, operations: tripChangeProposals.operations }).from(tripChangeProposals)
-    .where(and(eq(tripChangeProposals.userId, input.userId), eq(tripChangeProposals.tripProjectId, scope.id), eq(tripChangeProposals.status, "pending")))
+    .where(and(eq(tripChangeProposals.userId, input.userId), eq(tripChangeProposals.tripProjectId, scope.id), eq(tripChangeProposals.status, "pending"), sql`(${tripChangeProposals.expiresAt} is null or ${tripChangeProposals.expiresAt} > now())`))
     .orderBy(asc(tripChangeProposals.createdAt), asc(tripChangeProposals.id)).limit(2);
   return resolvePlanningMode({ tripProjectId: scope.id, aggregateVersion: scope.aggregateVersion, sessionRevision: input.sessionRevision, pendingProposals, question: input.question });
 }

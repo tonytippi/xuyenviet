@@ -218,10 +218,10 @@ async function streamAnswer({
     const sourceBundle = await dependencies.assembleContextPrioritySourceBundle({
       userId: session.userId,
       conversationId: saved.conversationId,
-      tripProjectId,
+      tripProjectId: planningMode.executionRef.tripProjectId ?? undefined,
       question,
       userMessageId: saved.userMessage.id,
-      webSearchUsageContext: { userId: session.userId, conversationId: saved.conversationId, userMessageId: saved.userMessage.id, tripProjectId: tripProjectId ?? null },
+      webSearchUsageContext: { userId: session.userId, conversationId: saved.conversationId, userMessageId: saved.userMessage.id, tripProjectId: planningMode.executionRef.tripProjectId },
       abortSignal,
       planningExecutionRef: planningMode.executionRef,
       pendingProposal: planningMode.proposal,

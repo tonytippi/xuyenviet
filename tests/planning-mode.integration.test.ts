@@ -41,4 +41,13 @@ describe("planning mode owner authority", () => {
     await testDb.update(tripProjects).set({ aggregateVersion: 2 }).where(eq(tripProjects.id, trip.id));
     await expect(resolveOwnedPlanningMode({ userId: "owner", conversationId: conversation.id, tripProjectId: trip.id, question: "Kế hoạch hiện tại", sessionRevision: null })).resolves.toMatchObject({ kind: "resolved", executionRef: { mode: "current_plan", proposalId: null, tripAggregateVersion: 2 } });
   });
+
+  test("does not validate an expired pending proposal", async () => {
+    await testDb.insert(users).values({ id: "owner", email: "owner@example.com" });
+    const [trip] = await testDb.insert(tripProjects).values({ userId: "owner", title: "Huế" }).returning({ id: tripProjects.id });
+    const [conversation] = await testDb.insert(conversations).values({ userId: "owner", tripProjectId: trip.id }).returning({ id: conversations.id });
+    await testDb.insert(tripChangeProposals).values({ userId: "owner", tripProjectId: trip.id, creatorClass: "owner_command", rationale: "Đổi điểm dừng", operations: [{ kind: "create-item" }], expectedAggregateVersion: 1, expiresAt: new Date(Date.now() - 1_000) });
+
+    await expect(resolveOwnedPlanningMode({ userId: "owner", conversationId: conversation.id, tripProjectId: trip.id, question: "Xem đề xuất này", sessionRevision: null })).resolves.toMatchObject({ kind: "clarification", question: expect.stringContaining("chưa có") });
+  });
 });
