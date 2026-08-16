@@ -103,6 +103,13 @@ Herdr observes the foreground worker, not build-auto's internal subagents.
 Require the worker to launch all build-auto subagents synchronously, join them,
 and print its final coordinator report only after the skill returns.
 
+The coordinator owns the wait. Keep the same coordinator turn active from the
+initial stage prompt until terminal evidence is verified. Do not return a final
+answer, yield control, pause the run, summarize and stop, or rely on a future
+user message while the current worker or any of its children may still be
+running. Context compaction, a Herdr timeout, and an `idle` observation do not
+end this ownership.
+
 Treat `idle`, `unknown`, timeout, and `agent_not_running` as observations, not
 success or failure by themselves. After each observation, inspect process
 liveness and pane output without writing to the pane or agent. `idle` can mean
@@ -119,19 +126,40 @@ herdr pane process-info --pane <worker-pane-id>
 herdr pane read <worker-pane-id> --source recent-unwrapped --lines 300
 ```
 
-Wait in bounded intervals of at most 120 seconds, then repeat those read-only
-observations. If output reports a subagent, tool call, review layer, command,
-queued internal work, or active build-auto step, keep waiting even when Herdr
-reports `idle`. A changed pane snapshot, changed generated-spec status, new Git
-revision, or explicit active-work message resets the inactivity clock.
+After every observation, run this state-transition wait loop in the same
+coordinator turn:
 
-For a build-auto dispatch, allow a two-hour stage deadline and require 30
-continuous minutes with no changed snapshot, artifact, Git revision, or explicit
-active-work evidence before classifying it as stalled. Reaching that threshold
-still does not authorize prompting the same worker. Re-inspect the generated
-spec, Git state, foreground process, and pane once; if child completion remains
-ambiguous, stop and report an operational stall rather than risk duplicate
-execution.
+1. Read the pane, process info, agent state/explanation, generated spec, and Git
+   state. Check for a complete report or independently verifiable terminal
+   artifacts.
+2. If the agent is `idle` without terminal evidence, wait for a transition while
+   deliberately excluding the already-matched `idle` state:
+
+   ```bash
+   herdr agent wait <unique-name> --until working --until done \
+     --until blocked --until unknown --timeout 120000
+   ```
+
+3. If the agent is `working`, wait for its next lifecycle boundary:
+
+   ```bash
+   herdr agent wait <unique-name> --until idle --until done \
+     --until blocked --until unknown --timeout 120000
+   ```
+
+4. On timeout, do not finish the coordinator turn. Re-run the read-only
+   observations, then repeat from step 2 or 3 according to the new state.
+5. If pane output reports a subagent, tool call, review layer, command, queued
+   internal work, or active build-auto step, keep looping regardless of how many
+   `idle` observations or timeouts occur.
+
+A changed pane snapshot, generated-spec status, Git revision, or explicit
+active-work message confirms progress. Do not impose a fixed stage deadline
+while such evidence continues. Only consider an operational stall after 30
+continuous minutes with no changed snapshot, artifact, Git revision, lifecycle
+transition, or active-work evidence. Re-inspect once at that threshold. If any
+child completion remains ambiguous, keep the coordinator turn alive and keep
+waiting; do not report a stall merely because the parent is `idle`.
 
 Accept completion only when the complete Chief-of-Staff report is visible and
 independently agrees with artifacts, or when the process has exited and the
