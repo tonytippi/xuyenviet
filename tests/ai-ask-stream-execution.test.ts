@@ -3,7 +3,7 @@ import { eq } from "drizzle-orm";
 
 import { createAiAskStreamExecution } from "@xuyenviet/domain";
 import { createAiAskStreamExecutionPort, setAiAskStreamTestDependencies } from "../packages/database/src/ai-ask-stream-execution";
-import { aiAskCommands, aiGatewayModels, aiUsageEvents, assistantResponseProvenance, assistantRetrievalDecisions, conversations, messages, publicMvpEvaluationResults, tripAnswerContextSnapshots, tripProjects, users } from "../packages/database/src/schema";
+import { aiAskCommands, aiGatewayModels, aiUsageEvents, assistantResponseProvenance, assistantRetrievalDecisions, conversations, domainOutbox, messages, planningContextSessions, publicMvpEvaluationResults, tripAnswerContextSnapshots, tripProjects, users } from "../packages/database/src/schema";
 import { renderSourceBundlePromptSection, type ContextPrioritySourceBundle } from "../packages/database/src/source-bundle";
 
 import { resetTestDatabase, testDb } from "./helpers/db";
@@ -11,6 +11,77 @@ import { resetTestDatabase, testDb } from "./helpers/db";
 describe("AI Ask stream execution", () => {
   beforeEach(async () => {
     await resetTestDatabase();
+    setAiAskStreamTestDependencies(undefined);
+  });
+
+  test("terminalizes a profiled incomplete turn before source assembly or provider work", async () => {
+    await testDb.insert(users).values({ id: "user-1", email: "user-1@example.com" });
+    const [conversation] = await testDb.insert(conversations).values({ userId: "user-1" }).returning({ id: conversations.id });
+    const assemble = vi.fn().mockResolvedValue(sourceBundle());
+    setAiAskStreamTestDependencies({ assembleContextPrioritySourceBundle: assemble });
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const events = await collect(await port().admit({ question: "Tôi muốn đi Đà Nẵng", idempotencyKey: "clarification_blocked_test".padEnd(24, "x"), conversationId: conversation.id }, principal(), "request-1", new AbortController().signal));
+
+    expect(events).toEqual([expect.objectContaining({ type: "preparing" }), expect.objectContaining({ type: "done", assistantMessage: { content: "Bạn sẽ xuất phát từ đâu?" } })]);
+    expect(assemble).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(await testDb.select().from(planningContextSessions)).toHaveLength(1);
+    expect(await testDb.select().from(domainOutbox)).toEqual([]);
+    expect(await testDb.select().from(assistantRetrievalDecisions)).toEqual([]);
+    expect(await testDb.select().from(aiUsageEvents).where(eq(aiUsageEvents.purpose, "ai_ask_initial_answer"))).toHaveLength(1);
+  });
+
+  test("revokes admission context extraction when preflight observes a newer collecting session", async () => {
+    await testDb.insert(users).values({ id: "user-1", email: "user-1@example.com" });
+    const [conversation] = await testDb.insert(conversations).values({ userId: "user-1" }).returning({ id: conversations.id });
+    const telemetry = { emit: vi.fn() };
+    setAiAskStreamTestDependencies({ prepareOwnedPlanningClarification: vi.fn().mockResolvedValue({ kind: "question", session: {} as never, question: "Bạn sẽ xuất phát từ đâu?" }) });
+
+    const admission = await createAiAskStreamExecutionPort(telemetry).admit({ question: "Thời tiết hôm nay thế nào?", idempotencyKey: "clarification_admission_race".padEnd(24, "x"), conversationId: conversation.id }, principal(), "request-race", new AbortController().signal);
+    expect(admission.kind).toBe("admitted");
+    await expect(testDb.select().from(domainOutbox)).resolves.toHaveLength(1);
+    if (admission.kind !== "admitted") return;
+    const events = [];
+    for await (const event of admission.execution) events.push(event);
+
+    expect(events.at(-1)).toMatchObject({ type: "done", assistantMessage: { content: "Bạn sẽ xuất phát từ đâu?" } });
+    await expect(testDb.select().from(domainOutbox)).resolves.toEqual([]);
+    expect(telemetry.emit).toHaveBeenCalledWith(expect.objectContaining({ correlationId: "request-race", capability: "ai_ask.clarification", resultCode: "success", durableId: expect.any(String) }));
+  });
+
+  test("records one local failure usage when clarification preflight requests retry", async () => {
+    await testDb.insert(users).values({ id: "user-1", email: "user-1@example.com" });
+    const [conversation] = await testDb.insert(conversations).values({ userId: "user-1" }).returning({ id: conversations.id });
+    const assemble = vi.fn();
+    setAiAskStreamTestDependencies({ assembleContextPrioritySourceBundle: assemble, prepareOwnedPlanningClarification: vi.fn().mockResolvedValue({ kind: "retry" }) });
+
+    const telemetry = { emit: vi.fn() };
+    const admission = await createAiAskStreamExecutionPort(telemetry).admit({ question: "Tôi muốn đi Huế", idempotencyKey: "clarification_retry_test".padEnd(24, "x"), conversationId: conversation.id }, principal(), "request-1", new AbortController().signal);
+    const events = await collect(admission);
+
+    expect(events.at(-1)).toMatchObject({ type: "error", errorMessage: "Mình chưa thể ghi nhận thông tin chuyến đi. Vui lòng thử lại." });
+    expect(assemble).not.toHaveBeenCalled();
+    await expect(testDb.select({ status: aiUsageEvents.status, provider: aiUsageEvents.provider, errorCode: aiUsageEvents.errorCode }).from(aiUsageEvents)).resolves.toEqual([{ status: "failure", provider: "local", errorCode: "planning_clarification_retry" }]);
+    await expect(testDb.select().from(domainOutbox)).resolves.toEqual([]);
+    expect(telemetry.emit).toHaveBeenCalledWith(expect.objectContaining({ capability: "ai_ask.clarification", resultCode: "failure" }));
+  });
+
+  test("returns the retained refresh terminal when conversation deletion wins clarification finalization", async () => {
+    await testDb.insert(users).values({ id: "user-1", email: "user-1@example.com" });
+    const [conversation] = await testDb.insert(conversations).values({ userId: "user-1" }).returning({ id: conversations.id });
+    let release!: () => void;
+    const pending = new Promise<void>((resolve) => { release = resolve; });
+    setAiAskStreamTestDependencies({ prepareOwnedPlanningClarification: vi.fn().mockImplementation(async () => { await pending; return { kind: "question", session: {} as never, question: "Bạn sẽ xuất phát từ đâu?" }; }) });
+    const admission = await port().admit({ question: "Tôi muốn đi Huế", idempotencyKey: "clarification_delete_test".padEnd(24, "x"), conversationId: conversation.id }, principal(), "request-1", new AbortController().signal);
+    if (admission.kind !== "admitted") throw new Error("Expected admitted execution");
+    const iterator = admission.execution[Symbol.asyncIterator]();
+    await expect(iterator.next()).resolves.toMatchObject({ value: { type: "preparing" } });
+    await testDb.delete(conversations).where(eq(conversations.id, conversation.id));
+    release();
+    expect((await collectIterator(iterator)).at(-1)).toMatchObject({ type: "error", code: "refresh_required" });
+    await expect(testDb.select().from(messages).where(eq(messages.role, "assistant"))).resolves.toEqual([]);
   });
 
   test("persists the exact rendered snapshot and links every answer-side record after a completed stream", async () => {

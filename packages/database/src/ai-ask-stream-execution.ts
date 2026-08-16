@@ -12,10 +12,12 @@ import { persistAssistantAnswerProvenance, type AssistantMessageProvenanceItem }
 import { conversations, messages, tripAnswerContextSnapshots } from "./schema";
 import { assembleContextPrioritySourceBundle, renderSourceBundlePromptSection } from "./source-bundle";
 import { writeAiUsageEvent } from "./usage";
+import { prepareOwnedPlanningClarification } from "./planning-context";
 
 type AiAskStreamTestDependencies = {
   assembleContextPrioritySourceBundle: typeof assembleContextPrioritySourceBundle;
   renderSourceBundlePromptSection: typeof renderSourceBundlePromptSection;
+  prepareOwnedPlanningClarification: typeof prepareOwnedPlanningClarification;
   buildSourceBundlePromptSection?: (bundle: Awaited<ReturnType<typeof assembleContextPrioritySourceBundle>>) => string;
 };
 
@@ -27,7 +29,7 @@ export function setAiAskStreamTestDependencies(dependencies: Partial<AiAskStream
 
 function getAiAskStreamDependencies(): AiAskStreamTestDependencies {
   const overrides = (globalThis as typeof globalThis & { [aiAskStreamTestDependenciesKey]?: Partial<AiAskStreamTestDependencies> })[aiAskStreamTestDependenciesKey];
-  return { assembleContextPrioritySourceBundle, renderSourceBundlePromptSection, ...overrides };
+  return { assembleContextPrioritySourceBundle, renderSourceBundlePromptSection, prepareOwnedPlanningClarification, ...overrides };
 }
 
 type StreamEvent =
@@ -56,22 +58,11 @@ export function createAiAskStreamExecutionPort(telemetry: OperationalTelemetrySi
       if (acquisition.kind === "pending_replay") return { kind: "replay", event: { type: "in_progress", conversationId: acquisition.conversationId, userMessage: acquisition.userMessage } };
       if (acquisition.kind === "terminal_replay") return { kind: "replay", event: acquisition.result as StreamEvent };
 
-      let selectedModel: NonNullable<Awaited<ReturnType<typeof selectActiveAiGatewayModel>>> | null;
-      try {
-        selectedModel = await selectActiveAiGatewayModel({ purpose: aiAskInitialAnswerPurpose, requiredCapabilities: { textInput: true, streaming: true, imageInput: Boolean(input.image) } });
-      } catch {
-        const result: StreamEvent = { type: "error", conversationId: acquisition.conversationId, userMessage: acquisition.userMessage, errorMessage: "Không thể chuẩn bị luồng trả lời lúc này. Hãy thử lại sau." };
-        return { kind: "admitted", execution: eventsFromTerminal(acquisition.commandId, "failed", result) };
-      }
-      if (!selectedModel) {
-        const result: StreamEvent = { type: "error", conversationId: acquisition.conversationId, userMessage: acquisition.userMessage, errorMessage: input.image ? "Selected AI model does not support streaming image input." : "No active streaming AI Ask model is configured." };
-        return { kind: "admitted", execution: eventsFromTerminal(acquisition.commandId, "failed", result) };
-      }
       const imageDataUrl = input.image ? `data:${input.image.mimeType};base64,${Buffer.from(input.image.bytes).toString("base64")}` : null;
       // A browser connection only owns its NDJSON relay. Once the command and user
       // message are committed, generation must run to a durable terminal result even
       // when navigation or a reload closes that relay.
-      return { kind: "admitted", execution: streamEvents({ abortSignal: new AbortController().signal, session: { userId: principal.userId, email: "" }, question: acquisition.question, tripProjectId: acquisition.tripProjectId ?? undefined, imageDataUrl, selectedModel, command: acquisition, correlationId, telemetry }) };
+      return { kind: "admitted", execution: streamEvents({ abortSignal: new AbortController().signal, session: { userId: principal.userId, email: "" }, question: acquisition.question, tripProjectId: acquisition.tripProjectId ?? undefined, imageDataUrl, command: acquisition, correlationId, telemetry }) };
     },
   };
 }
@@ -138,7 +129,6 @@ async function streamAnswer({
   question,
   tripProjectId,
   imageDataUrl,
-  selectedModel,
   command,
   correlationId,
   telemetry,
@@ -149,7 +139,6 @@ async function streamAnswer({
   question: string;
   tripProjectId?: string;
   imageDataUrl: string | null;
-  selectedModel: NonNullable<Awaited<ReturnType<typeof selectActiveAiGatewayModel>>>;
   command: Extract<Awaited<ReturnType<typeof acquireAiAskCommand>>, { kind: "admitted" }>;
   correlationId: string;
   telemetry: OperationalTelemetrySink;
@@ -166,6 +155,35 @@ async function streamAnswer({
     saved = { conversationId: command.conversationId, history: command.history, userMessage: command.userMessage };
 
     await sink.emit({ type: "preparing" });
+
+    const clarification = await dependencies.prepareOwnedPlanningClarification(session.userId, saved.conversationId, question, saved.userMessage.id);
+    if (clarification.kind === "question") {
+      const finalization = await finalizeAiAskCommand(command.commandId, async (transaction, fencedCommand) => {
+        const [assistantMessage] = await transaction.insert(messages).values({ conversationId: fencedCommand.conversationId, userId: fencedCommand.userId, role: "assistant", content: clarification.question }).returning({ id: messages.id });
+        await transaction.update(conversations).set({ updatedAt: new Date() }).where(eq(conversations.id, fencedCommand.conversationId));
+        await writeAiUsageEvent(transaction, { initiatedByUserId: fencedCommand.userId, executorSystem: "system-ai-orchestration", tripProjectId: fencedCommand.tripProjectId, conversationId: fencedCommand.conversationId, userMessageId: fencedCommand.userMessageId, assistantMessageId: assistantMessage.id, purpose: aiAskInitialAnswerPurpose, provider: "local", model: "planning-context", promptVersion: "planning-clarification-v1", status: "success", latencyMs: 0 });
+        return { assistantMessageId: assistantMessage.id, result: { type: "done" as const, conversationId: fencedCommand.conversationId, userMessage: saved!.userMessage, assistantMessage: { id: assistantMessage.id, content: clarification.question } } };
+      }, { suppressFollowUps: true, revokeContextExtraction: true });
+      const retained = await readAiAskCommandTerminalResult(command.commandId) as StreamEvent;
+      await sink.emit(retained);
+      emitAiAskTelemetry(telemetry, correlationId, command.commandId, retained.type === "done" ? "success" : "failure", 0, undefined, "ai_ask.clarification");
+      return;
+    }
+    if (clarification.kind === "retry") {
+      const result: StreamEvent = { type: "error", conversationId: saved.conversationId, userMessage: saved.userMessage, errorMessage: "Mình chưa thể ghi nhận thông tin chuyến đi. Vui lòng thử lại." };
+      await writeAiUsageEvent(db, { initiatedByUserId: session.userId, executorSystem: "system-ai-orchestration", tripProjectId: tripProjectId ?? null, conversationId: saved.conversationId, userMessageId: saved.userMessage.id, purpose: aiAskInitialAnswerPurpose, provider: "local", model: "planning-context", promptVersion: "planning-clarification-v1", status: "failure", latencyMs: 0, errorCode: "planning_clarification_retry" });
+      const retained = await terminalizeAiAskCommand(command.commandId, "failed", result) as StreamEvent;
+      await sink.emit(retained);
+      emitAiAskTelemetry(telemetry, correlationId, command.commandId, "failure", 0, undefined, "ai_ask.clarification");
+      return;
+    }
+
+    let selectedModel: NonNullable<Awaited<ReturnType<typeof selectActiveAiGatewayModel>>> | null;
+    try { selectedModel = await selectActiveAiGatewayModel({ purpose: aiAskInitialAnswerPurpose, requiredCapabilities: { textInput: true, streaming: true, imageInput: Boolean(imageDataUrl) } }); } catch { selectedModel = null; }
+    if (!selectedModel) {
+      await sink.emit(await terminalizeAiAskCommand(command.commandId, "failed", { type: "error", conversationId: saved.conversationId, userMessage: saved.userMessage, errorMessage: "Không thể chuẩn bị luồng trả lời lúc này. Hãy thử lại sau." }) as StreamEvent);
+      return;
+    }
 
     const pricingSnapshot = getAiGatewayPricingSnapshot(selectedModel);
     const sourceBundle = await dependencies.assembleContextPrioritySourceBundle({

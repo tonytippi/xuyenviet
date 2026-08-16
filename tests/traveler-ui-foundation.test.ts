@@ -97,6 +97,7 @@ describe("traveler UI foundation", () => {
 
     expect(composer).not.toContain("setStatus(`${result.errorMessage}");
     expect(composer).toContain('return { status: "answer-failed" };');
+    expect(composer).not.toContain('content.endsWith("?")');
     expect(shellLoader).toContain("Thử mở lại");
     expect(shellLoader).toContain("motion-reduce:transition-none");
   });

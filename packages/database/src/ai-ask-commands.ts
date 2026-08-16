@@ -1,11 +1,13 @@
 import { createHash } from "node:crypto";
 
 import { and, asc, eq, inArray } from "drizzle-orm";
+import { parsePlanningContextSession } from "@xuyenviet/contracts";
 
 import { getDb } from "./client";
-import { aiAskCommands, conversations, domainOutbox, messageImageAttachments, messages, tripProjects } from "./schema";
+import { aiAskCommands, conversations, domainOutbox, messageImageAttachments, messages, planningContextSessions, tripProjects } from "./schema";
 import { enqueueAiAskFollowUpInTransaction } from "./domain-outbox";
 import { resolveOwnedPrimaryConversationInTransaction } from "./primary-conversation";
+import { isPlanningClarificationBlocked } from "./planning-context";
 
 const keyPattern = /^[A-Za-z0-9_-]{16,128}$/;
 const commandLifetimeMs = 24 * 60 * 60 * 1000;
@@ -134,7 +136,9 @@ export async function acquireAiAskCommand(input: AcquireAiAskCommandInput): Prom
     if (attachment) await transaction.insert(messageImageAttachments).values({ conversationId: conversation.id, messageId: message.id, userId: input.userId, originalFileName: attachment.fileName, mimeType: attachment.mimeType, byteSize: attachment.byteSize, storageKey: null });
     await transaction.update(conversations).set({ updatedAt: new Date() }).where(eq(conversations.id, conversation.id));
     await transaction.update(aiAskCommands).set({ userMessageId: message.id, updatedAt: new Date() }).where(eq(aiAskCommands.id, inserted.id));
-    await enqueueAiAskFollowUpInTransaction(transaction, {
+    const [planningSession] = await transaction.select({ payload: planningContextSessions.payload }).from(planningContextSessions).where(and(eq(planningContextSessions.userId, input.userId), eq(planningContextSessions.conversationId, conversation.id))).limit(1);
+    const clarificationBlocked = isPlanningClarificationBlocked(planningSession ? parsePlanningContextSession(planningSession.payload) : null, question);
+    if (!clarificationBlocked) await enqueueAiAskFollowUpInTransaction(transaction, {
       eventType: "ai_ask.context_extraction.v1",
       envelope: {
         version: 1,
@@ -230,7 +234,7 @@ export async function readOwnedCompletedAiAskConsumerStatuses(userId: string, as
   return [...statuses.values()].slice(0, acceptedAssistantMessageIds.length * aiAskConsumerStatusCategories.length);
 }
 
-export async function finalizeAiAskCommand<T extends { result: AiAskTerminalResult; assistantMessageId: string; tripAnswerContextSnapshotId?: string | null }>(commandId: string, persist: (transaction: Transaction, command: { userId: string; conversationId: string; tripProjectId: string | null; userMessageId: string }) => Promise<T>): Promise<T | { result: AiAskTerminalResult; discarded: true }> {
+export async function finalizeAiAskCommand<T extends { result: AiAskTerminalResult; assistantMessageId: string; tripAnswerContextSnapshotId?: string | null }>(commandId: string, persist: (transaction: Transaction, command: { userId: string; conversationId: string; tripProjectId: string | null; userMessageId: string }) => Promise<T>, options?: { suppressFollowUps?: boolean; revokeContextExtraction?: boolean }): Promise<T | { result: AiAskTerminalResult; discarded: true }> {
   return getDb().transaction(async (transaction) => {
     const [unlocked] = await transaction.select().from(aiAskCommands).where(eq(aiAskCommands.id, commandId)).limit(1);
     if (!unlocked) throw new Error("AI Ask command was not found.");
@@ -255,6 +259,14 @@ export async function finalizeAiAskCommand<T extends { result: AiAskTerminalResu
       return { result, discarded: true };
     }
 
+    // Admission may have observed an older ready session. Remove its owned
+    // extraction work in the same terminal transaction before a blocked turn
+    // can become visible to workers.
+    if (options?.revokeContextExtraction) await transaction.delete(domainOutbox).where(and(
+      eq(domainOutbox.originatingCommandId, command.id),
+      eq(domainOutbox.userId, command.userId),
+      eq(domainOutbox.eventType, "ai_ask.context_extraction.v1"),
+    ));
     const completed = await persist(transaction, { userId: command.userId, conversationId: conversation.id, tripProjectId: command.tripProjectId, userMessageId: command.userMessageId });
     await transaction.update(aiAskCommands).set({ status: "completed", terminalResult: completed.result, assistantMessageId: completed.assistantMessageId, tripAnswerContextSnapshotId: completed.tripAnswerContextSnapshotId ?? null, terminalAt: new Date(), updatedAt: new Date() }).where(and(eq(aiAskCommands.id, command.id), eq(aiAskCommands.status, "pending")));
     const envelope = {
@@ -267,8 +279,10 @@ export async function finalizeAiAskCommand<T extends { result: AiAskTerminalResu
       ...(command.tripProjectId ? { tripProjectId: command.tripProjectId, tripProjectAggregateVersion: command.tripProjectAggregateVersion! } : {}),
       conversationLifecycleVersion: command.conversationLifecycleVersion!,
     };
-    await enqueueAiAskFollowUpInTransaction(transaction, { eventType: "ai_ask.answer_annotation.v1", envelope });
-    if (command.tripProjectId) await enqueueAiAskFollowUpInTransaction(transaction, { eventType: "ai_ask.trip_proposal_draft.v1", envelope });
+    if (!options?.suppressFollowUps) {
+      await enqueueAiAskFollowUpInTransaction(transaction, { eventType: "ai_ask.answer_annotation.v1", envelope });
+      if (command.tripProjectId) await enqueueAiAskFollowUpInTransaction(transaction, { eventType: "ai_ask.trip_proposal_draft.v1", envelope });
+    }
     return completed;
   });
 }
