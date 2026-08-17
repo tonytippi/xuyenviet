@@ -472,7 +472,7 @@ development_status:
   # durable traveler data exist. Canonical dispatch remains in spec-epic-21,
   # now as eight small sequential stories. stories.yaml owns no status; the
   # orchestrator updates only the currently dispatched story.
-  epic-21: in-progress
+  epic-21: done
   21-1-add-minimal-planning-session-storage: done
   21-2-collect-multi-turn-clarification: done
   21-3-resolve-planning-mode-and-applied-trip-authority: done
@@ -480,7 +480,7 @@ development_status:
   21-5-retrieve-by-required-need-and-remove-card-count: done
   21-6-verify-fresh-facts-and-finalize-through-existing-ai-ask: done
   21-7-convert-eligible-chat-context-into-a-reviewable-trip: done
-  21-8-delete-planning-data-and-verify-the-clean-break: in-progress
+  21-8-delete-planning-data-and-verify-the-clean-break: done
   epic-21-retrospective: optional
 
 action_items:

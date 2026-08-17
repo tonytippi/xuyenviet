@@ -11,7 +11,7 @@ describe("YouTube Discovery owner-port composition", () => {
     expect(adapter).toContain("createKnowledgeDiscoveryQuerySignalPort(),");
     expect(adapter).toContain("createAiAskDiscoveryQuerySignalPort(),");
     expect(adapter).toContain("bindYoutubeDiscoveryExecutionPorts(createYoutubeCaptureEligibilityPort(), undefined, youtubeDataApiKey);");
-    expect(adapter).toContain('process.argv[2] === "discovery" && !youtubeDataApiKey');
+    expect(adapter).not.toContain('process.argv[2] === "discovery" && !youtubeDataApiKey');
     expect(adapter).not.toMatch(/read(?:Knowledge|AiAsk)DiscoveryQuerySignals/);
     const execution = await readFile(resolve(root, "packages/worker-domain/src/features/youtube-discovery/execution.ts"), "utf8");
     expect(execution).not.toMatch(/captureMethodVersion|payloadSchemaVersion|youtube-gemini-windowed/);
