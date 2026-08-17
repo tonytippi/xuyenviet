@@ -5,7 +5,7 @@ created: '2026-08-16'
 status: 'done'
 baseline_revision: '0496ce120b4032508068a2649573925670fd0fdd'
 review_loop_iteration: 0
-followup_review_recommended: false
+followup_review_recommended: true
 context:
   - '_bmad-output/specs/spec-epic-21/story-contracts.md'
   - '_bmad-output/specs/spec-epic-21/SPEC.md'
@@ -82,11 +82,12 @@ deferred: []
 ### 2026-08-17 — Follow-up review pass
 - intent_gap: 0
 - bad_spec: 0
-- patch: 1 (medium 1)
+- patch: 2 (medium 2)
 - defer: 0
 - reject: 19
 - addressed_findings:
   - [medium] [patch] The AI proposal creation validator now accepts set/clear route operations only for an existing transport leg and validates set-path IDs against the static manifest, so the normal proposal path reaches the existing Apply transaction safely.
+  - [medium] [patch] Added direct source-bundle prompt assertions for selected and stale persisted route references.
 
 ## Auto Run Result
 
@@ -106,10 +107,11 @@ Files changed:
 - `packages/database/src/trip-plan-commands.ts` and `packages/database/src/traveler-proposal-commands.ts` — version-fenced set and clear operations through existing proposal Apply.
 - `tests/route-authority.test.ts`, `tests/route-authority.integration.test.ts`, `tests/drizzle-migration-plan.test.ts`, and `vitest.config.ts` — focused resolver, migration, and persistence evidence.
 
-Review findings: follow-up pass applied 1 medium patch; 0 deferred; 19 rejected as noise or outside the exact contract. Follow-up review recommendation: false (patched high: 0, medium: 1, low: 0; score: 3).
+Review findings: follow-up pass applied 2 medium patches; 0 deferred; 19 rejected as noise or outside the exact contract. Follow-up review recommendation: true (patched high: 0, medium: 2, low: 0; score: 6).
 
 Verification:
 - `pnpm test:unit -- tests/route-authority.test.ts tests/drizzle-migration-plan.test.ts` — passed (44 files, 369 tests); the unit wrapper ran its configured project beyond the focused arguments.
+- `pnpm test:unit -- tests/planning-mode.test.ts tests/route-authority.test.ts tests/drizzle-migration-plan.test.ts` — passed (44 files, 369 tests); the unit wrapper ran its configured project beyond the focused arguments.
 - `pnpm exec vitest run --project integration tests/route-authority.integration.test.ts` — passed (1 file, 4 tests).
 - `pnpm typecheck` — passed across all workspace packages.
 - `git diff --check` — passed.

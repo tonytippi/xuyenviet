@@ -59,6 +59,17 @@ describe("planning mode resolver", () => {
     expect(JSON.parse(rendered.tripContext.serialization)).toMatchObject({ planningExecutionRef: proposal.executionRef, pendingProposalId: "proposal-1" });
     expect(rendered.tripContext.included).toEqual(expect.arrayContaining([{ kind: "planning_session", id: "planning_context_session", version: 4 }, { kind: "pending_proposal", id: "proposal-1", version: null }]));
   });
+
+  test("renders selected and stale canonical route authority for transport legs", () => {
+    const routeItem = { id: "leg-1", version: 1, kind: "leg" as const, anchorRole: null, type: "transport" as const, state: "planned" as const, label: "Chặng chính", ordinal: 0, parentItemId: null, canonicalRoutePathId: "hanoi-da-nang-national-1a", transportOriginLabel: "Hà Nội", transportDestinationLabel: "Đà Nẵng" };
+    const currentPlan = { mode: "current_plan", tripProjectId: "trip-1", tripAggregateVersion: 7, proposalId: null, proposalUpdatedAt: null, sessionRevision: 4 } as const;
+    const selected = bundle(currentPlan, null);
+    selected.tripAnswerContext!.planItems = [routeItem];
+    expect(renderSourceBundlePromptSection(selected).section).toContain("route=selected pathId=\"hanoi-da-nang-national-1a\"");
+    const stale = bundle(currentPlan, null);
+    stale.tripAnswerContext!.planItems = [{ ...routeItem, canonicalRoutePathId: "removed-path" }];
+    expect(renderSourceBundlePromptSection(stale).section).toContain("route=stale pathId=\"removed-path\"");
+  });
 });
 
 function bundle(planningExecutionRef: PlanningExecutionRef, pendingProposal: { id: string; rationale: string; operations: unknown } | null): ContextPrioritySourceBundle {
