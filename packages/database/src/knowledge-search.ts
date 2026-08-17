@@ -45,7 +45,7 @@ export type KnowledgeSearchEvidence = {
 
 export type KnowledgeSearchResult = Pick<
   typeof knowledgeCards.$inferSelect,
-  "id" | "type" | "title" | "locationName" | "routeSegment" | "summary" | "practicalDetails" | "tags" | "confidence" | "freshnessSensitive" | "lifecycleState" | "knowledgeState" | "verificationRequirement" | "conditions" | "contentVersion" | "evidenceSetRevision" | "updatedAt" | "createdAt"
+  "id" | "type" | "title" | "locationName" | "normalizedCurrentProvinceName" | "routeSegment" | "summary" | "practicalDetails" | "tags" | "confidence" | "freshnessSensitive" | "lifecycleState" | "knowledgeState" | "verificationRequirement" | "conditions" | "contentVersion" | "evidenceSetRevision" | "updatedAt" | "createdAt"
 > & {
   score: number;
   policy: Exclude<KnowledgeTravelerPolicy, "exclude">;
@@ -303,6 +303,7 @@ async function loadApprovedKnowledgeCandidates(db: Pick<KnowledgeSearchDb, "sele
         type: knowledgeCards.type,
         title: knowledgeCards.title,
         locationName: knowledgeCards.locationName,
+        normalizedCurrentProvinceName: knowledgeCards.normalizedCurrentProvinceName,
         routeSegment: knowledgeCards.routeSegment,
         summary: knowledgeCards.summary,
         practicalDetails: knowledgeCards.practicalDetails,
@@ -508,6 +509,7 @@ function toSearchResult(card: KnowledgeSearchCardSnapshot): Omit<KnowledgeSearch
     type: card.type,
     title: card.title,
     locationName: card.locationName,
+    normalizedCurrentProvinceName: card.normalizedCurrentProvinceName,
     routeSegment: card.routeSegment,
     summary: card.summary,
     practicalDetails: card.practicalDetails,
@@ -531,6 +533,7 @@ function buildSearchableText(card: Omit<KnowledgeSearchResult, "score">) {
     card.title,
     card.type,
     card.locationName,
+    card.normalizedCurrentProvinceName,
     card.routeSegment,
     card.summary,
     ...getPracticalDetailSearchValues(card.practicalDetails),

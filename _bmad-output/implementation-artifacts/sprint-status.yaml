@@ -1,5 +1,5 @@
 # generated: 2026-07-25
-# last_updated: 08-16-2026 15:23 (Epic 21 split into eight minimal clean-break stories.)
+# last_updated: 08-17-2026 (Story 23.1 implementation and review completed.)
 # project: xuyenviet
 # project_key: NOKEY
 # tracking_system: file-system
@@ -33,7 +33,7 @@
 #   - done: Completed
 
 generated: 2026-07-25
-last_updated: 08-16-2026 15:23
+last_updated: 08-17-2026
 project: xuyenviet
 project_key: NOKEY
 tracking_system: file-system
@@ -472,8 +472,8 @@ development_status:
   # Knowledge coverage by current/legacy province reference, bounded AI query
   # suggestions, immediate operator-confirmed runs, and safe progress tracking.
   # Epic 23 reuses the existing candidate review and Knowledge intake handoff.
-  epic-23: backlog
-  23-1-normalize-current-and-legacy-province-references: backlog
+  epic-23: in-progress
+  23-1-normalize-current-and-legacy-province-references: review
   23-2-show-province-coverage-and-propose-vietnamese-queries: backlog
   23-3-run-confirmed-queries-immediately-and-show-progress: backlog
   epic-23-retrospective: optional

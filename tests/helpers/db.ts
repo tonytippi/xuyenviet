@@ -1,7 +1,8 @@
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 
-import { schema, users } from "@/db/schema";
+import { knowledgeProvinceReferences, schema, users } from "@/db/schema";
+import { knowledgeProvinceReferenceEffectiveDate, knowledgeProvinceReferenceFixture, knowledgeProvinceReferenceProvenance, knowledgeProvinceReferenceVersion } from "@/db/knowledge-geography";
 
 import { getTestDatabaseUrl } from "./env-file";
 
@@ -29,6 +30,9 @@ export async function resetTestDatabase() {
   const tableList = tables.map(({ table_name: tableName }) => `"${tableName.replaceAll('"', '""')}"`).join(", ");
 
   await testSql.unsafe(`truncate table ${tableList} restart identity cascade`);
+  const currentUnits = knowledgeProvinceReferenceFixture.filter((reference) => reference.id === reference.currentUnitId);
+  const legacyAliases = knowledgeProvinceReferenceFixture.filter((reference) => reference.id !== reference.currentUnitId);
+  await testDb.insert(knowledgeProvinceReferences).values([...currentUnits, ...legacyAliases].map((reference) => ({ ...reference, version: knowledgeProvinceReferenceVersion, effectiveDate: knowledgeProvinceReferenceEffectiveDate, officialSourceUrl: knowledgeProvinceReferenceProvenance })));
 }
 
 export async function seedTestOperator() {

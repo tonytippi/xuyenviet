@@ -895,6 +895,27 @@ export const knowledgeIngestionJobs = pgTable(
   ],
 );
 
+export const knowledgeProvinceReferences = pgTable(
+  "knowledge_province_references",
+  {
+    id: text("id").primaryKey(),
+    displayName: text("display_name").notNull(),
+    currentUnitId: text("current_unit_id").notNull(),
+    version: text("version").notNull(),
+    effectiveDate: text("effective_date").notNull(),
+    officialSourceUrl: text("official_source_url").notNull(),
+  },
+  (reference) => [
+    uniqueIndex("knowledge_province_references_name_version_idx").on(reference.displayName, reference.version),
+    uniqueIndex("knowledge_province_references_id_display_name_idx").on(reference.id, reference.displayName),
+    foreignKey({ columns: [reference.currentUnitId], foreignColumns: [reference.id], name: "knowledge_province_references_current_unit_fk" }).onDelete("restrict"),
+    check("knowledge_province_references_display_name_check", sql`length(btrim(${reference.displayName})) between 1 and 160`),
+    check("knowledge_province_references_version_check", sql`length(btrim(${reference.version})) between 1 and 80`),
+    check("knowledge_province_references_effective_date_check", sql`${reference.effectiveDate} ~ '^\\d{4}-\\d{2}-\\d{2}$'`),
+    check("knowledge_province_references_source_check", sql`${reference.officialSourceUrl} ~ '^https://'`),
+  ],
+);
+
 // Operational rows only: knowledge_cards remains the sole canonical fact aggregate.
 export const knowledgeIngestionCandidates = pgTable(
   "knowledge_ingestion_candidates",
@@ -908,6 +929,8 @@ export const knowledgeIngestionCandidates = pgTable(
     title: text("title").notNull(),
     summary: text("summary").notNull(),
     locationName: text("location_name"),
+    normalizedCurrentProvinceId: text("normalized_current_province_id"),
+    normalizedCurrentProvinceName: text("normalized_current_province_name"),
     routeSegment: text("route_segment"),
     conditions: jsonb("conditions").$type<string[]>().default([]).notNull(),
     freshnessSensitive: boolean("freshness_sensitive").default(false).notNull(),
@@ -941,6 +964,7 @@ export const knowledgeIngestionCandidates = pgTable(
     index("knowledge_ingestion_candidates_parent_processing_status_idx").on(candidate.ingestionJobId, candidate.processingStatus),
     index("knowledge_ingestion_candidates_capture_span_idx").on(candidate.captureVersionId, candidate.spanStart),
     foreignKey({ columns: [candidate.ingestionJobId, candidate.sourceId, candidate.captureVersionId], foreignColumns: [knowledgeIngestionJobs.id, knowledgeIngestionJobs.sourceId, knowledgeIngestionJobs.captureVersionId], name: "knowledge_ingestion_candidates_parent_capture_fk" }).onDelete("cascade"),
+    foreignKey({ columns: [candidate.normalizedCurrentProvinceId, candidate.normalizedCurrentProvinceName], foreignColumns: [knowledgeProvinceReferences.id, knowledgeProvinceReferences.displayName], name: "knowledge_ingestion_candidates_normalized_province_pair_fk" }).onDelete("restrict"),
     check("knowledge_ingestion_candidates_processing_status_check", sql`${candidate.processingStatus} in ('queued', 'processing', 'completed', 'failed')`),
     check("knowledge_ingestion_candidates_span_check", sql`${candidate.spanStart} >= 0 and ${candidate.spanEnd} > ${candidate.spanStart}`),
     check("knowledge_ingestion_candidates_safe_text_check", sql`length(btrim(${candidate.title})) between 1 and 160 and length(btrim(${candidate.summary})) between 1 and 1200 and length(btrim(${candidate.extractionPromptVersion})) between 1 and 160`),
@@ -951,6 +975,7 @@ export const knowledgeIngestionCandidates = pgTable(
     check("knowledge_ingestion_candidates_claim_shape_check", sql`(${candidate.claimedBy} is null and ${candidate.claimedAt} is null and ${candidate.leaseExpiresAt} is null and ${candidate.fencingToken} is null) or (${candidate.claimedBy} is not null and ${candidate.claimedAt} is not null and ${candidate.leaseExpiresAt} > ${candidate.claimedAt} and ${candidate.fencingToken} ~ '^[a-f0-9]{64}$')`),
     check("knowledge_ingestion_candidates_decision_shape_check", sql`(${candidate.processingStatus} = 'completed' and ${candidate.aiDisposition} is not null and ${candidate.aiDisposition} in ('apply', 'needs_operator', 'discard') and ${candidate.outcomeReasonCode} is not null and ${candidate.outcomeReasonCode} in ('applied', 'verification_required', 'weak_evidence', 'relation_ambiguous', 'missing_context', 'conflict', 'stale_capture', 'policy_rejected') and length(btrim(${candidate.outcomeReasonCode})) > 0) or (${candidate.processingStatus} in ('queued', 'processing', 'failed') and ${candidate.aiDisposition} is null and ${candidate.outcomeReasonCode} is null)`),
     check("knowledge_ingestion_candidates_completion_fence_check", sql`(${candidate.completedContentVersion} is null and ${candidate.completedEvidenceSetRevision} is null) or (${candidate.processingStatus} = 'completed' and ${candidate.knowledgeCardId} is not null and ${candidate.completedContentVersion} >= 1 and ${candidate.completedEvidenceSetRevision} >= 1)`),
+    check("knowledge_ingestion_candidates_normalized_province_shape_check", sql`(${candidate.normalizedCurrentProvinceId} is null and ${candidate.normalizedCurrentProvinceName} is null) or (${candidate.normalizedCurrentProvinceId} is not null and ${candidate.normalizedCurrentProvinceName} is not null and length(btrim(${candidate.normalizedCurrentProvinceName})) between 1 and 160)`),
   ],
 );
 
@@ -1560,6 +1585,8 @@ export const knowledgeCards = pgTable(
     type: text("type").$type<KnowledgeCardType>().notNull(),
     title: text("title").notNull(),
     locationName: text("location_name"),
+    normalizedCurrentProvinceId: text("normalized_current_province_id"),
+    normalizedCurrentProvinceName: text("normalized_current_province_name"),
     routeSegment: text("route_segment"),
     summary: text("summary").notNull(),
     practicalDetails: jsonb("practical_details").$type<Record<string, unknown>>().default({}).notNull(),
@@ -1580,6 +1607,7 @@ export const knowledgeCards = pgTable(
     index("knowledge_cards_confidence_idx").on(card.confidence),
     index("knowledge_cards_created_by_user_id_idx").on(card.createdByUserId),
     index("knowledge_cards_executor_system_updated_at_idx").on(card.executorSystem, card.updatedAt),
+    foreignKey({ columns: [card.normalizedCurrentProvinceId, card.normalizedCurrentProvinceName], foreignColumns: [knowledgeProvinceReferences.id, knowledgeProvinceReferences.displayName], name: "knowledge_cards_normalized_province_pair_fk" }).onDelete("restrict"),
     check("knowledge_cards_lifecycle_state_check", sql`${card.lifecycleState} in ('draft', 'pending_operator', 'active', 'suppressed', 'archived', 'rejected')`),
     check("knowledge_cards_knowledge_state_check", sql`${card.knowledgeState} in ('community_observation', 'community_pattern', 'conditional', 'conflicted')`),
     check("knowledge_cards_verification_requirement_check", sql`${card.verificationRequirement} in ('none', 'operator_required', 'failed')`),
@@ -1596,6 +1624,7 @@ export const knowledgeCards = pgTable(
     check("knowledge_cards_title_length_check", sql`length(btrim(${card.title})) between 1 and 160`),
     check("knowledge_cards_summary_length_check", sql`length(btrim(${card.summary})) between 1 and 1200`),
     check("knowledge_cards_location_length_check", sql`${card.locationName} is null or length(btrim(${card.locationName})) between 1 and 160`),
+    check("knowledge_cards_normalized_province_shape_check", sql`(${card.normalizedCurrentProvinceId} is null and ${card.normalizedCurrentProvinceName} is null) or (${card.normalizedCurrentProvinceId} is not null and ${card.normalizedCurrentProvinceName} is not null and length(btrim(${card.normalizedCurrentProvinceName})) between 1 and 160)`),
     check("knowledge_cards_route_segment_length_check", sql`${card.routeSegment} is null or length(btrim(${card.routeSegment})) between 1 and 160`),
     check("knowledge_cards_details_object_check", sql`jsonb_typeof(${card.practicalDetails}) = 'object'`),
     check("knowledge_cards_tags_array_check", sql`jsonb_typeof(${card.tags}) = 'array'`),

@@ -1,6 +1,6 @@
 import { and, eq, sql } from "drizzle-orm";
 
-import { getDb } from "@xuyenviet/database";
+import { getDb, normalizeKnowledgeProvinceReference } from "@xuyenviet/database";
 import {
   facebookCaptureReviews,
   knowledgeCards,
@@ -46,6 +46,8 @@ type DraftInsert = Pick<
   | "type"
   | "title"
   | "locationName"
+  | "normalizedCurrentProvinceId"
+  | "normalizedCurrentProvinceName"
   | "routeSegment"
   | "summary"
   | "practicalDetails"
@@ -369,11 +371,14 @@ function normalizeDraft(value: unknown, source: typeof sources.$inferSelect, raw
     return { result: null, reason: "unsafe_raw_overlap_or_sensitive_value" };
   }
 
+  const geography = normalizeKnowledgeProvinceReference(locationName);
   return {
     result: {
       type,
       title,
       locationName,
+      normalizedCurrentProvinceId: geography?.currentUnitId ?? null,
+      normalizedCurrentProvinceName: geography?.currentUnitName ?? null,
       routeSegment,
       summary,
       practicalDetails,

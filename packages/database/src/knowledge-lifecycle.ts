@@ -96,6 +96,8 @@ async function transitionCandidateRelation(transaction: LifecycleTransaction, in
       type: candidate.type,
       title: candidate.title,
       locationName: candidate.locationName,
+      normalizedCurrentProvinceId: candidate.normalizedCurrentProvinceId,
+      normalizedCurrentProvinceName: candidate.normalizedCurrentProvinceName,
       routeSegment: candidate.routeSegment,
       summary: candidate.summary,
       practicalDetails: candidate.practicalDetails,
