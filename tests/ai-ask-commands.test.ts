@@ -176,8 +176,8 @@ describe("AI Ask command ledger", () => {
     ]);
 
     await expect(readOwnedCompletedAiAskConsumerStatuses("owner", [finalized.assistantMessageId])).resolves.toEqual([
-      { assistantMessageId: finalized.assistantMessageId, category: "context_extraction", state: "pending" },
       { assistantMessageId: finalized.assistantMessageId, category: "answer_annotation", state: "failed" },
+      { assistantMessageId: finalized.assistantMessageId, category: "context_extraction", state: "pending" },
     ]);
     await expect(readOwnedCompletedAiAskConsumerStatuses("other", [finalized.assistantMessageId])).resolves.toEqual([]);
     const safeProjection = JSON.stringify(await readOwnedCompletedAiAskConsumerStatuses("owner", [finalized.assistantMessageId]));

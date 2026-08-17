@@ -38,7 +38,7 @@ const base = {
 
 async function createCompletedCommandSnapshot() {
   await testDb.insert(users).values({ id: "owner", email: "owner@example.com" });
-  const admitted = await acquireAiAskCommand({ userId: "owner", idempotencyKey: "outbox_completed_snapshot", question: "Đi Huế" });
+  const admitted = await acquireAiAskCommand({ userId: "owner", idempotencyKey: "outbox_completed_snapshot", question: "Cho tôi lời khuyên an toàn." });
   if (admitted.kind !== "admitted") throw new Error("Expected command admission");
   const finalized = await finalizeAiAskCommand(admitted.commandId, async (transaction, command) => {
     const [assistant] = await transaction.insert(messages).values({ conversationId: command.conversationId, userId: command.userId, role: "assistant", content: "Gợi ý Huế đã hoàn tất." }).returning({ id: messages.id, content: messages.content });
@@ -160,7 +160,7 @@ describe("AI Ask domain outbox contract", () => {
 
   test("dedupes an enqueue without resetting the existing event", async () => {
     await testDb.insert(users).values({ id: "owner", email: "owner@example.com" });
-    const admitted = await acquireAiAskCommand({ userId: "owner", idempotencyKey: "outbox_dedupe_key_123", question: "Đi Huế" });
+    const admitted = await acquireAiAskCommand({ userId: "owner", idempotencyKey: "outbox_dedupe_key_123", question: "Cho tôi lời khuyên an toàn." });
     if (admitted.kind !== "admitted") throw new Error("Expected command admission");
     const [existing] = await testDb.select().from(domainOutbox).where(eq(domainOutbox.originatingCommandId, admitted.commandId));
     if (!existing) throw new Error("Expected context outbox event");
@@ -178,8 +178,8 @@ describe("AI Ask domain outbox contract", () => {
   test("claims disjoint due rows through independent PostgreSQL connections", async () => {
     if (!staleWorkerSql || !reclaimWorkerSql) throw new Error("outbox concurrency clients were not initialized");
     await testDb.insert(users).values({ id: "owner", email: "owner@example.com" });
-    const first = await acquireAiAskCommand({ userId: "owner", idempotencyKey: "outbox_disjoint_key_1", question: "Đi Huế" });
-    const second = await acquireAiAskCommand({ userId: "owner", idempotencyKey: "outbox_disjoint_key_2", question: "Đi Đà Nẵng" });
+    const first = await acquireAiAskCommand({ userId: "owner", idempotencyKey: "outbox_disjoint_key_1", question: "Cho tôi lời khuyên an toàn." });
+    const second = await acquireAiAskCommand({ userId: "owner", idempotencyKey: "outbox_disjoint_key_2", question: "Lái xe an toàn cần gì?" });
     if (first.kind !== "admitted" || second.kind !== "admitted") throw new Error("Expected command admissions");
     await testDb.update(domainOutbox).set({ availableAt: new Date("2020-01-01T00:00:00.000Z") });
     const firstDb = drizzle(staleWorkerSql, { schema });
@@ -198,7 +198,7 @@ describe("AI Ask domain outbox contract", () => {
 
   test("releases retryable failures and terminalizes exhausted, invalid failures", async () => {
     await testDb.insert(users).values({ id: "owner", email: "owner@example.com" });
-    const admitted = await acquireAiAskCommand({ userId: "owner", idempotencyKey: "outbox_retry_key_123", question: "Đi Huế" });
+    const admitted = await acquireAiAskCommand({ userId: "owner", idempotencyKey: "outbox_retry_key_123", question: "Cho tôi lời khuyên an toàn." });
     if (admitted.kind !== "admitted") throw new Error("Expected command admission");
     await testDb.update(domainOutbox).set({ availableAt: new Date("2020-01-01T00:00:00.000Z") });
     const now = new Date(Date.now() + 60_000);
@@ -215,7 +215,7 @@ describe("AI Ask domain outbox contract", () => {
     const exhausted = await failDomainOutboxEvent({ id: secondClaim.id, fencingToken: secondClaim.fencingToken, eventVersion: secondClaim.eventVersion, code: "provider_unavailable", retryable: true, now: new Date(secondClaim.leaseExpiresAt.getTime() - 1) });
     expect(exhausted).toMatchObject({ status: "failed", failureCode: "retry_exhausted", lastErrorCode: "retry_exhausted" });
 
-    const admittedInvalid = await acquireAiAskCommand({ userId: "owner", idempotencyKey: "outbox_invalid_key_123", question: "Đi Hội An" });
+    const admittedInvalid = await acquireAiAskCommand({ userId: "owner", idempotencyKey: "outbox_invalid_key_123", question: "Lái xe an toàn cần gì?" });
     if (admittedInvalid.kind !== "admitted") throw new Error("Expected command admission");
     await testDb.update(domainOutbox).set({ availableAt: new Date("2020-01-01T00:00:00.000Z") }).where(eq(domainOutbox.originatingCommandId, admittedInvalid.commandId));
     const [invalidClaim] = await claimDueDomainOutboxEvents({ workerId: "invalid-worker", now: new Date(Date.now() + 60_000) });
@@ -226,7 +226,7 @@ describe("AI Ask domain outbox contract", () => {
 
   test("terminalizes a claimed invalid payload instead of stranding it in processing", async () => {
     await testDb.insert(users).values({ id: "owner", email: "owner@example.com" });
-    const admitted = await acquireAiAskCommand({ userId: "owner", idempotencyKey: "outbox_worker_invalid_key", question: "Đi Huế" });
+    const admitted = await acquireAiAskCommand({ userId: "owner", idempotencyKey: "outbox_worker_invalid_key", question: "Cho tôi lời khuyên an toàn." });
     if (admitted.kind !== "admitted") throw new Error("Expected command admission");
     await testDb.update(domainOutbox).set({ payload: { ...base, commandId: admitted.commandId, userId: "owner", conversationId: admitted.conversationId, userMessageId: admitted.userMessage.id, assistantMessageId: "forbidden" }, availableAt: new Date("2020-01-01T00:00:00.000Z") }).where(eq(domainOutbox.originatingCommandId, admitted.commandId));
 
@@ -246,7 +246,7 @@ describe("AI Ask domain outbox contract", () => {
 
   test("releases an active provider failure atomically after its one failure usage write", async () => {
     await testDb.insert(users).values({ id: "owner", email: "owner@example.com" });
-    const admitted = await acquireAiAskCommand({ userId: "owner", idempotencyKey: "outbox_atomic_retry_key", question: "Đi Huế" });
+    const admitted = await acquireAiAskCommand({ userId: "owner", idempotencyKey: "outbox_atomic_retry_key", question: "Cho tôi lời khuyên an toàn." });
     if (admitted.kind !== "admitted") throw new Error("Expected command admission");
     await testDb.update(domainOutbox).set({ availableAt: new Date("2020-01-01T00:00:00.000Z") });
     const now = new Date(Date.now() + 60_000);
@@ -262,7 +262,7 @@ describe("AI Ask domain outbox contract", () => {
 
   test("safely completes a fenced-out claim with a durable fenced effect", async () => {
     await testDb.insert(users).values({ id: "owner", email: "owner@example.com" });
-    const admitted = await acquireAiAskCommand({ userId: "owner", idempotencyKey: "outbox_fenced_effect_key", question: "Đi Huế" });
+    const admitted = await acquireAiAskCommand({ userId: "owner", idempotencyKey: "outbox_fenced_effect_key", question: "Cho tôi lời khuyên an toàn." });
     if (admitted.kind !== "admitted") throw new Error("Expected command admission");
     await testDb.update(domainOutbox).set({ availableAt: new Date("2020-01-01T00:00:00.000Z") });
     const now = new Date(Date.now() + 60_000);
@@ -279,7 +279,7 @@ describe("AI Ask domain outbox contract", () => {
 
   test("scrubs the retained command and cascades operational rows when a source message is deleted", async () => {
     await testDb.insert(users).values({ id: "owner", email: "owner@example.com" });
-    const admitted = await acquireAiAskCommand({ userId: "owner", idempotencyKey: "outbox_delete_key_123", question: "Đi Huế" });
+    const admitted = await acquireAiAskCommand({ userId: "owner", idempotencyKey: "outbox_delete_key_123", question: "Cho tôi lời khuyên an toàn." });
     if (admitted.kind !== "admitted") throw new Error("Expected command admission");
     await testDb.update(domainOutbox).set({ availableAt: new Date("2020-01-01T00:00:00.000Z") });
     const [claim] = await claimDueDomainOutboxEvents({ workerId: "ack-worker", now: new Date(Date.now() + 60_000) });
@@ -296,7 +296,7 @@ describe("AI Ask domain outbox contract", () => {
     await testDb.insert(users).values({ id: "owner", email: "owner@example.com" });
     const [project] = await testDb.insert(tripProjects).values({ id: "project", userId: "owner", title: "Huế" }).returning({ id: tripProjects.id });
     const [conversation] = await testDb.insert(conversations).values({ id: "conversation", userId: "owner", tripProjectId: project.id }).returning({ id: conversations.id });
-    const admitted = await acquireAiAskCommand({ userId: "owner", idempotencyKey: "outbox_project_delete_key", question: "Đi Huế", tripProjectId: project.id });
+    const admitted = await acquireAiAskCommand({ userId: "owner", idempotencyKey: "outbox_project_delete_key", question: "Cho tôi lời khuyên an toàn.", tripProjectId: project.id });
     if (admitted.kind !== "admitted") throw new Error("Expected command admission");
     const [event] = await testDb.select({ id: domainOutbox.id }).from(domainOutbox).where(eq(domainOutbox.originatingCommandId, admitted.commandId));
     if (!event) throw new Error("Expected context outbox event");
@@ -312,7 +312,7 @@ describe("AI Ask domain outbox contract", () => {
   test("rejects a stale claimant before it can create an effect after lease reclaim", async () => {
     if (!staleWorkerSql || !reclaimWorkerSql) throw new Error("outbox concurrency clients were not initialized");
     await testDb.insert(users).values({ id: "owner", email: "owner@example.com" });
-    const admitted = await acquireAiAskCommand({ userId: "owner", idempotencyKey: "outbox_stale_claim_key", question: "Đi Huế" });
+    const admitted = await acquireAiAskCommand({ userId: "owner", idempotencyKey: "outbox_stale_claim_key", question: "Cho tôi lời khuyên an toàn." });
     if (admitted.kind !== "admitted") throw new Error("Expected command admission");
     const [event] = await testDb.select({ id: domainOutbox.id }).from(domainOutbox).where(eq(domainOutbox.originatingCommandId, admitted.commandId));
     if (!event) throw new Error("Expected context outbox event");
@@ -340,7 +340,7 @@ describe("AI Ask domain outbox contract", () => {
     }, now));
     expect(staleCompletion).toEqual({ completed: false });
     await expect(testDb.select().from(domainOutboxEffects).where(eq(domainOutboxEffects.outboxEventId, event.id))).resolves.toEqual([]);
-    await expect(testDb.select({ content: messages.content }).from(messages).where(eq(messages.id, admitted.userMessage.id))).resolves.toEqual([{ content: "Đi Huế" }]);
+    await expect(testDb.select({ content: messages.content }).from(messages).where(eq(messages.id, admitted.userMessage.id))).resolves.toEqual([{ content: "Cho tôi lời khuyên an toàn." }]);
 
     const activeCompletion = await reclaimDb.transaction((transaction) => completeDomainOutboxClaimInTransaction(transaction, reclaimed, async () => {
       await transaction.insert(domainOutboxEffects).values({ outboxEventId: event.id, effectType: "context_extraction" });
@@ -373,7 +373,7 @@ describe("AI Ask domain outbox contract", () => {
 
   test("does not claim rows when explicit worker configuration is invalid", async () => {
     await testDb.insert(users).values({ id: "owner", email: "owner@example.com" });
-    const admitted = await acquireAiAskCommand({ userId: "owner", idempotencyKey: "outbox_invalid_worker_config", question: "Đi Huế" });
+    const admitted = await acquireAiAskCommand({ userId: "owner", idempotencyKey: "outbox_invalid_worker_config", question: "Cho tôi lời khuyên an toàn." });
     if (admitted.kind !== "admitted") throw new Error("Expected command admission");
     await testDb.update(domainOutbox).set({ availableAt: new Date("2020-01-01T00:00:00.000Z") });
 
@@ -383,7 +383,7 @@ describe("AI Ask domain outbox contract", () => {
 
   test("requires a failure code when terminalizing an event as failed", async () => {
     await testDb.insert(users).values({ id: "owner", email: "owner@example.com" });
-    const admitted = await acquireAiAskCommand({ userId: "owner", idempotencyKey: "outbox_failed_code_required", question: "Đi Huế" });
+    const admitted = await acquireAiAskCommand({ userId: "owner", idempotencyKey: "outbox_failed_code_required", question: "Cho tôi lời khuyên an toàn." });
     if (admitted.kind !== "admitted") throw new Error("Expected command admission");
 
     await expect(testDb.update(domainOutbox).set({ status: "failed", failedAt: new Date() }).where(eq(domainOutbox.originatingCommandId, admitted.commandId))).rejects.toThrow();
@@ -391,7 +391,7 @@ describe("AI Ask domain outbox contract", () => {
 
   test("rejects unknown statuses and any claim field on a non-processing event", async () => {
     await testDb.insert(users).values({ id: "owner", email: "owner@example.com" });
-    const admitted = await acquireAiAskCommand({ userId: "owner", idempotencyKey: "outbox_status_and_claim_checks", question: "Đi Huế" });
+    const admitted = await acquireAiAskCommand({ userId: "owner", idempotencyKey: "outbox_status_and_claim_checks", question: "Cho tôi lời khuyên an toàn." });
     if (admitted.kind !== "admitted") throw new Error("Expected command admission");
 
     await expect(testDb.update(domainOutbox).set({ status: "unknown" as "pending" }).where(eq(domainOutbox.originatingCommandId, admitted.commandId))).rejects.toThrow();
@@ -400,7 +400,7 @@ describe("AI Ask domain outbox contract", () => {
 
   test("writes failure work before a nonretryable claim terminalization", async () => {
     await testDb.insert(users).values({ id: "owner", email: "owner@example.com" });
-    const admitted = await acquireAiAskCommand({ userId: "owner", idempotencyKey: "outbox_atomic_nonretryable_key", question: "Đi Huế" });
+    const admitted = await acquireAiAskCommand({ userId: "owner", idempotencyKey: "outbox_atomic_nonretryable_key", question: "Cho tôi lời khuyên an toàn." });
     if (admitted.kind !== "admitted") throw new Error("Expected command admission");
     await testDb.update(domainOutbox).set({ availableAt: new Date("2020-01-01T00:00:00.000Z") });
     const now = new Date(Date.now() + 60_000);
@@ -416,7 +416,7 @@ describe("AI Ask domain outbox contract", () => {
 
   test("terminalizes an expired exhausted lease with the standard safe failure signal", async () => {
     await testDb.insert(users).values({ id: "owner", email: "owner@example.com" });
-    const admitted = await acquireAiAskCommand({ userId: "owner", idempotencyKey: "outbox_expired_exhausted_signal", question: "Đi Huế" });
+    const admitted = await acquireAiAskCommand({ userId: "owner", idempotencyKey: "outbox_expired_exhausted_signal", question: "Cho tôi lời khuyên an toàn." });
     if (admitted.kind !== "admitted") throw new Error("Expected command admission");
     const now = new Date(Date.now() + 60_000);
     await testDb.update(domainOutbox).set({
@@ -438,7 +438,7 @@ describe("AI Ask domain outbox contract", () => {
 
   test("rejects completion and retry when the event version fence changes", async () => {
     await testDb.insert(users).values({ id: "owner", email: "owner@example.com" });
-    const admitted = await acquireAiAskCommand({ userId: "owner", idempotencyKey: "outbox_event_version_fence", question: "Đi Huế" });
+    const admitted = await acquireAiAskCommand({ userId: "owner", idempotencyKey: "outbox_event_version_fence", question: "Cho tôi lời khuyên an toàn." });
     if (admitted.kind !== "admitted") throw new Error("Expected command admission");
     await testDb.update(domainOutbox).set({ availableAt: new Date("2020-01-01T00:00:00.000Z") });
     const [claim] = await claimDueDomainOutboxEvents({ workerId: "version-fence-worker", now: new Date(Date.now() + 60_000) });
@@ -450,7 +450,7 @@ describe("AI Ask domain outbox contract", () => {
 
   test("uses the database clock after locking, not a stale worker timestamp", async () => {
     await testDb.insert(users).values({ id: "owner", email: "owner@example.com" });
-    const admitted = await acquireAiAskCommand({ userId: "owner", idempotencyKey: "outbox_db_clock_claim", question: "Đi Huế" });
+    const admitted = await acquireAiAskCommand({ userId: "owner", idempotencyKey: "outbox_db_clock_claim", question: "Cho tôi lời khuyên an toàn." });
     if (admitted.kind !== "admitted") throw new Error("Expected command admission");
     await testDb.update(domainOutbox).set({ availableAt: new Date("2020-01-01T00:00:00.000Z") });
     const [claim] = await claimDueDomainOutboxEvents({ workerId: "db-clock-worker", now: new Date() });

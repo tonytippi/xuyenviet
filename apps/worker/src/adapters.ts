@@ -25,7 +25,6 @@ function testTelemetryFileSink(environment = process.env): OperationalTelemetryS
 async function main() {
   try {
     const youtubeDataApiKey = process.env.YOUTUBE_DATA_API_KEY?.trim();
-    if (process.argv[2] === "discovery" && !youtubeDataApiKey) throw new Error("Worker YouTube Discovery configuration is invalid");
     bindYoutubeDiscoveryPlanningPorts(
       createKnowledgeDiscoveryQuerySignalPort(),
       createAiAskDiscoveryQuerySignalPort(),

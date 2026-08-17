@@ -13,7 +13,7 @@ describe.sequential("YouTube Discovery Mission projections", () => {
   test("keeps durable Mission lineage, selects the latest run, deduplicates candidates, combines operator queries, and never writes on projections", async () => {
     await seedTestOperator();
     const policy = await createYoutubeDiscoveryPolicyVersion({ version: 1, isCurrent: true, actor: createSystemAuditActor("system-youtube-discovery") }, testDb);
-    const system = await createYoutubeDiscoveryQueryProposal({ origin: "system", reason: "coverage_gap", priority: 1, queryText: "Da Lat kinh nghiệm cung đường đi ô tô", cadenceMinutes: 15, actor: createSystemAuditActor("system-youtube-discovery"), systemSignal: { reason: "coverage_gap", geography: "Da Lat", taxonomy: "route", priority: 50 } }, testDb);
+    const system = await createYoutubeDiscoveryQueryProposal({ origin: "system", reason: "coverage_gap", priority: 1, queryText: "Da Lat kinh nghiệm hành trình cung đường đi ô tô", cadenceMinutes: 15, actor: createSystemAuditActor("system-youtube-discovery"), systemSignal: { reason: "coverage_gap", geography: "Da Lat", taxonomy: "route", priority: 50 } }, testDb);
     await testDb.update(youtubeDiscoveryQueryProposals).set({ missionActionId: actionId }).where(eq(youtubeDiscoveryQueryProposals.id, system.id));
     const operator = await createYoutubeDiscoveryQueryProposal({ origin: "operator", reason: "operator_request", priority: 20, queryText: "Da Lat lake", cadenceMinutes: 60, actor: createUserAuditActor({ userId: "operator", email: "operator@example.com" }) }, testDb);
     const first = await completeCandidate(policy.id, system.id, "missioncandidate");
@@ -64,7 +64,7 @@ describe.sequential("YouTube Discovery Mission projections", () => {
 });
 
 async function createSystemMissionQuery(missionActionId: string, taxonomy: "route" | "place") {
-  const query = await createYoutubeDiscoveryQueryProposal({ origin: "system", reason: "coverage_gap", priority: 50, queryText: taxonomy === "route" ? "Da Lat kinh nghiệm cung đường đi ô tô" : "Da Lat kinh nghiệm điểm dừng chân", cadenceMinutes: 15, actor: createSystemAuditActor("system-youtube-discovery"), systemSignal: { reason: "coverage_gap", geography: "Da Lat", taxonomy, priority: 50 } }, testDb);
+  const query = await createYoutubeDiscoveryQueryProposal({ origin: "system", reason: "coverage_gap", priority: 50, queryText: taxonomy === "route" ? "Da Lat kinh nghiệm hành trình cung đường đi ô tô" : "Da Lat kinh nghiệm hành trình điểm dừng chân", cadenceMinutes: 15, actor: createSystemAuditActor("system-youtube-discovery"), systemSignal: { reason: "coverage_gap", geography: "Da Lat", taxonomy, priority: 50 } }, testDb);
   await testDb.update(youtubeDiscoveryQueryProposals).set({ missionActionId }).where(eq(youtubeDiscoveryQueryProposals.id, query.id));
   return query;
 }

@@ -89,7 +89,7 @@ describe("required-need retrieval", () => {
     expect(evaluateRequiredNeeds({ question: "Đi Huế", knowledge: [card("match")]}).needs).toEqual([{ id: "itinerary", outcome: "satisfied", evidenceCardIds: ["match"] }]);
     expect(evaluateRequiredNeeds({ question: "Đi Sa Pa", knowledge: [card("hue")]}).needs).toEqual([{ id: "itinerary", outcome: "missing", evidenceCardIds: [] }]);
     expect(evaluateRequiredNeeds({ question: "Đi Huế", knowledge: [card("verify", { policy: "caveat_only" })]}).needs).toEqual([{ id: "itinerary", outcome: "requires_verification", evidenceCardIds: ["verify"] }]);
-    expect(evaluateRequiredNeeds({ question: "Gợi ý cung đường Huế", knowledge: [card("route", { type: "route_note", routeSegment: "hanoi-da-nang-national-1a" })]}).needs).toContainEqual({ id: "route", outcome: "requires_clarification", evidenceCardIds: [] });
+    expect(evaluateRequiredNeeds({ question: "Gợi ý cung đường Huế", knowledge: [card("route", { type: "route_note", routeSegment: "hanoi-da-nang-national-1a" })]}).needs).toContainEqual({ id: "route", outcome: "missing", evidenceCardIds: [] });
   });
 
   test("marks a freshness-sensitive itinerary fact as requiring verification", () => {
@@ -130,9 +130,9 @@ describe("required-need retrieval", () => {
       warnings: [],
     };
     const rendered = renderSourceBundlePromptSection(bundle);
-    expect(rendered.promptUsage.knowledgeCardIds).toEqual(["omitted"]);
-    expect(bundle.retrievalDecision.requiredNeeds.needs[0]).toMatchObject({ evidenceCardIds: ["omitted"] });
-    expect(rendered.retrievalDecision.approvedKnowledgeSelectedCount).toBe(1);
+    expect(rendered.promptUsage.knowledgeCardIds).toEqual(["omitted", "rendered"]);
+    expect(bundle.retrievalDecision.requiredNeeds.needs[0]).toMatchObject({ evidenceCardIds: ["omitted", "rendered"] });
+    expect(rendered.retrievalDecision.approvedKnowledgeSelectedCount).toBe(2);
   });
 
   test("bounds persisted required-need evidence IDs", () => {

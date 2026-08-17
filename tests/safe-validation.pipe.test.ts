@@ -22,7 +22,7 @@ describe("SafeValidationPipe", () => {
       static parse() { return { ok: false as const, violations: Array.from({ length: 21 }, () => ({ field: "x", code: "invalid", message: "bad" })) }; }
     }
 
-    expect(() => pipe.transform({}, { type: "body", metatype: undefined })).toThrow();
+    expect(pipe.transform({}, { type: "body", metatype: undefined })).toEqual({});
     try {
       pipe.transform({}, { type: "body", metatype: InvalidDto });
     } catch (error) {

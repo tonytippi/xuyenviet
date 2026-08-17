@@ -9,7 +9,7 @@ describe("YouTube Discovery eligibility migration", () => {
     expect(migration).toContain("minimum_useful_duration_seconds");
     expect(migration).toContain("allow_foreign_fallback");
     expect(migration).toContain('ADD COLUMN "query_builder_version" integer');
-    expect(migration).toContain('"language_classifier_version", 1, 180');
+    expect(migration).toContain('current_policy."query_builder_version", 1, 180');
     expect(migration).toContain('UPDATE "youtube_discovery_policy_versions" SET "is_current" = false');
     expect(migration).toContain("to_jsonb(OLD) - ARRAY['id', 'is_current', 'created_at']");
     expect(migration).toContain("youtube_discovery_appearances_eligibility_check");

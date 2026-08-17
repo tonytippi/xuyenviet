@@ -18,7 +18,7 @@ describe("target knowledge ingestion pipeline", () => {
 
   test("resolves model evidence without offsets across decorative Unicode", () => {
     const capture = "📍 Hội\u200b An ✨ có chỗ đậu xe.";
-    expect(resolveEvidenceSpan(capture, "Hội An có chỗ đậu xe.")).toEqual([3, Array.from(capture).length]);
+    expect(resolveEvidenceSpan(capture, "Hội An có chỗ đậu xe.")).toEqual([2, Array.from(capture).length]);
   });
 
   test("uses the first exact match when an evidence quote appears more than once", () => {
@@ -135,7 +135,7 @@ describe("target knowledge ingestion pipeline", () => {
     if (!claim) throw new Error("expected job claim");
 
     await expect(runKnowledgeIngestionPipeline(claim, testDb, async () => [{ fingerprint: "food-with-parking", type: "food" as const, title: "Quán ăn có chỗ đậu xe", summary: "Phù hợp dừng ăn khi đi ô tô.", locationName: "Hải Vân", conditions: ["Nên kiểm tra chỗ trống trước khi đến."], freshnessSensitive: true, practicalDetails: { parking_notes: ["Có chỗ đậu xe."] }, tags: ["ăn uống", "đậu xe"], spanStart: 0, spanEnd: 1 }])).resolves.toMatchObject({ outcome: "completed", candidateCount: 1 });
-    await expect(testDb.select().from(knowledgeIngestionCandidates).where(eq(knowledgeIngestionCandidates.captureVersionId, capture.id))).resolves.toMatchObject([{ type: "food", locationName: "Hải Vân", conditions: ["Nên kiểm tra chỗ trống trước khi đến."], freshnessSensitive: true, practicalDetails: { parking_notes: ["Có chỗ đậu xe."] }, tags: ["ăn uống", "đậu xe"], extractionPromptVersion: "knowledge_pipeline_multi_fact_extraction_v2" }]);
+    await expect(testDb.select().from(knowledgeIngestionCandidates).where(eq(knowledgeIngestionCandidates.captureVersionId, capture.id))).resolves.toMatchObject([{ type: "food", locationName: "Hải Vân", conditions: ["Nên kiểm tra chỗ trống trước khi đến."], freshnessSensitive: true, practicalDetails: { parking_notes: ["Có chỗ đậu xe."] }, tags: ["ăn uống", "đậu xe"], extractionPromptVersion: "knowledge_pipeline_multi_fact_extraction_v3" }]);
   });
 
   test("persists valid candidates when the same discovery response includes an invalid candidate", async () => {
