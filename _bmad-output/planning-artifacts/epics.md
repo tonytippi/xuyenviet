@@ -182,10 +182,10 @@ FR-58: Preserve one writer per aggregate command during migration; route each re
 FR-59: Move AI Ask streaming to the versioned API while preserving `preparing`, `delta`, `done`, and `error` NDJSON events, abort behavior, and atomic terminal persistence.
 FR-59A: Accept provider-specific completion variations only when the response is well formed, useful, and free of provider-declared or parsing failure; ambiguous or malformed completion fails safely.
 FR-60: Retire Auth.js, BFF transport, legacy Next.js domain route handlers, server-action writers, and the legacy `/admin` operational surface before public launch.
-FR-66: Generate and refresh governed YouTube Discovery query proposals from coverage gaps, freshness risk, conflicts, and safe aggregate demand, while supporting operator-created queries.
-FR-67: Let authorized operators inspect and manage query origin, reason, priority, text, schedule context, and enabled/paused state.
+FR-66: Generate and refresh governed YouTube Discovery query proposals from coverage gaps, freshness risk, conflicts, safe aggregate demand, and bounded province/topic coverage summaries; bounded AI suggestions require operator confirmation, and operator-created queries remain supported.
+FR-67: Let authorized operators inspect and manage query origin, reason, priority, text, current/latest safe run status, candidate-processing progress, schedule context, and enabled/paused state; accept, edit, or dismiss AI proposals; and create operator queries.
 FR-68: Let an authorized operator globally disable new Discovery planning, search, enrichment, triage, provider calls, and writes without changing Knowledge or manual capture work.
-FR-69: Run bounded scheduled Discovery through documented YouTube Data API capabilities and deduplicate eligible public individual videos into canonical URL candidates without media download/storage.
+FR-69: Run bounded immediate operator-confirmed or scheduled Discovery through documented YouTube Data API capabilities and deduplicate eligible public individual videos into canonical URL candidates without media download/storage.
 FR-70: Retain only bounded safe video/channel metadata and closed derived comment signals; comments never become evidence, capture material, knowledge, retrieval input, or traveler content.
 FR-71: Validate bounded AI metadata triage and combine it with deterministic eligibility/ranking into `skip | defer | consider`; model output or popularity never establishes correctness or publication eligibility.
 FR-72: Provide authorized operators a ranked one-at-a-time candidate review experience using safe metadata and bounded decision factors.
@@ -534,16 +534,16 @@ FR-62: Epic 21 - Capacity-safe prioritization, useful partial guidance, and expl
 FR-63: Epic 21 - Traveler-language supported route coverage.
 FR-64: Epic 21 - Safe bounded behavior for partial, ambiguous, and unsupported routes.
 FR-65: Epic 21 - Recent warnings remain distinct from live route authority.
-FR-66: Epic 18 Stories 18.2-18.3 - Governed system/operator Discovery query proposals; Epic 22 Story 22.1 - natural Vietnamese provider-query construction.
-FR-67: Epic 18 Story 18.3 - Authorized query inspection, management, and scheduling context.
+FR-66: Epic 18 Stories 18.2-18.3 - Governed system/operator Discovery query proposals; Epic 22 Story 22.1 - natural Vietnamese provider-query construction; Epic 23 Stories 23.1-23.2 - current/legacy province coverage and operator-guided bounded AI suggestions.
+FR-67: Epic 18 Story 18.3 - Authorized query inspection, management, and scheduling context; Epic 23 Stories 23.2-23.3 - suggestion decisions, immediate run, and safe progress.
 FR-68: Epic 18 Story 18.2 and Epic 20 Story 20.4 - Global Discovery disablement without changing Knowledge/manual capture.
-FR-69: Epic 18 Story 18.4 - Bounded documented YouTube API discovery and canonical URL deduplication; Epic 22 Stories 22.1-22.2 - Vietnamese-first search and authoritative exact-duration gating.
+FR-69: Epic 18 Story 18.4 - Bounded documented YouTube API discovery and canonical URL deduplication; Epic 22 Stories 22.1-22.2 - Vietnamese-first search and authoritative exact-duration gating; Epic 23 Story 23.3 - immediate operator-confirmed admission through the same Worker path.
 FR-70: Epic 18 Story 18.5 - Bounded safe metadata and non-evidence derived comment signals; Epic 22 Story 22.2 - bounded language/audio-language, duration, views, publish time, and versioned fit metadata.
 FR-71: Epic 19 Stories 19.1-19.2 - Validated AI metadata triage plus deterministic eligibility/ranking; Epic 22 Story 22.2 - language/duration hard gates before downstream AI work.
 FR-72: Epic 19 Story 19.3 - Ranked explainable one-at-a-time candidate review; Epic 22 Story 22.3 - Vietnamese-first review evidence and separated foreign fallback.
 FR-73: Epic 19 Story 19.5 - Protected audited Accept/Defer/Skip and recoverable unknown outcomes.
 FR-74: Epic 19 Story 19.4 - Canonical URL handoff to Knowledge intake without capture ownership.
-FR-75: Epic 20 Stories 20.1-20.3 - Action Required, Knowledge Mission, and Automation Health control tower.
+FR-75: Epic 20 Stories 20.1-20.3 - Action Required, Knowledge Mission, and Automation Health control tower; Epic 23 Stories 23.2-23.3 - province coverage, suggestions, and immediate-run progress.
 FR-76: Epic 20 Story 20.2 - Route verification/conflict work to existing Knowledge ownership.
 FR-77: Epic 18 Story 18.5 - Policy-controlled safe candidate and derived-signal retention.
 FR-78: Epic 18 Stories 18.4-18.5 - Documented APIs and bounded metadata only; no scraping, transcript, media, raw-comment, or automatic-video-analysis path.
@@ -2490,6 +2490,14 @@ Operators receive sufficiently detailed videos useful to XuyenViet's primarily V
 
 **Implementation notes:** This corrective epic extends the shipped Epic 18-20 modules without reopening them. It preserves URL-only Discovery, candidate jobs, Knowledge intake handoff, manual `youtube:capture`, audit, Usage, and Worker lease/fence/retry ownership. The policy applies only to new runs and does not process historical Discovery data. Deliver Stories 22.1, 22.2, and 22.3 before resuming Epic 21.
 
+## Epic 23: Operator-Guided Proactive Knowledge Discovery
+
+Operators can inspect bounded Knowledge coverage by current province or centrally governed city while retaining legacy province-name references, ask AI for useful Vietnamese query suggestions, run a selected or operator-authored query immediately, follow its safe progress, and choose URLs through the existing candidate review flow.
+
+**Requirements covered:** FR-66, FR-67, FR-69, FR-75; AC-34, AC-39.
+
+**Implementation notes:** This corrective epic reuses the shipped Discovery proposal, Worker execution, candidate processing, review, and Knowledge intake handoff. It adds a small versioned current/legacy province reference, a Knowledge-owned bounded coverage summary, operator-guided AI suggestions, idempotent immediate-run admission, and safe progress projection. It does not add a GIS subsystem, autonomous coverage lifecycle, raw-Knowledge AI scan, new service, automatic capture, or publication path. Deliver Stories 23.1-23.3 before Epic 21.
+
 ### Story 18.1: Establish Discovery Ownership, Policy, and Audit Foundation
 
 As an operator,
@@ -3046,6 +3054,77 @@ So that I can judge relevance, reach, and freshness for Vietnamese users without
 **When** focused unit, serial PostgreSQL integration, protected API, admin UI, accessibility, typecheck, lint, and build checks complete
 **Then** metadata formatting, responsive/assistive output, queue isolation, measurement filters, and safe reason projections are covered
 **And** no ownership, provider, credential, URL-only, Knowledge intake, manual capture, Usage, audit, lease, fence, retry, or retention boundary regresses.
+
+## Epic 23: Operator-Guided Proactive Knowledge Discovery
+
+### Story 23.1: Normalize Current And Legacy Province References
+
+As an operator,
+I want Knowledge geography to retain the place name found in a source while resolving certain province-level aliases to the current administrative unit,
+So that coverage reporting remains understandable across Vietnam's administrative changes.
+
+**Acceptance Criteria:**
+
+**Given** the official versioned province reference is installed
+**When** the current province/city list and legacy province-level aliases are loaded
+**Then** every reference has a stable identifier, display name, effective version/date, and deterministic current-unit mapping
+**And** fixtures trace the dataset to an official administrative source rather than model output or free-text inference.
+
+**Given** a Knowledge record contains a current or legacy province-level label that maps unambiguously
+**When** geography normalization runs for a new or eligible existing record
+**Then** the original source label remains available and the canonical current province/city is resolved deterministically
+**And** coverage groups under the current unit while search can match either the current or legacy label.
+
+**Given** a label is ambiguous, more granular than the governed reference, or cannot be mapped safely
+**When** normalization runs
+**Then** it remains unresolved without AI guessing or silent nationwide applicability
+**And** no unrelated Knowledge, evidence, publication, retrieval, or source lifecycle state changes.
+
+### Story 23.2: Show Province Coverage And Propose Vietnamese Queries
+
+As an operator,
+I want to inspect bounded coverage and ask AI for a small set of useful query suggestions,
+So that I can choose what knowledge to supplement without manually discovering every gap.
+
+**Acceptance Criteria:**
+
+**Given** the operator opens Knowledge Mission
+**When** province coverage loads
+**Then** it shows current province/city, related legacy province names, bounded Knowledge counts by topic, and latest update
+**And** search accepts current or legacy names while card count is presented as context rather than an automatic sufficiency verdict.
+
+**Given** the operator selects a bounded geography scope and requests suggestions
+**When** the AI Gateway request is assembled
+**Then** it receives only canonical geography, topic/count/freshness summaries, and safe aggregated demand when available
+**And** it receives no raw Knowledge text, source material, traveler identity, prompt, conversation, answer, or provider payload.
+
+**Given** a valid bounded AI result returns
+**When** suggestions render
+**Then** each contains a current geography, concise knowledge need, reason, and natural Vietnamese YouTube query
+**And** the operator can edit, dismiss, select `Chạy ngay`, or create a query directly; no suggestion starts Discovery automatically.
+
+### Story 23.3: Run Confirmed Queries Immediately And Show Progress
+
+As an operator,
+I want a confirmed or self-authored query to run immediately and expose safe progress,
+So that I do not wait for the next scheduled cadence or guess whether results are ready.
+
+**Acceptance Criteria:**
+
+**Given** Discovery and the query are enabled
+**When** the operator confirms an AI suggestion or selects `Chạy ngay` for an operator-authored query
+**Then** one immediate run is admitted idempotently without waiting for `nextRunAt`
+**And** it uses the existing Worker claim, lease, fence, provider search, appearance, candidate-job, retry, and terminal-state path.
+
+**Given** an immediate run or its candidate jobs are active or terminal
+**When** the operator inspects the query
+**Then** the surface shows `queued`, `running`, `completed`, `failed`, or `cancelled`, bounded timing/counts, and candidate-processing progress
+**And** it exposes only safe error/retry context, never raw provider errors, prompts, responses, payloads, source material, or secrets.
+
+**Given** reviewable candidates become available
+**When** the operator selects `Xem video`
+**Then** the existing Vietnamese-first candidate review opens for URL confirmation and Knowledge intake handoff
+**And** Discovery does not start, schedule, or retry `youtube:capture`, create Knowledge, or authorize publication.
 
 ## Epic 17: Current Operator Runbook
 

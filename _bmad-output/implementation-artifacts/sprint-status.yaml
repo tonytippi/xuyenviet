@@ -468,6 +468,16 @@ development_status:
   22-3-surface-video-evidence-and-prove-vietnamese-first-quality: done
   epic-22-retrospective: optional
 
+  # 2026-08-17: Approved Correct Course proposal adds operator-guided proactive
+  # Knowledge coverage by current/legacy province reference, bounded AI query
+  # suggestions, immediate operator-confirmed runs, and safe progress tracking.
+  # Epic 23 reuses the existing candidate review and Knowledge intake handoff.
+  epic-23: backlog
+  23-1-normalize-current-and-legacy-province-references: backlog
+  23-2-show-province-coverage-and-propose-vietnamese-queries: backlog
+  23-3-run-confirmed-queries-immediately-and-show-progress: backlog
+  epic-23-retrospective: optional
+
   # 2026-08-16: Product Owner approved a clean-break rebaseline before users or
   # durable traveler data exist. Canonical dispatch remains in spec-epic-21,
   # now as eight small sequential stories. stories.yaml owns no status; the

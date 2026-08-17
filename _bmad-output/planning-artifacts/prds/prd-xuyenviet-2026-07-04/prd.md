@@ -2,7 +2,7 @@
 title: XuyenViet AI Travel Information MVP PRD
 status: final
 created: 2026-07-04
-updated: 2026-08-14
+updated: 2026-08-17
 ---
 
 # XuyenViet AI Travel Information MVP PRD
@@ -157,12 +157,13 @@ Internal owner or future small operations team member who collects travel inform
 
 ### UJ-6: Operator Discovers And Reviews A Useful YouTube URL
 
-1. An authorized operator sees a coverage or freshness need and the system or operator creates a scoped Discovery query.
-2. While Discovery is enabled, scheduled work uses documented YouTube metadata APIs to find canonical individual-video URLs and retain only bounded safe operational metadata.
-3. Bounded AI metadata triage and deterministic policy produce a ranked `skip`, `defer`, or `consider` recommendation without treating the video or comments as evidence.
-4. The operator reviews one candidate with its safe context and chooses Accept, Defer, or Skip through an audited command.
-5. Accept submits the canonical URL to the existing Knowledge intake API. Discovery neither creates nor owns the resulting Knowledge source and does not start `youtube:capture` or Gemini video analysis.
-6. The operator uses Action Required, Knowledge Mission, and Automation Health views to address review work, understand coverage progress, inspect safe incidents, and enable or disable Discovery without changing queued Knowledge sources or manual capture work.
+1. An authorized operator opens Knowledge Mission and sees bounded coverage summaries grouped by current province or centrally governed city, with legacy province names retained as searchable references.
+2. The system combines safe Knowledge coverage by geography and topic with safe aggregated traveler demand when available. Bounded AI proposes a knowledge need, concise reason, and natural Vietnamese YouTube query without receiving raw Knowledge, source, or traveler content.
+3. The operator accepts, edits, dismisses, or replaces the suggestion with an operator-authored query. No AI suggestion starts Discovery without this operator decision.
+4. While Discovery is enabled, an accepted or operator-authored query is queued immediately rather than waiting for its next scheduled cadence. The operator can inspect safe run and candidate-processing status until results are ready.
+5. Documented YouTube metadata APIs find canonical individual-video URLs, and bounded AI metadata triage plus deterministic policy produce ranked `skip`, `defer`, or `consider` recommendations without treating video metadata or comments as evidence.
+6. The operator reviews one candidate with its safe context and chooses Accept, Defer, or Skip through an audited command.
+7. Accept submits the canonical URL to the existing Knowledge intake API. Discovery neither creates nor owns the resulting Knowledge source and does not start `youtube:capture` or Gemini video analysis.
 
 ## 8. Functional Requirements
 
@@ -307,10 +308,10 @@ Internal owner or future small operations team member who collects travel inform
 
 ### 8.8 YouTube Discovery
 
-- FR-66: The system shall generate and refresh scoped YouTube Discovery query proposals from knowledge coverage gaps, freshness risk, unresolved conflicts, and safe aggregated traveler-demand signals, and shall support operator-created queries in the same governed workflow. System-generated provider queries shall translate geography, taxonomy, and planning need into natural Vietnamese; raw internal English taxonomy labels shall never be sent unchanged to the provider.
-- FR-67: Authorized operators shall be able to inspect a query's origin, reason, priority, text, schedule context, and enabled or paused state and to create, edit, reprioritize, pause, or resume operator-managed queries.
+- FR-66: The system shall generate and refresh scoped YouTube Discovery query proposals from knowledge coverage gaps, freshness risk, unresolved conflicts, and safe aggregated traveler-demand signals, and shall support operator-created queries in the same governed workflow. It shall also provide operator-guided proposals from bounded Knowledge coverage summaries grouped by current province or centrally governed city and topic. Bounded AI may propose a knowledge need, concise reason, and natural Vietnamese query from those summaries, but shall not receive raw Knowledge, source, or traveler content and shall not start Discovery without operator confirmation. System-generated provider queries shall translate geography, taxonomy, and planning need into natural Vietnamese; raw internal English taxonomy labels shall never be sent unchanged to the provider.
+- FR-67: Authorized operators shall be able to inspect a query's origin, reason, priority, text, current or latest safe run status, candidate-processing progress, schedule context, and enabled or paused state; accept, edit, or dismiss an AI proposal; and create, edit, reprioritize, pause, or resume operator-managed queries.
 - FR-68: An authorized operator shall be able to enable or disable Discovery globally. Disabling stops new Discovery planning, search, enrichment, triage, provider calls, and writes safely; it shall not alter queued Knowledge sources, completed knowledge, or manual `youtube:capture` work.
-- FR-69: While permitted by global and query policy, the system shall run bounded scheduled Vietnamese-first discovery through documented YouTube Data API capabilities and deduplicate eligible individual public videos into canonical URL candidates without downloading or storing video media. Provider region and language parameters are ranking hints, not proof of Vietnamese-language or Vietnamese-user fit.
+- FR-69: While permitted by global and query policy, the system shall run bounded Vietnamese-first discovery through documented YouTube Data API capabilities and deduplicate eligible individual public videos into canonical URL candidates without downloading or storing video media. Operator-confirmed or operator-authored queries shall enqueue an immediate run without waiting for the next scheduled cadence; scheduled recurrence remains a separate governed option. Provider region and language parameters are ranking hints, not proof of Vietnamese-language or Vietnamese-user fit.
 - FR-70: Candidate enrichment shall retain only bounded safe video/channel metadata, exact duration, default metadata/audio language where available, a versioned language-fit result, and closed derived comment signals needed for triage. Comments shall never become evidence, capture material, knowledge cards, retrieval input, or traveler content.
 - FR-71: The system shall apply deterministic language/audience-fit and minimum-useful-duration eligibility before downstream AI metadata triage and primary review, then validate bounded AI triage and combine it with deterministic ranking policy to produce `skip`, `defer`, or `consider` recommendations. A score, popularity signal, or model output shall not override a failed hard gate and shall not establish factual correctness, credibility, evidence, or publication eligibility.
 - FR-72: Authorized operators shall receive a ranked, one-at-a-time Vietnamese-first candidate review experience with safe metadata including channel, duration, view count, publish time, language fit, originating query, and decision reason; a plain-language recommendation; concise factors and penalties; bounded derived signals; and prior safe capture outcome when available. Foreign-language fallback shall be bounded and visibly separated from the primary review pool, while too-short and primary-language-ineligible candidates shall not enter Action Required or primary review.
@@ -516,7 +517,7 @@ The supported route-planning boundary shall be communicated to travelers. Knowle
 - AC-31: Under evidence or response-capacity pressure, consequential required needs are prioritized, every uncovered required need is surfaced, and unrelated evidence is never used to make the answer appear complete.
 - AC-32: Recent route or safety warnings are distinguished from live closure, traffic, navigation, or guaranteed-safety authority, including when fresh verification fails.
 - AC-33: Ordinary-chat deletion does not mutate an unrelated Trip plan; primary-conversation deletion cannot orphan a live Trip; Trip deletion invalidates reconstructable derived planning and retrieval context; retained non-content audit cannot reconstruct deleted traveler content.
-- AC-34: An authorized operator can create or manage a scoped query proposal and, while Discovery is enabled, a scheduled run can produce deduplicated canonical individual-video candidates using documented YouTube metadata APIs only.
+- AC-34: From a bounded Knowledge coverage summary grouped by current province or centrally governed city, the system can produce an AI-assisted proposal with a concise reason and natural Vietnamese query. An authorized operator can accept, edit, dismiss, or replace it with an operator-authored query; while Discovery is enabled, confirmation queues an immediate run, exposes safe run and candidate-processing status, and produces deduplicated canonical individual-video candidates using documented YouTube metadata APIs only.
 - AC-35: Disabling Discovery safely prevents new Discovery provider calls and writes without changing completed knowledge, queued Knowledge sources, or manual `youtube:capture` work; re-enabling resumes only newly eligible Discovery work.
 - AC-36: Candidate enrichment and triage persist only bounded safe metadata and derived signal codes; raw comments, transcripts, media, prompts/responses, provider payloads, source material, evidence, and traveler content do not become Discovery input/output records or traveler knowledge.
 - AC-37: A candidate receives a validated deterministic recommendation, and an authorized operator can review it and Accept, Defer, or Skip it with attributable audit history and safe recovery for failed or unknown outcomes.

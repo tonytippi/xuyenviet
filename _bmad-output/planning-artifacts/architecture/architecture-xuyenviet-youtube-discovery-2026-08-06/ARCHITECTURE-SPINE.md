@@ -7,7 +7,7 @@ paradigm: PostgreSQL-backed modular workflow with worker-owned scheduled executi
 scope: URL-only YouTube discovery, triage, and operator review
 status: final
 created: 2026-08-06
-updated: 2026-08-14
+updated: 2026-08-17
 binds: [youtube-discovery]
 sources:
   - _bmad-output/planning-artifacts/prds/prd-xuyenviet-2026-07-04/prd.md
@@ -48,19 +48,20 @@ PostgreSQL-backed modular workflow with Worker-owned scheduled execution. Discov
 - **Prevents:** duplicate review queues and incompatible candidate histories for the same video.
 - **Rule:** Discovery and Knowledge intake share one exported canonicalizer for documented HTTPS `youtube.com`/`youtu.be` individual-video forms; it validates the video ID and returns a normalized `https://www.youtube.com/watch?v=<video-id>` URL. A Discovery candidate is unique by that video ID; query/run appearances reference that candidate. Immutable triage recommendation is `skip | defer | consider`; mutable operator state is `pending | accepted | deferred | skipped`. `accepted` means the existing Knowledge intake API has already returned `submitted` or `duplicate` for the candidate URL.
 
-### AD-3 - Worker Owns Scheduled Discovery Execution [AMENDED 2026-08-13]
+### AD-3 - Worker Owns Immediate And Scheduled Discovery Execution [AMENDED 2026-08-17]
 
-- **Binds:** query schedules, run creation, provider calls, retries, run state.
+- **Binds:** operator-confirmed immediate admission, query schedules, run creation, provider calls, retries, run state, safe progress projection.
 - **Prevents:** request-serving execution, platform-specific cron ownership, overlapping runs, and a hidden capture scheduler.
-- **Rule:** Discovery is a registered Worker adapter with explicit readiness and telemetry. Its separately leased planning stage idempotently creates/refreshes system proposals; its due-query stage creates and claims runs only while the global switch is enabled. A due-query run searches, persists canonical candidates and immutable appearances, atomically enqueues one candidate-processing job per appearance, then completes. Candidate jobs independently perform enrichment, metadata triage, deterministic eligibility, and recommendation. Before every provider call, Discovery write, and retry/requeue write, the Worker compares current enablement under the matching active lease. A revoked run or job becomes `cancelled` with a safe terminal audit outcome and creates no further work. API/admin commands create or change policy/query state and read projections; they never execute Discovery stages. Provider-stage failures use bounded exponential backoff and safe terminal error codes at the candidate-job unit, so one URL cannot block a query or unrelated URL. Later scheduled query runs remain independent.
+- **Rule:** Discovery is a registered Worker adapter with explicit readiness and telemetry. Its separately leased planning stage idempotently creates/refreshes system proposals. An operator-confirmed or operator-authored query command may idempotently admit one immediate queued run while the global switch and query policy permit it; scheduled admission continues to create due runs at the configured cadence. Both triggers use the same Worker-owned claim, lease, fence, provider, appearance, candidate-job, retry, and terminal-state path. A run searches, persists canonical candidates and immutable appearances, atomically enqueues one candidate-processing job per appearance, then completes. Candidate jobs independently perform enrichment, metadata triage, deterministic eligibility, and recommendation. Before every provider call, Discovery write, and retry/requeue write, the Worker compares current enablement under the matching active lease. A revoked run or job becomes `cancelled` with a safe terminal audit outcome and creates no further work. API/admin commands enqueue or change state and read safe projections; they never execute provider stages. Safe projections expose `queued | running | completed | failed | cancelled`, bounded timing/counts, and candidate-processing progress without raw provider errors or payloads. Provider-stage failures use bounded exponential backoff and safe terminal error codes at the candidate-job unit, so one URL cannot block a query or unrelated URL. Later immediate or scheduled runs remain independent.
 
-### AD-4 - One Query Proposal Aggregate Serves System And Operator Origins [AMENDED 2026-08-14]
+### AD-4 - One Query Proposal Aggregate Serves System And Operator Origins [AMENDED 2026-08-17]
 
 - **Binds:** automated planning signals, operator-managed queries, schedules, priority, query lifecycle.
 - **Prevents:** separate scheduling and ranking contracts for semantically equivalent queries.
 - **Rule:** One `youtube_discovery_query_proposal` aggregate records `origin = system | operator`, reason, priority, query text, enabled/paused state, cadence, and the applicable query-builder version. System proposals derive only from coverage gaps, freshness risk, unresolved conflicts, and aggregated anonymized AI Ask demand. Global enablement controls all new Discovery planning and runs; per-query state controls an individual proposal.
 - **Rule:** Normalized target identity and digests remain language-neutral, but a versioned builder translates system-owned geography, taxonomy, and planning need into natural Vietnamese provider queries. Mappings use Vietnamese road-user language, for example `route` to `kinh nghiệm cung đường ô tô`, `cost_note` to `chi phí hành trình`, and `hotel_area` to `khu vực lưu trú khách sạn`; unchanged internal English taxonomy must never reach the provider. Builder-version changes regenerate system proposals idempotently and never overwrite operator-authored query text.
 - **Rule:** A due query may issue bounded YouTube `medium` and `long` duration search tranches. Their results merge deterministically through the existing canonical candidate identity while each appearance retains originating query/tranche provenance. Search filters reduce waste but never replace authoritative exact-duration eligibility after enrichment.
+- **Rule:** Knowledge owns a bounded coverage-summary port grouped by canonical current province or centrally governed city, topic, count, and freshness; AI Ask may add only safe aggregated demand. A versioned reference dataset maps legacy province-level labels to the current administrative unit while preserving the label found in the source. Deterministic mappings support grouping and search aliases; ambiguous labels remain unresolved and are never inferred by AI. Discovery may submit only this bounded aggregate to AI Gateway to propose a concise knowledge need, reason, and natural Vietnamese query. The proposal remains inert until an operator accepts or edits it; an operator may always author a query directly.
 
 ### AD-5 - Vietnamese-First Eligibility Precedes AI Metadata Triage [AMENDED 2026-08-14]
 
@@ -163,6 +164,7 @@ apps/admin/
 | Capability / Area | Lives in | Governed by |
 | --- | --- | --- |
 | System/operator query proposals and Vietnamese provider queries | Discovery domain, PostgreSQL | AD-3, AD-4, AD-7 |
+| Current/legacy province reference and bounded coverage summary | Knowledge domain and PostgreSQL | AD-4; inherited geographic-authority rules |
 | Search and appearance enqueue | Worker and Discovery domain | AD-2, AD-3, AD-6, AD-9 |
 | Candidate enrichment, language/duration eligibility, triage, ranking | Worker and Discovery domain | AD-3, AD-5, AD-6, AD-9 |
 | Metadata AI triage and ranking | Discovery domain, AI Gateway, Usage | AD-5, AD-6 |
@@ -173,7 +175,7 @@ apps/admin/
 ## Deferred
 
 - Initial score weights, score bands, cadence defaults, bounded worker concurrency/retry settings, review-age threshold, candidate retention default, and derived-comment-signal TTL: policy values, not architectural constants; establish through operations tuning.
-- Exact coverage/freshness/conflict/demand read-model fields and aggregate latency: define in the upstream Knowledge/AI Ask integration story without persisting traveler content in Discovery.
+- Coverage beyond current province/city and topic, including route segment, season, automatic sufficiency thresholds, and an autonomous coverage-need lifecycle, remains deferred. Epic 23 owns only the bounded coverage summary, operator-guided AI proposal, and immediate-run flow without persisting traveler content in Discovery.
 - Candidate UI interaction design and control-tower layout: UX artifact owns presentation while AD-7 preserves the API/ownership boundary.
 - Hard Discovery AI-cost budgets, quota reservations, projected capacity, and budget alerts: deferred until Discovery usage justifies enforcement beyond bounded concurrency and provider rate-limit handling.
 - Operator-authored candidate, channel, and query blocklists remain deferred. The adopted Vietnamese-first language/duration eligibility policy is a separate deterministic gate and is not deferred.

@@ -3,7 +3,7 @@ name: XuyenViet YouTube Discovery Control Tower
 status: final
 project: xuyenviet
 created: 2026-08-06
-updated: 2026-08-14
+updated: 2026-08-17
 sources:
   - ../ux-xuyenviet-2026-07-05/DESIGN.md
   - ../ux-xuyenviet-2026-07-05/EXPERIENCE.md
@@ -25,9 +25,9 @@ Only authorized operators access this surface. Discovery produces and manages UR
 | --- | --- | --- |
 | Discovery action queue | Admin navigation / Discovery entry | Default worklist for candidates needing review, stalled high-priority Mission needs, and persistent Discovery failures. |
 | Candidate review workspace | Candidate item / Mission candidate list | Vietnamese-first ranked queue plus selected inspector for one-at-a-time Accept, defer, or skip decisions. A bounded foreign fallback section remains separate. |
-| Knowledge Mission | Discovery navigation / action-queue drill-in | Inspect four focused views: Coverage needs, Queries, Candidates, and Discovery funnel. |
-| Coverage need detail | Mission coverage view / action queue | Drill from a corridor/location/route/taxonomy/season gap to linked query proposals and ranked candidates. |
-| Query proposal detail | Mission query list | Inspect reason/history and create, edit, reprioritize, pause, or resume a simple operator query. |
+| Knowledge Mission | Discovery navigation / action-queue drill-in | Inspect coverage by current province/city with legacy-name references, ask AI for bounded query suggestions, and use the existing Queries, Candidates, and Discovery funnel views. |
+| Coverage need detail | Mission coverage view / action queue | Inspect topic counts and freshness under the current administrative unit, find contributions by current or legacy name, and drill into linked proposals and candidates. Card count is context, not an automatic sufficiency verdict. |
+| Query proposal detail | Mission query list | Inspect reason/history; accept, edit, or dismiss an AI suggestion; create an operator query; run it immediately; and inspect safe current/latest run progress. |
 | Automation Health | Discovery navigation / incident drill-in | See schedule/enabled state, throughput/review backlog, incidents, usage telemetry, data freshness, affected safe records, and new-policy quality distributions. |
 | Discovery settings | Health header / authorized settings entry | Immediate global Discovery switch and policy-projected operational context. Complex policy configuration may remain a later desktop surface. |
 | Knowledge intake handoff feedback | Candidate inspector after Accept | Confirm the existing Knowledge intake result and direct the operator to manual capture without creating a second intake UI. |
@@ -65,6 +65,9 @@ Operator copy is Vietnamese-first, direct, and operationally precise without bec
 | Defer | Candidate inspector | Persists `deferred`, removes it from the immediate review queue, and keeps safe priority/history for later review. |
 | Skip | Candidate inspector | Persists `skipped` after a concise immediate action. No confirmation dialog in the initial slice. It removes the candidate from review and retains only safe audit/dedupe state under retention policy. |
 | Query proposal list | Knowledge Mission | One combined list for `Hệ thống đề xuất` and `Operator tạo`. Supports simple create, text edit, priority change, and pause/resume. It does not provide advanced rule-builder controls. |
+| Province coverage table | Knowledge Mission | Shows current province/city, related legacy province names, bounded Knowledge counts by topic, and latest update. Search matches current and legacy names. Operator selects a bounded scope before asking AI for suggestions. Counts never claim completeness by themselves. |
+| AI knowledge suggestion | Knowledge Mission | Shows current geography, related legacy label when useful, proposed knowledge need, concise reason, and natural Vietnamese query. Explicit actions are `Chạy ngay`, `Sửa`, and `Bỏ qua`; AI never starts Discovery without operator confirmation. |
+| Query run progress | Knowledge Mission / query detail | After `Chạy ngay`, shows `Đang chờ`, `Đang chạy`, `Hoàn tất`, `Thất bại`, or `Đã hủy`, bounded start/end times, candidate count, candidate-processing progress, safe retry, and `Xem video` when reviewable results exist. |
 | Global Discovery switch | Automation Health/settings | Immediate server action with visible enabled/disabled state. Disabling fences Discovery planning/search/enrichment/triage work only; it does not alter queued Knowledge sources or execute/cancel `youtube:capture`. |
 | Health incident | Automation Health/action queue | Shows safe provider/stage/time/retry context. Persistent failures and rate limits are action-required; ordinary retrying states remain visible in Health but are not alerts. |
 
@@ -89,6 +92,7 @@ Operator copy is Vietnamese-first, direct, and operationally precise without bec
 | Discovery re-enabled | Health/settings | Display the next eligible scheduled planning/query run. Cancelled runs remain terminal and are not revived. |
 | Provider/rate-limit/schema retry | Health | Safe incident status and retry context. Escalate to action queue only when persistent or blocking high-priority work. |
 | Mission query paused | Mission | Keep query visible with paused state and reason/history; it creates no due run until resumed. |
+| Immediate query queued/running | Mission | Keep the accepted or operator-authored query visible with current safe status and progress. It does not show a scheduled wait as the next required action. |
 | Global Discovery off / query enabled | Mission | Show `Tạm dừng do Discovery đang tắt`, distinct from `Tạm dừng bởi operator`; no next run is shown until global enablement returns. |
 | Health first run / unavailable / stale | Health | Distinguish no run yet, no incident, unavailable projection, and stale projection. Show last-updated time and reload recovery; never present missing telemetry as healthy operation. |
 | Desktop on narrow viewport | Admin | Collapse split panes into sequential queue/detail views. Keep all authorized query and policy controls reachable without horizontal two-dimensional scrolling. |
@@ -154,15 +158,15 @@ Failure: Knowledge intake fails. The candidate remains selected, no success stat
 
 Failure: The toggle command fails. The previous state remains visible and the UI provides a safe retry message.
 
-### Flow 3 - Turn a coverage gap into a managed query (Mai, planning for a holiday corridor)
+### Flow 3 - Turn bounded coverage into an immediate managed query (Mai, planning for a province)
 
-1. Mai opens Knowledge Mission from a stalled high-priority gap in the action queue.
-2. She sees system-generated query proposals and operator-created queries in one list, each with origin, reason, priority, state, and next run.
-3. She pauses an irrelevant system proposal and creates a simple operator query for a holiday route need.
-4. The query appears with `Operator tạo`, its selected priority, and a scheduled next run when Discovery is enabled.
-5. **Climax:** Mai can steer what Discovery looks for without building complex automation rules or editing Worker configuration.
+1. Mai opens Knowledge Mission and views Knowledge coverage grouped by current province/city. Legacy province names remain searchable and visible as references.
+2. She chooses a bounded geography and asks AI for suggestions. The system shows proposed knowledge needs, reasons, and Vietnamese queries derived only from safe coverage and demand summaries.
+3. Mai edits one suggestion or creates a simple operator query, then selects `Chạy ngay`.
+4. The same surface shows `Đang chờ`, `Đang chạy`, candidate count and processing progress, then `Hoàn tất` with `Xem video`; it does not make Mai wait for the next scheduled cadence.
+5. **Climax:** Mai chooses what Discovery looks for and can follow it to reviewable results without building automation rules or interpreting Worker configuration.
 
-Failure: The query text is invalid or a save conflicts with a newer change. The editor preserves Mai's draft and shows a field-level recovery message.
+Failure: The query is invalid, Discovery is disabled, admission conflicts, or execution fails. The editor preserves Mai's draft and the surface shows an accurate safe recovery action without claiming that a run or candidate exists.
 
 ### Flow 4 - Trace a coverage need to candidates (Mai, closing a road-condition gap)
 
