@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 
-import { and, asc, desc, eq, ilike, inArray, isNull, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 
 import { createSystemAuditActor } from "./actors";
 import { getDb } from "./client";
@@ -9,9 +9,8 @@ import { evaluateKnowledgeTravelerPolicy, type KnowledgeTravelerPolicy, type Kno
 import { knowledgeCardEvidence, knowledgeCards, knowledgeCardSearchDocuments, knowledgeCardSources, sourceCaptureVersions, sources, type KnowledgeSourceSupport } from "./schema";
 
 const defaultSearchLimit = 5;
-const maxSearchLimit = 10;
+const maxSearchLimit = 30;
 const maxSearchQueryLength = 500;
-const maxSearchCandidateDocuments = 200;
 const maxPracticalDetailEntries = 20;
 const maxPracticalDetailKeyLength = 60;
 const maxPracticalDetailValuesPerEntry = 10;
@@ -191,12 +190,8 @@ async function searchApprovedKnowledgeInternal(query: string | null | undefined,
     return { results, candidateCount: countAllCandidates ? candidateCount : results.length, policySummary };
   }
 
-  while (offset < maxSearchCandidateDocuments) {
-    const currentBatchSize = Math.min(batchSize, maxSearchCandidateDocuments - offset);
-
-    if (currentBatchSize <= 0) {
-      break;
-    }
+  while (true) {
+    const currentBatchSize = batchSize;
 
     const matchingDocuments = await db
       .select({ knowledgeCardId: knowledgeCardSearchDocuments.knowledgeCardId, contentVersion: knowledgeCardSearchDocuments.contentVersion, searchableText: knowledgeCardSearchDocuments.searchableText, updatedAt: knowledgeCardSearchDocuments.updatedAt })
@@ -208,7 +203,6 @@ async function searchApprovedKnowledgeInternal(query: string | null | undefined,
           eq(knowledgeCards.lifecycleState, "active"),
           eq(knowledgeCardSearchDocuments.contentVersion, knowledgeCards.contentVersion),
           ...(cardIds ? [inArray(knowledgeCardSearchDocuments.knowledgeCardId, cardIds)] : []),
-          or(...terms.map((term) => ilike(knowledgeCardSearchDocuments.searchableText, `%${escapeLikePattern(term)}%`))),
         ),
       )
       .orderBy(desc(knowledgeCardSearchDocuments.updatedAt))
@@ -228,7 +222,7 @@ async function searchApprovedKnowledgeInternal(query: string | null | undefined,
     offset += currentBatchSize;
   }
 
-  scoredDocuments.sort((left, right) => right.score - left.score || right.updatedAt.getTime() - left.updatedAt.getTime());
+  scoredDocuments.sort((left, right) => right.score - left.score || right.updatedAt.getTime() - left.updatedAt.getTime() || left.knowledgeCardId.localeCompare(right.knowledgeCardId));
 
   const candidates = await loadApprovedKnowledgeCandidates(db, scoredDocuments.map((document) => document.knowledgeCardId));
 
@@ -240,11 +234,12 @@ async function searchApprovedKnowledgeInternal(query: string | null | undefined,
     const candidate = candidates.get(document.knowledgeCardId) ?? emptyKnowledgeCandidate();
     const card = candidate.card;
 
-    if (card && document.contentVersion === card.contentVersion) {
+    const currentScore = card && document.contentVersion === card.contentVersion ? scoreSearchDocument(buildSearchableText(card), terms) : 0;
+    if (card && currentScore > 0) {
       candidateCount += 1;
 
       if (results.length < limit) {
-        results.push({ ...card, score: document.score });
+        results.push({ ...card, score: currentScore });
       }
     } else if (candidate.exclusion && document.contentVersion === candidate.contentVersion) {
       recordExcludedCandidatePolicy(policySummary, candidate.exclusion);
@@ -537,17 +532,6 @@ function buildSearchableText(card: Omit<KnowledgeSearchResult, "score">) {
     ...card.tags,
     card.confidence,
     card.freshnessSensitive ? "freshness sensitive" : null,
-    ...card.sources.flatMap((source) => [
-      source.kind,
-      source.label,
-      source.publisher,
-      source.collectedDate,
-      source.sourceType,
-      source.verificationStatus,
-      source.official ? "official" : null,
-      source.partner ? "partner" : null,
-      source.supportLevel,
-    ]),
   ];
 
   return values.map(normalizeSearchableValue).filter((value): value is string => Boolean(value)).join("\n");
@@ -656,8 +640,4 @@ function scoreSearchDocument(searchableText: string, terms: string[]) {
 
     return score + (term.length > 2 ? 2 : 1);
   }, 0);
-}
-
-function escapeLikePattern(value: string) {
-  return value.replace(/[\\%_]/g, (match) => `\\${match}`);
 }

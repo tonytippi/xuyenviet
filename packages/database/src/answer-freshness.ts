@@ -5,12 +5,13 @@ export function ensureAiAskFreshnessWarning(content: string, sourceBundle: Await
   const caveatOnlyKnowledge = sourceBundle.knowledge.filter((item) => item.policy === "caveat_only" || item.verificationRequirement === "operator_required");
   const conditionalKnowledge = sourceBundle.knowledge.filter((item) => item.policy === "contextual_use" && item.knowledgeState === "conditional" && item.conditions.length > 0);
   const caveatWarningRequired = caveatOnlyKnowledge.length > 0;
+  const requiredNeedVerification = sourceBundle.retrievalDecision.requiredNeeds.needs.some((need) => need.outcome === "requires_verification");
   const externalVerificationRequired = sourceBundle.retrievalDecision.webSearchTriggered
     && (sourceBundle.warnings.includes("web_search_load_failed") || sourceBundle.warnings.includes("web_search_low_quality"));
   const retainGeneralPlanningContent = externalVerificationRequired
     && sourceBundle.retrievalDecision.broadPlanningQuestion
     && sourceBundle.retrievalDecision.webSearchTriggerReasons.length > 0
-    && sourceBundle.retrievalDecision.webSearchTriggerReasons.every(isMissingKnowledgeCoverageReason)
+    && sourceBundle.retrievalDecision.requiredNeeds.needs.some((need) => need.outcome === "missing" || need.outcome === "requires_clarification")
     && !freshnessWarningRequired;
   const successfulWebFallbackVerificationRequired = sourceBundle.web.length > 0
     && sourceBundle.retrievalDecision.webSearchTriggerReasons.some(requiresWebFallbackVerificationGuidance);
@@ -35,7 +36,7 @@ export function ensureAiAskFreshnessWarning(content: string, sourceBundle: Await
     return { content: `${content.trimEnd()}${appendedWarning}`, appendedWarning, replacedUnsafeContent: false };
   }
 
-  if (!freshnessWarningRequired && !caveatWarningRequired && !externalVerificationRequired && !successfulWebFallbackVerificationRequired) {
+  if (!freshnessWarningRequired && !caveatWarningRequired && !requiredNeedVerification && !externalVerificationRequired && !successfulWebFallbackVerificationRequired) {
     return { content, appendedWarning: "", replacedUnsafeContent: false };
   }
 
@@ -63,6 +64,9 @@ export function ensureAiAskFreshnessWarning(content: string, sourceBundle: Await
   if (successfulWebFallbackVerificationRequired && !hasSuccessfulWebFallbackVerificationGuidance) {
     warnings.push("Nguồn web bên ngoài này chưa được XuyenViet xác minh. Hãy xác nhận trực tiếp với nguồn chính thức hoặc nhà cung cấp trước khi đi, hành động hoặc đặt dịch vụ.");
   }
+  if (requiredNeedVerification) {
+    warnings.push("Một số nhu cầu bắt buộc vẫn cần xác minh trước khi dùng để chốt lịch trình hoặc hành động.");
+  }
   if (externalVerificationRequired) {
     warnings.push("Mình chưa thể xác minh thông tin hiện tại từ nguồn bên ngoài. Hãy xác nhận trực tiếp với nguồn chính thức hoặc nhà cung cấp trước khi đi, hành động hoặc đặt dịch vụ.");
   }
@@ -82,14 +86,9 @@ function getVerificationTarget(item: Awaited<ReturnType<typeof assembleContextPr
   return `tình trạng hiện tại của "${title}"`;
 }
 
-function isMissingKnowledgeCoverageReason(reason: string) {
-  return reason === "no_active_knowledge" || reason === "insufficient_active_knowledge";
-}
-
 function requiresWebFallbackVerificationGuidance(reason: string) {
   return reason === "no_active_knowledge"
     || reason === "active_knowledge_unavailable"
-    || reason === "insufficient_active_knowledge"
     || reason === "excluded_conflict_candidate"
     || reason === "excluded_verification_required_candidate";
 }

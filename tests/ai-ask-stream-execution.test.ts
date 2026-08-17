@@ -137,6 +137,7 @@ describe("AI Ask stream execution", () => {
     expect(snapshot?.conflicts).toEqual(rendered.tripContext.conflicts);
     expect(command).toMatchObject({ status: "completed", tripAnswerContextSnapshotId: snapshot.id });
     expect(decision?.tripAnswerContextSnapshotId).toBe(snapshot.id);
+    expect(decision?.knowledgePolicySnapshot).toEqual({ version: "required-needs-v1", needs: [] });
     expect(usage?.tripAnswerContextSnapshotId).toBe(snapshot.id);
     expect(provenance).toHaveLength(3);
     expect(provenance.every((row) => row.tripAnswerContextSnapshotId === snapshot.id)).toBe(true);
@@ -187,7 +188,7 @@ describe("AI Ask stream execution", () => {
 
   test.each([
     { warning: "web_search_load_failed" as const, reason: "no_active_knowledge" as const },
-    { warning: "web_search_low_quality" as const, reason: "insufficient_active_knowledge" as const },
+    { warning: "web_search_low_quality" as const, reason: "no_active_knowledge" as const },
   ])("retains broad planning guidance with a bounded warning when $warning follows $reason", async ({ warning, reason }) => {
     await seedUserAndModel();
     const [conversation] = await testDb.insert(conversations).values({ userId: "user-1" }).returning({ id: conversations.id });
@@ -433,7 +434,7 @@ function sourceBundle(overrides?: { warnings?: ContextPrioritySourceBundle["warn
     tripAnswerContext: { version: 1, hasProjectScope: true, tripProjectId: "project", aggregateVersion: 1, primaryConversationId: "conversation", anchors: [{ field: "destination", value: "Huế", source: "trip_project" }], planItems: [], constraints: null, currentConversationFacts: [{ field: "budget", value: "5 triệu", source: "conversation" }], conflicts: [{ field: "destination", canonicalValue: "Huế", lowerPriorityValue: "Đà Lạt", projectValue: "Huế", conversationValue: "Đà Lạt", source: "conversation_chat", priority: "lower", material: true }] },
     chatTripContext: { tripProjectFacts: [{ field: "destination", value: "Huế", source: "trip_project" }], chatFacts: [{ field: "budget", value: "5 triệu", source: "conversation" }], conflicts: [{ field: "destination", canonicalValue: "Huế", lowerPriorityValue: "Đà Lạt", projectValue: "Huế", conversationValue: "Đà Lạt", source: "conversation_chat", priority: "lower", material: true }] },
     knowledge: [], web: overrides?.web ?? [], general: { available: true },
-    retrievalDecision: { approvedKnowledgeCandidateCount: 0, approvedKnowledgeSelectedCount: 0, approvedKnowledgeTargetCount: 3, approvedKnowledgeRelevanceThreshold: 1, broadPlanningQuestion: false, freshnessRequired: false, conflictDetected: false, webSearchTriggered: false, webSearchTriggerReasons: [], generalReasoningUsed: true, ...overrides?.retrievalDecision },
+    retrievalDecision: { approvedKnowledgeCandidateCount: 0, approvedKnowledgeSelectedCount: 0, approvedKnowledgeRelevanceThreshold: 1, broadPlanningQuestion: false, freshnessRequired: false, conflictDetected: false, webSearchTriggered: false, webSearchTriggerReasons: [], generalReasoningUsed: true, requiredNeeds: { version: "required-needs-v1", needs: [] }, ...overrides?.retrievalDecision },
     warnings: overrides?.warnings ?? [],
   };
 }

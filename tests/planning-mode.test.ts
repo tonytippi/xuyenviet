@@ -79,7 +79,7 @@ function bundle(planningExecutionRef: PlanningExecutionRef, pendingProposal: { i
     tripAnswerContext: { version: 1, hasProjectScope: true, tripProjectId: "trip-1", aggregateVersion: 7, primaryConversationId: "conversation-1", anchors: [], planItems: [], constraints: null, currentConversationFacts: [], conflicts: [] },
     chatTripContext: { tripProjectFacts: [], chatFacts: [], conflicts: [] },
     knowledge: [], web: [], general: { available: true },
-    retrievalDecision: { approvedKnowledgeCandidateCount: 0, approvedKnowledgeSelectedCount: 0, approvedKnowledgeTargetCount: 3, approvedKnowledgeRelevanceThreshold: 1, broadPlanningQuestion: false, freshnessRequired: false, conflictDetected: false, webSearchTriggered: false, webSearchTriggerReasons: [], generalReasoningUsed: true },
+    retrievalDecision: { approvedKnowledgeCandidateCount: 0, approvedKnowledgeSelectedCount: 0, approvedKnowledgeRelevanceThreshold: 1, broadPlanningQuestion: false, freshnessRequired: false, conflictDetected: false, webSearchTriggered: false, webSearchTriggerReasons: [], generalReasoningUsed: true, requiredNeeds: { version: "required-needs-v1", needs: [] } },
     warnings: [],
   };
 }

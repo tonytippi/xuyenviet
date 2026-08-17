@@ -186,6 +186,19 @@ describe("knowledge card state-model retrieval safety", () => {
     expect(result?.sources).toEqual([expect.objectContaining({ id: "validated-source-card-source", url: "https://example.com/card" })]);
   });
 
+  test("does not honor legacy indexed source metadata after the source projection changes", async () => {
+    await createUser("legacy-metadata-operator", ["operator"]);
+    const card = await createApprovedCardWithSource("legacy-metadata-operator", "legacy-metadata-card");
+    const capture = await seedSourceCaptureVersion({ sourceId: `${card.id}-source`, captureKind: "url", rawText: "Bằng chứng hợp lệ." });
+    await seedKnowledgeCardEvidence({ cardId: card.id, sourceId: `${card.id}-source`, captureVersionId: capture.id, quoteText: "Bằng chứng hợp lệ." });
+    await enqueueAndProcessIndexWork(card.id);
+    await testDb.update(knowledgeCardSearchDocuments).set({ searchableText: "Điểm dừng Huế https://legacy.example/metadata-token Nhãn metadata-token Nhà xuất bản metadata-token provenance metadata-token" }).where(eq(knowledgeCardSearchDocuments.knowledgeCardId, card.id));
+    const { searchApprovedKnowledge } = await import("@/features/knowledge/search");
+
+    await expect(searchApprovedKnowledge("metadata-token")).resolves.toEqual([]);
+    await expect(searchApprovedKnowledge("Huế")).resolves.toEqual([expect.objectContaining({ id: card.id })]);
+  });
+
   test("fails closed when a source recapture supersedes the capture supporting active evidence", async () => {
     await createUser("historical-capture-operator", ["operator"]);
     const card = await createApprovedCardWithSource("historical-capture-operator", "historical-capture-card");
@@ -395,6 +408,20 @@ describe("knowledge card state-model retrieval safety", () => {
 
     await expect(searchApprovedKnowledge("Huế")).resolves.toEqual([]);
     await expect(testDb.select().from(knowledgeCardSearchDocuments).where(eq(knowledgeCardSearchDocuments.knowledgeCardId, card.id))).resolves.toMatchObject([{ status: "active", disabledAt: null }]);
+  });
+
+  test("finds an older factual match after more than 200 newer active documents", async () => {
+    await createUser("older-match-operator", ["operator"]);
+    const older = await createApprovedCardWithSource("older-match-operator", "older-factual-match");
+    const capture = await seedSourceCaptureVersion({ sourceId: `${older.id}-source`, captureKind: "url", rawText: "Bằng chứng cho điểm cũ." });
+    await seedKnowledgeCardEvidence({ cardId: older.id, sourceId: `${older.id}-source`, captureVersionId: capture.id, quoteText: "Bằng chứng cho điểm cũ." });
+    await enqueueAndProcessIndexWork(older.id);
+    await testDb.update(knowledgeCardSearchDocuments).set({ updatedAt: new Date(0) }).where(eq(knowledgeCardSearchDocuments.knowledgeCardId, older.id));
+    await testDb.insert(knowledgeCards).values(Array.from({ length: 201 }, (_, index) => ({ id: `newer-${index}`, lifecycleState: "active" as const, knowledgeState: "community_observation" as const, verificationRequirement: "none" as const, type: "place" as const, title: "Không liên quan", summary: "Không liên quan", confidence: "curated" as const, aiPromptVersion: "test", createdByUserId: "older-match-operator" })));
+    await testDb.insert(knowledgeCardSearchDocuments).values(Array.from({ length: 201 }, (_, index) => ({ knowledgeCardId: `newer-${index}`, executorSystem: "system-knowledge-pipeline", status: "active" as const, searchableText: "khong lien quan", textHash: `${String(index).padStart(64, "0")}`, sourceCount: 1, confidence: "curated" as const, freshnessSensitive: false, updatedAt: new Date() })));
+    const { searchApprovedKnowledge } = await import("@/features/knowledge/search");
+
+    await expect(searchApprovedKnowledge("Huế")).resolves.toEqual([expect.objectContaining({ id: older.id })]);
   });
 
   test("indexing worker disables an active document when its active card becomes state-ineligible", async () => {

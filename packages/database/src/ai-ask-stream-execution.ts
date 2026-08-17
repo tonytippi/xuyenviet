@@ -227,8 +227,9 @@ async function streamAnswer({
       pendingProposal: planningMode.proposal,
     });
     const renderedSourceBundle = dependencies.buildSourceBundlePromptSection
-      ? { section: dependencies.buildSourceBundlePromptSection(sourceBundle), tripContext: { version: 1 as const, aggregateVersion: null, included: [], excluded: [], conflicts: [], serialization: "{}", promptDigest: "0".repeat(64) }, promptUsage: { tripProjectFactIndexes: [], chatFactIndexes: [], knowledgeCardIds: [], webRanks: [], generalReasoningUsed: false, sourceHandles: [] } }
+      ? { section: dependencies.buildSourceBundlePromptSection(sourceBundle), tripContext: { version: 1 as const, aggregateVersion: null, included: [], excluded: [], conflicts: [], serialization: "{}", promptDigest: "0".repeat(64) }, promptUsage: { tripProjectFactIndexes: [], chatFactIndexes: [], knowledgeCardIds: [], webRanks: [], generalReasoningUsed: false, sourceHandles: [] }, retrievalDecision: sourceBundle.retrievalDecision }
       : dependencies.renderSourceBundlePromptSection(sourceBundle);
+    const finalizedSourceBundle = { ...sourceBundle, retrievalDecision: renderedSourceBundle.retrievalDecision };
     const contextSection = renderedSourceBundle.section;
     const gatewayMessages = buildAiAskMessages({ question, history: saved.history, contextSection });
     const finalGatewayMessages = imageDataUrl ? attachImageToFinalUserMessage(gatewayMessages, imageDataUrl) : gatewayMessages;
@@ -316,7 +317,7 @@ async function streamAnswer({
     }
 
     const savedTurn = saved;
-    const assistantContent = ensureAiAskFreshnessWarning(gatewayResult.content, sourceBundle);
+    const assistantContent = ensureAiAskFreshnessWarning(gatewayResult.content, finalizedSourceBundle);
     if (assistantContent.appendedWarning && !assistantContent.replacedUnsafeContent) {
       if (protectDeltas) bufferedDeltas.push(assistantContent.appendedWarning);
       else await sink.emit({ type: "delta", content: assistantContent.appendedWarning });
@@ -349,7 +350,7 @@ async function streamAnswer({
           userMessageId: fencedCommand.userMessageId,
           assistantMessageId: assistantMessage.id,
           tripAnswerContextSnapshotId: snapshot.id,
-          sourceBundle,
+          sourceBundle: finalizedSourceBundle,
           promptUsage: renderedSourceBundle.promptUsage,
           reportedSourceHandles: gatewayResult.reportedSourceHandles,
         });

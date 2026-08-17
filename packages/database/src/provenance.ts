@@ -90,7 +90,8 @@ async function persistAssistantAnswerProvenanceInTransaction(db: Exclude<Provena
     tripAnswerContextSnapshotId: tripAnswerContextSnapshotId ?? null,
     approvedKnowledgeCandidateCount: sourceBundle.retrievalDecision.approvedKnowledgeCandidateCount,
     approvedKnowledgeSelectedCount: sourceBundle.retrievalDecision.approvedKnowledgeSelectedCount,
-    approvedKnowledgeTargetCount: sourceBundle.retrievalDecision.approvedKnowledgeTargetCount,
+    // This legacy required column is inert telemetry; coverage is in requiredNeeds.
+    approvedKnowledgeTargetCount: Math.max(1, sourceBundle.retrievalDecision.approvedKnowledgeSelectedCount),
     approvedKnowledgeRelevanceThreshold: sourceBundle.retrievalDecision.approvedKnowledgeRelevanceThreshold,
     broadPlanningQuestion: sourceBundle.retrievalDecision.broadPlanningQuestion,
     freshnessRequired: sourceBundle.retrievalDecision.freshnessRequired,
@@ -99,8 +100,8 @@ async function persistAssistantAnswerProvenanceInTransaction(db: Exclude<Provena
     webSearchTriggerReasons: sourceBundle.retrievalDecision.webSearchTriggerReasons,
     generalReasoningUsed: sourceBundle.retrievalDecision.generalReasoningUsed,
     warnings: sourceBundle.warnings,
-    selectedKnowledgeCardIds: sourceBundle.retrievalDecision.knowledgePolicySummary?.selectedCardIds ?? sourceBundle.knowledge.map((item) => item.id),
-    knowledgePolicySnapshot: sourceBundle.retrievalDecision.knowledgePolicySummary ?? null,
+    selectedKnowledgeCardIds: sourceBundle.retrievalDecision.knowledgePolicySummary?.selectedCardIds ?? [],
+    knowledgePolicySnapshot: boundRequiredNeedsSnapshot(sourceBundle.retrievalDecision.requiredNeeds),
   });
 
   const rows = buildProvenanceRows({ userId, conversationId, userMessageId, assistantMessageId, tripAnswerContextSnapshotId, sourceBundle, promptUsage, reportedSourceHandles });
@@ -115,6 +116,22 @@ async function persistAssistantAnswerProvenanceInTransaction(db: Exclude<Provena
   }
 
   return [];
+}
+
+function boundRequiredNeedsSnapshot(value: unknown) {
+  const allowedIds = new Set(["itinerary", "route", "freshness"]);
+  const allowedOutcomes = new Set(["satisfied", "missing", "requires_verification", "requires_clarification"]);
+  if (!isRecord(value) || value.version !== "required-needs-v1" || !Array.isArray(value.needs)) return { version: "required-needs-v1", needs: [] };
+  const seenNeedIds = new Set<string>();
+  const needs = value.needs.flatMap((need) => {
+    if (!isRecord(need) || typeof need.id !== "string" || typeof need.outcome !== "string" || !allowedIds.has(need.id) || !allowedOutcomes.has(need.outcome)) return [];
+    if (seenNeedIds.has(need.id)) return [];
+    seenNeedIds.add(need.id);
+    const evidenceCardIds = Array.isArray(need.evidenceCardIds) ? [...new Set(need.evidenceCardIds.filter((id): id is string => typeof id === "string" && id.length > 0).map((id) => id.slice(0, 160)))].slice(0, 5) : [];
+    return [{ id: need.id, outcome: need.outcome, evidenceCardIds }];
+  }).slice(0, 3);
+  const snapshot = { version: "required-needs-v1" as const, needs };
+  return Buffer.byteLength(JSON.stringify(snapshot), "utf8") <= 4_096 ? snapshot : { version: "required-needs-v1" as const, needs: [] };
 }
 
 function resolveReportedSourceReferences(promptUsage: PromptUsageLedger | undefined, reportedHandles: string[] | null | undefined) {
