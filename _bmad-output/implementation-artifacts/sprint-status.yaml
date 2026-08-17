@@ -479,7 +479,7 @@ development_status:
   21-4-preserve-canonical-route-authority: done
   21-5-retrieve-by-required-need-and-remove-card-count: done
   21-6-verify-fresh-facts-and-finalize-through-existing-ai-ask: done
-  21-7-convert-eligible-chat-context-into-a-reviewable-trip: backlog
+  21-7-convert-eligible-chat-context-into-a-reviewable-trip: in-progress
   21-8-delete-planning-data-and-verify-the-clean-break: backlog
   epic-21-retrospective: optional
 
