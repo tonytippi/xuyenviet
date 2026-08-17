@@ -72,7 +72,7 @@ describe("AI Ask command ledger", () => {
   test("does not enqueue context extraction for an explicit partial reply while collecting", async () => {
     await testDb.insert(users).values({ id: "owner", email: "owner@example.com" });
     const [conversation] = await testDb.insert(conversations).values({ id: "conversation", userId: "owner" }).returning({ id: conversations.id });
-    await saveOwnedPlanningContextSession("owner", conversation.id, null, { intent: "trip_planning", slots: { destination: "Đà Nẵng" }, missingSlots: ["origin", "start_date", "adults"], status: "collecting", sourceMessageIds: ["message-1"], revision: 1 });
+    await saveOwnedPlanningContextSession("owner", conversation.id, null, { intent: "trip_planning", slots: { destination: "Đà Nẵng" }, slotSourceMessageIds: { destination: "message-1" }, missingSlots: ["origin", "start_date", "adults"], status: "collecting", sourceMessageIds: ["message-1"], revision: 1 });
 
     await expect(acquireAiAskCommand({ userId: "owner", idempotencyKey: "clarification_partial_key", question: "Xuất phát từ Hà Nội", conversationId: conversation.id })).resolves.toMatchObject({ kind: "admitted" });
     await expect(testDb.select().from(domainOutbox)).resolves.toEqual([]);

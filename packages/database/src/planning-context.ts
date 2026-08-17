@@ -36,6 +36,7 @@ export function reducePlanningClarification(input: { session: PlanningContextSes
   }
 
   let slots: Partial<Record<PlanningContextSession["missingSlots"][number], string>> = input.session ? { ...input.session.slots } : {};
+  let slotSourceMessageIds: Partial<Record<PlanningContextSession["missingSlots"][number], string>> = input.session ? { ...input.session.slotSourceMessageIds } : {};
   let superseded = false;
   for (const [slot, value] of Object.entries(extracted) as Array<[keyof typeof slots, string]>) {
     if (slots[slot] && slots[slot] !== value) {
@@ -43,18 +44,22 @@ export function reducePlanningClarification(input: { session: PlanningContextSes
       // be corrected explicitly rather than silently preferring the latest reply.
       if (slot === "destination") {
         slots = { destination: value };
+        slotSourceMessageIds = { destination: input.sourceMessageId };
         superseded = true;
       } else {
         delete slots[slot];
+        delete slotSourceMessageIds[slot];
       }
     } else {
       slots[slot] = value;
+      slotSourceMessageIds[slot] = input.sourceMessageId;
     }
   }
   const missingSlots = materialSlots.filter((slot) => !slots[slot]);
   const session: PlanningContextSession = {
     intent: "trip_planning",
     slots,
+    slotSourceMessageIds,
     missingSlots,
     status: missingSlots.length === 0 ? "ready" : "collecting",
     sourceMessageIds: [...(superseded ? [] : input.session?.sourceMessageIds ?? []), input.sourceMessageId].slice(-40),
@@ -73,7 +78,7 @@ export async function prepareOwnedPlanningClarification(userId: string, conversa
   const current = await loadOwnedPlanningContextSession(userId, conversationId);
   const reduced = reducePlanningClarification({ session: current, question, sourceMessageId });
   if (reduced.kind === "not_applicable" || reduced.kind === "retry") return reduced;
-  if (reduced.kind === "ready" && current?.status === "ready" && JSON.stringify(current.slots) === JSON.stringify(reduced.session.slots)) {
+  if (reduced.kind === "ready" && current?.status === "ready" && JSON.stringify(current.slots) === JSON.stringify(reduced.session.slots) && JSON.stringify(current.slotSourceMessageIds) === JSON.stringify(reduced.session.slotSourceMessageIds)) {
     return { kind: "ready", session: current };
   }
   const saved = await saveOwnedPlanningContextSession(userId, conversationId, current?.revision ?? null, reduced.session);

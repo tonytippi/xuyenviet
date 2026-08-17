@@ -300,7 +300,7 @@ describe("AI Ask stream execution", () => {
     const [project] = await testDb.insert(tripProjects).values({ userId: "user-1", title: "Huế" }).returning({ id: tripProjects.id });
     const [conversation] = await testDb.insert(conversations).values({ userId: "user-1", tripProjectId: project.id }).returning({ id: conversations.id });
     await testDb.update(tripProjects).set({ primaryConversationId: conversation.id }).where(eq(tripProjects.id, project.id));
-    await testDb.insert(planningContextSessions).values({ userId: "user-1", conversationId: conversation.id, revision: 1, payload: { intent: "trip_planning", slots: { origin: "Hà Nội", destination: "Huế", start_date: "2026-09-01", adults: "2" }, missingSlots: [], status: "ready", sourceMessageIds: ["seed"], revision: 1 } });
+    await testDb.insert(planningContextSessions).values({ userId: "user-1", conversationId: conversation.id, revision: 1, payload: { intent: "trip_planning", slots: { origin: "Hà Nội", destination: "Huế", start_date: "2026-09-01", adults: "2" }, slotSourceMessageIds: { origin: "seed", destination: "seed", start_date: "seed", adults: "seed" }, missingSlots: [], status: "ready", sourceMessageIds: ["seed"], revision: 1 } });
     let releaseBundle!: () => void;
     const bundleReady = new Promise<void>((resolve) => { releaseBundle = resolve; });
     setAiAskStreamTestDependencies({ assembleContextPrioritySourceBundle: vi.fn().mockImplementation(async () => { await bundleReady; return sourceBundle(); }) });
@@ -310,7 +310,7 @@ describe("AI Ask stream execution", () => {
     if (admission.kind !== "admitted") throw new Error("Expected admitted execution");
     const iterator = admission.execution[Symbol.asyncIterator]();
     await expect(iterator.next()).resolves.toMatchObject({ value: { type: "preparing" } });
-    await testDb.update(planningContextSessions).set({ revision: 2, payload: { intent: "trip_planning", slots: { origin: "Hà Nội", destination: "Huế", start_date: "2026-09-02", adults: "2" }, missingSlots: [], status: "ready", sourceMessageIds: ["seed", "changed"], revision: 2 } }).where(eq(planningContextSessions.conversationId, conversation.id));
+    await testDb.update(planningContextSessions).set({ revision: 2, payload: { intent: "trip_planning", slots: { origin: "Hà Nội", destination: "Huế", start_date: "2026-09-02", adults: "2" }, slotSourceMessageIds: { origin: "seed", destination: "seed", start_date: "changed", adults: "seed" }, missingSlots: [], status: "ready", sourceMessageIds: ["seed", "changed"], revision: 2 } }).where(eq(planningContextSessions.conversationId, conversation.id));
     releaseBundle();
 
     expect((await collectIterator(iterator)).at(-1)).toMatchObject({ type: "error", code: "refresh_required" });
@@ -324,7 +324,7 @@ describe("AI Ask stream execution", () => {
     const [project] = await testDb.insert(tripProjects).values({ userId: "user-1", title: "Huế" }).returning({ id: tripProjects.id });
     const [conversation] = await testDb.insert(conversations).values({ userId: "user-1", tripProjectId: project.id }).returning({ id: conversations.id });
     await testDb.update(tripProjects).set({ primaryConversationId: conversation.id }).where(eq(tripProjects.id, project.id));
-    await testDb.insert(planningContextSessions).values({ userId: "user-1", conversationId: conversation.id, revision: 1, payload: { intent: "trip_planning", slots: { origin: "Hà Nội", destination: "Huế", start_date: "2026-09-01", adults: "2" }, missingSlots: [], status: "ready", sourceMessageIds: ["seed"], revision: 1 } });
+    await testDb.insert(planningContextSessions).values({ userId: "user-1", conversationId: conversation.id, revision: 1, payload: { intent: "trip_planning", slots: { origin: "Hà Nội", destination: "Huế", start_date: "2026-09-01", adults: "2" }, slotSourceMessageIds: { origin: "seed", destination: "seed", start_date: "seed", adults: "seed" }, missingSlots: [], status: "ready", sourceMessageIds: ["seed"], revision: 1 } });
     const [proposal] = await testDb.insert(tripChangeProposals).values({ userId: "user-1", tripProjectId: project.id, creatorClass: "owner_command", rationale: "Đổi điểm dừng", operations: [{ kind: "create-item" }], expectedAggregateVersion: 1 }).returning({ id: tripChangeProposals.id });
     let releaseBundle!: () => void;
     let assembled!: () => void;

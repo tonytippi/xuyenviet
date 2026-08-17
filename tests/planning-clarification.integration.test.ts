@@ -25,7 +25,7 @@ describe("planning clarification persistence", () => {
     const before = await loadOwnedPlanningContextSession("owner", "conversation");
     await prepareOwnedPlanningClarification("owner", "conversation", "Xuất phát từ Hà Nội", "message-2");
     expect(before?.revision).toBe(1);
-    await expect(saveOwnedPlanningContextSession("owner", "conversation", before!.revision, { ...before!, slots: { ...before!.slots, origin: "Huế" }, missingSlots: ["start_date", "adults"], revision: before!.revision + 1, sourceMessageIds: [...before!.sourceMessageIds, "stale-message"] })).resolves.toEqual({ status: "stale" });
+    await expect(saveOwnedPlanningContextSession("owner", "conversation", before!.revision, { ...before!, slots: { ...before!.slots, origin: "Huế" }, slotSourceMessageIds: { ...before!.slotSourceMessageIds, origin: "stale-message" }, missingSlots: ["start_date", "adults"], revision: before!.revision + 1, sourceMessageIds: [...before!.sourceMessageIds, "stale-message"] })).resolves.toEqual({ status: "stale" });
     await expect(loadOwnedPlanningContextSession("owner", "conversation")).resolves.toMatchObject({ revision: 2, slots: { origin: "Hà Nội" } });
   });
 });

@@ -22,6 +22,7 @@ export type ExpireTripChangeProposalResult = { success: true; proposal: Terminal
 export type TerminalProposalRow = { id: string; userId: string; status: "pending" | "applied" | "dismissed" | "expired"; rationale: string; operations: unknown; alternatives: unknown; expiresAt: Date | null; createdAt: Date; terminalTimestamp: Date | null; affectedItems: ProposalAffectedItem[]; beforeAfter: ProposalBeforeAfter[] };
 export type ProposalAffectedItem = { itemId: string; kind: TripPlanItemKind; label: string; change: "create" | "update" | "remove" | "reorder" | "change-state" | "set-leg-path" | "clear-leg-path" | "upsert-constraints" };
 export type ProposalBeforeAfter = { operation: string; before: string | null; after: string | null };
+export type PendingProposalInsertInput = { tripProjectId: string; operations: unknown; rationale: string };
 
 class ProposalOperationFailure extends Error { constructor(readonly reason: "refresh_required" | "not_found" | "expired") { super(reason); } }
 
@@ -86,6 +87,38 @@ export async function executeAnnotationProposalAction(userId: string, binding: A
 }
 
 export async function expireTripChangeProposal(input: ExpireTripChangeProposalInput): Promise<ExpireTripChangeProposalResult> { return getDb().transaction((transaction) => expireTripChangeProposalInTransaction(transaction, input)); }
+/** Inserts conversion proposals only after the database validates their typed operations. */
+export async function insertPendingTripChangeProposalInTransaction(transaction: TripPlanCommandTransaction, userId: string, input: PendingProposalInsertInput) {
+  const [project] = await transaction.select({ aggregateVersion: tripProjects.aggregateVersion }).from(tripProjects).where(and(eq(tripProjects.id, input.tripProjectId), eq(tripProjects.userId, userId))).limit(1).for("update");
+  if (!project || !Array.isArray(input.operations) || input.operations.length === 0 || input.operations.length > 20 || typeof input.rationale !== "string" || !input.rationale.trim() || input.rationale.trim().length > 500 || /[\r\n]/.test(input.rationale)) return null;
+  const operations: unknown[] = [];
+  let anchorCount = 0;
+  let hasConstraints = false;
+  let firstAnchorRole: "origin" | "destination" | null = null;
+  for (const operation of input.operations) {
+    if (!isRecord(operation)) return null;
+    if (operation.kind === "create-item" && isRecord(operation.item) && operation.parentItemId === null && operation.ordinal === anchorCount && !hasConstraints) {
+      const item = itemInput(operation.item, operation.parentItemId, operation.ordinal);
+      const expectedRole: "origin" | "destination" | null = anchorCount === 0 ? operation.item.anchorRole === "origin" || operation.item.anchorRole === "destination" ? operation.item.anchorRole : null : anchorCount === 1 && firstAnchorRole === "origin" ? "destination" : null;
+      if (!item || item.kind !== "anchor" || item.anchorRole !== expectedRole || item.type !== null || item.state !== "idea" || item.notes !== null || item.plannedAt !== null || item.backupTargetItemId !== null || item.transportOriginLabel !== null || item.transportDestinationLabel !== null || item.accommodationPlaceAreaLabel !== null) return null;
+      try { operations.push({ kind: "create-item", item: { ...normalizePlanItem(item), plannedAt: null }, parentItemId: null, ordinal: operation.ordinal }); } catch { return null; }
+      if (anchorCount === 0) firstAnchorRole = expectedRole;
+      anchorCount += 1;
+      continue;
+    }
+    if (!hasConstraints && operation.kind === "upsert-constraints" && isRecord(operation.constraints) && operation.expectedConstraintsVersion === null) {
+      try { operations.push({ kind: "upsert-constraints", constraints: normalizeConstraints(operation.constraints), expectedConstraintsVersion: null }); } catch { return null; }
+      hasConstraints = true;
+      continue;
+    }
+    return null;
+  }
+  if (operations.length === 0) return null;
+  const actor = await loadActor(transaction, userId); if (!actor) return null;
+  const [proposal] = await transaction.insert(tripChangeProposals).values({ tripProjectId: input.tripProjectId, userId, creatorClass: "owner_command", status: "pending", rationale: input.rationale.trim(), operations, expectedAggregateVersion: project.aggregateVersion, expectedItemVersions: null, orderingPreconditions: null, alternatives: null, expiresAt: null, sourceAssistantMessageId: null }).returning({ id: tripChangeProposals.id });
+  await recordAuditEvent({ actor: toUserAuditActor(actor), operation: "create", targetType: "trip_change_proposal", targetId: proposal!.id, afterSummary: JSON.stringify({ tripProjectId: input.tripProjectId, proposalId: proposal!.id, status: "pending", conversion: true }) }, transaction);
+  return proposal ?? null;
+}
 export async function expireTripChangeProposalInTransaction(transaction: TripPlanCommandTransaction, input: ExpireTripChangeProposalInput): Promise<ExpireTripChangeProposalResult> {
   const now = input.now ?? new Date(); const [proposal] = await transaction.select({ id: tripChangeProposals.id, tripProjectId: tripChangeProposals.tripProjectId, userId: tripChangeProposals.userId, status: tripChangeProposals.status, rationale: tripChangeProposals.rationale, operations: tripChangeProposals.operations, alternatives: tripChangeProposals.alternatives, expiresAt: tripChangeProposals.expiresAt, createdAt: tripChangeProposals.createdAt, terminalTimestamp: tripChangeProposals.terminalTimestamp }).from(tripChangeProposals).where(and(eq(tripChangeProposals.id, input.proposalId), eq(tripChangeProposals.tripProjectId, input.tripProjectId))).limit(1).for("update");
   if (!proposal) return { success: false, reason: "not_found" }; if (proposal.status !== "pending" || !proposal.expiresAt || proposal.expiresAt > now) { const items = await loadPlanItems(transaction, proposal.tripProjectId, proposal.userId); return { success: true, proposal: terminal(proposal, proposal.status, proposal.terminalTimestamp, proposalSummary(Array.isArray(proposal.operations) ? proposal.operations : [], new Map(items.map((item) => [item.id, item])))) }; }

@@ -6,7 +6,7 @@ import { conversations, planningContextSessions, users } from "@/db/schema";
 import { resetTestDatabase, testDb } from "./helpers/db";
 
 function session(revision: number, origin = "Hà Nội") {
-  return { intent: "trip_planning" as const, slots: { origin }, missingSlots: ["destination"] as const, status: "collecting" as const, sourceMessageIds: ["message-1"], revision };
+  return { intent: "trip_planning" as const, slots: { origin }, slotSourceMessageIds: { origin: "message-1" }, missingSlots: ["destination"] as const, status: "collecting" as const, sourceMessageIds: ["message-1"], revision };
 }
 
 describe("planning context session storage", () => {

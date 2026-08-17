@@ -2,9 +2,9 @@
 title: 'Convert Eligible Chat Context Into A Reviewable Trip'
 type: 'feature'
 created: '2026-08-17'
-status: 'ready-for-dev'
+status: 'done'
 baseline_revision: 'f0db58c74625d3fc3764425f686a81eec3d5f109'
-review_loop_iteration: 0
+review_loop_iteration: 1
 followup_review_recommended: false
 context:
   - '_bmad-output/specs/spec-epic-21/SPEC.md'
@@ -101,7 +101,7 @@ Bốn trạng thái là projection của recommendation aggregate hiện hữu, 
 
 ## Auto Run Result
 
-Status: ready-for-dev
+Status: done
 
 Historical blocking condition: The current `PlanningContextSession` stored aggregate `sourceMessageIds`, but not a source message ID for each explicit slot. Therefore Story 21.7 could not prove that a mapped `origin`, `destination`, or `adults` value came from the latest completed unscoped terminal command without either extending the bounded session contract, restoring asynchronous `chat_context` extraction as authority, or parsing stored message content. Each option violated the exact Story 21.7 constraints.
 
@@ -111,4 +111,6 @@ Implemented before the block: recommendation eligibility is terminal/unscoped/ow
 
 Focused verification completed before the final provenance finding: `pnpm exec vitest run tests/trip-recommendations.test.ts tests/traveler-ui-foundation.test.ts` passed (2 files, 16 tests); `pnpm exec vitest run --project integration tests/trip-recommendations.integration.test.ts tests/trip-recommendations-api.integration.test.ts` passed (2 files, 27 tests); `pnpm typecheck`, `pnpm lint` (0 errors, 64 existing warnings), `pnpm build`, and `git diff --check` passed.
 
-No commit, push, or sprint-status edit was performed. HEAD remains `f0db58c74625d3fc3764425f686a81eec3d5f109`.
+Recovery completed: planning sessions now persist only a flat `slotSourceMessageIds` map alongside existing bounded slot values and aggregate source IDs. A conversion includes only supported `origin`, `destination`, and `adults` slots whose source ID equals the current successful unscoped terminal user message ID. The terminal command is also bound to the ordinary conversation scope ID. No transcript, assistant prose, prompt, assumption, provider payload, schema, migration, table, workflow, endpoint, or pre-Apply plan mutation was added.
+
+Verification completed: `pnpm exec vitest run tests/planning-context.test.ts tests/trip-recommendations.test.ts tests/traveler-ui-foundation.test.ts` passed (3 files, 23 tests); `pnpm exec vitest run --project integration tests/trip-recommendations.integration.test.ts tests/trip-recommendations-api.integration.test.ts` passed (2 files, 29 tests); `pnpm typecheck`, `pnpm lint` (0 errors, 64 existing warnings), `pnpm build`, and `git diff --check` passed.

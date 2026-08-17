@@ -45,6 +45,7 @@ export type RouteResolution =
 export type PlanningContextSession = {
   intent: PlanningSessionIntent;
   slots: Partial<Record<PlanningSessionSlotName, string>>;
+  slotSourceMessageIds: Partial<Record<PlanningSessionSlotName, string>>;
   missingSlots: PlanningSessionSlotName[];
   status: PlanningSessionStatus;
   sourceMessageIds: string[];
@@ -58,13 +59,16 @@ const maxPostgresInteger = 2_147_483_647;
 
 /** Rejects all operational, provider, and nested data before it reaches session storage. */
 export function parsePlanningContextSession(value: unknown): PlanningContextSession | null {
-  if (!isRecord(value) || !hasExactKeys(value, ["intent", "slots", "missingSlots", "status", "sourceMessageIds", "revision"])) return null;
-  if (!planningSessionIntents.includes(value.intent as PlanningSessionIntent) || !planningSessionStatuses.includes(value.status as PlanningSessionStatus) || !isPlainRecord(value.slots) || !Array.isArray(value.missingSlots) || !Array.isArray(value.sourceMessageIds) || !positiveInteger(value.revision)) return null;
+  if (!isRecord(value) || !hasExactKeys(value, ["intent", "slots", "slotSourceMessageIds", "missingSlots", "status", "sourceMessageIds", "revision"])) return null;
+  if (!planningSessionIntents.includes(value.intent as PlanningSessionIntent) || !planningSessionStatuses.includes(value.status as PlanningSessionStatus) || !isPlainRecord(value.slots) || !isPlainRecord(value.slotSourceMessageIds) || !Array.isArray(value.missingSlots) || !Array.isArray(value.sourceMessageIds) || !positiveInteger(value.revision)) return null;
   const slots = value.slots;
+  const slotSourceMessageIds = value.slotSourceMessageIds;
   const missingSlots = value.missingSlots;
   const sourceMessageIds = value.sourceMessageIds;
   const slotEntries = Object.entries(slots);
   if (slotEntries.length > planningSessionSlotNames.length || !slotEntries.every(([name, slotValue]) => planningSessionSlotNames.includes(name as PlanningSessionSlotName) && boundedText(slotValue, maxSlotValueLength))) return null;
+  const sourceEntries = Object.entries(slotSourceMessageIds);
+  if (sourceEntries.length > planningSessionSlotNames.length || !sourceEntries.every(([name, sourceMessageId]) => name in slots && planningSessionSlotNames.includes(name as PlanningSessionSlotName) && boundedText(sourceMessageId, 128) && sourceMessageIds.includes(sourceMessageId))) return null;
   if (missingSlots.length > planningSessionSlotNames.length || !uniqueStrings(missingSlots) || !missingSlots.every((name) => planningSessionSlotNames.includes(name as PlanningSessionSlotName)) || missingSlots.some((name) => name in slots)) return null;
   if (sourceMessageIds.length > maxSourceMessageIds || !uniqueStrings(sourceMessageIds) || !sourceMessageIds.every((id) => boundedText(id, 128))) return null;
   if (new TextEncoder().encode(JSON.stringify(value)).length > maxPayloadBytes) return null;
