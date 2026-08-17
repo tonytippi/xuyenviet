@@ -160,6 +160,7 @@ export async function assembleContextPrioritySourceBundle({
     chatFacts: answerContext.facts.filter((fact) => fact.source === "conversation"),
     conflicts: answerContext.conflicts,
   };
+  const routePathIds = selectedRoutePathIds(answerContext as TripAnswerContext, question);
 
   const retrievalDecision = decideWebSearchFallback({
     question,
@@ -169,11 +170,11 @@ export async function assembleContextPrioritySourceBundle({
     warnings,
     policySummary: knowledgeResult.status === "fulfilled" ? knowledgeResult.value.policySummary : undefined,
     planningExecutionRef,
-    routePathIds: selectedRoutePathIds(answerContext as TripAnswerContext, question),
+    routePathIds,
   });
   const provisionalBundle: ContextPrioritySourceBundle = { requiredNeedQuestion: question, planningExecutionRef, pendingProposal, tripAnswerContext: answerContext as TripAnswerContext, chatTripContext, knowledge, web: [], general: { available: true }, retrievalDecision, warnings };
   const finalRetrievalDecision = renderSourceBundlePromptSection(provisionalBundle).retrievalDecision;
-  const web = await loadTriggeredWebSearch({ userId, conversationId, tripProjectId: resolvedTripProjectId, userMessageId, webSearchUsageContext: webSearchUsageContext && { ...webSearchUsageContext, tripProjectId: resolvedTripProjectId ?? null }, question, retrievalDecision: finalRetrievalDecision, warnings, abortSignal, dependencies });
+  const web = await loadTriggeredWebSearch({ userId, conversationId, tripProjectId: resolvedTripProjectId, userMessageId, webSearchUsageContext: webSearchUsageContext && { ...webSearchUsageContext, tripProjectId: resolvedTripProjectId ?? null }, question, routePathIds, retrievalDecision: finalRetrievalDecision, warnings, abortSignal, dependencies });
 
   return {
     requiredNeedQuestion: question,
@@ -203,6 +204,7 @@ async function loadTriggeredWebSearch({
   userMessageId,
   webSearchUsageContext,
   question,
+  routePathIds,
   retrievalDecision,
   warnings,
   abortSignal,
@@ -214,6 +216,7 @@ async function loadTriggeredWebSearch({
   userMessageId?: string;
   webSearchUsageContext?: WebSearchUsageContext;
   question: string;
+  routePathIds: string[];
   retrievalDecision: RetrievalDecision;
   warnings: SourceBundleWarning[];
   abortSignal?: AbortSignal;
@@ -234,10 +237,13 @@ async function loadTriggeredWebSearch({
     return [];
   }
 
+  const query = buildScopedWebSearchQuery({ question, routePathIds, requiredNeeds: retrievalDecision.requiredNeeds });
+  if (!query) return [];
+
   let searchResult: Awaited<ReturnType<typeof searchWebForSourceBundle>>;
 
   try {
-    searchResult = await dependencies.searchWebForSourceBundle({ query: question, triggerReasons: retrievalDecision.webSearchTriggerReasons, abortSignal });
+    searchResult = await dependencies.searchWebForSourceBundle({ query, triggerReasons: retrievalDecision.webSearchTriggerReasons, abortSignal });
   } catch (error) {
     warnings.push("web_search_load_failed");
     console.warn("Web search skipped after unexpected failure", {
@@ -328,9 +334,10 @@ export function decideWebSearchFallback({
   routePathIds?: string[];
 }): RetrievalDecision {
   const broadPlanningQuestion = isBroadPlanningQuestion(question);
-  const requiredNeeds = evaluateRequiredNeeds({ question, knowledge, planningExecutionRef, routePathIds });
+  const evaluatedNeeds = evaluateRequiredNeeds({ question, knowledge, planningExecutionRef, routePathIds });
   const freshnessRequired = isFreshnessSensitiveQuestion(question) || knowledge.some((result) => result.freshnessSensitive);
   const conflictDetected = chatTripContext.conflicts.length > 0 || hasApprovedKnowledgeConflict(knowledge);
+  const requiredNeeds = conflictDetected ? requireVerificationForConflictedNeed(evaluatedNeeds) : evaluatedNeeds;
   const reasons: WebSearchTriggerReason[] = [];
   const knowledgePolicySummary: SafeKnowledgePolicySummary = {
     selectedCardIds: knowledge.map((result) => result.id),
@@ -350,30 +357,12 @@ export function decideWebSearchFallback({
     ...policySummary,
   };
 
-  if (warnings.includes("approved_knowledge_load_failed")) {
-    reasons.push("active_knowledge_unavailable");
-  } else if (knowledge.length === 0) {
-    reasons.push("no_active_knowledge");
-  } else if (requiredNeeds.needs.some((need) => need.outcome === "missing" || need.outcome === "requires_clarification")) {
-    reasons.push("no_active_knowledge");
-  }
-
-  if (isFreshnessSensitiveQuestion(question)) {
-    reasons.push("freshness_sensitive_request");
-  }
-
-  if (knowledge.some((result) => result.freshnessSensitive)) {
-    reasons.push("active_knowledge_may_be_stale");
-  }
-
-  if (conflictDetected) {
-    reasons.push("source_conflict");
-  }
-
-  if (knowledgePolicySummary.excludedPolicyCounts.conflict > 0) reasons.push("excluded_conflict_candidate");
-  if (knowledgePolicySummary.excludedPolicyCounts.verificationRequired > 0) reasons.push("excluded_verification_required_candidate");
-  if (knowledge.some((result) => result.policy === "caveat_only" || result.verificationRequirement === "operator_required")) {
-    reasons.push("selected_knowledge_requires_verification");
+  const webNeed = requiredNeeds.needs.find((need) => need.outcome === "missing" || need.outcome === "requires_verification");
+  if (webNeed) {
+    if (conflictDetected) reasons.push("source_conflict");
+    else if (webNeed.id === "freshness") reasons.push("freshness_sensitive_request");
+    else if (webNeed.outcome === "missing") reasons.push("no_active_knowledge");
+    else reasons.push("selected_knowledge_requires_verification");
   }
 
   return {
@@ -427,6 +416,52 @@ export function evaluateRequiredNeeds({
       return { id, outcome: "satisfied" as const, evidenceCardIds };
     }),
   });
+}
+
+function requireVerificationForConflictedNeed(snapshot: RequiredNeedSnapshot): RequiredNeedSnapshot {
+  return boundRequiredNeedSnapshot({
+    version: snapshot.version,
+    needs: snapshot.needs.map((need) => need.outcome === "satisfied" ? { ...need, outcome: "requires_verification" } : need),
+  });
+}
+
+export function buildScopedWebSearchQuery({
+  question,
+  routePathIds,
+  requiredNeeds,
+}: {
+  question: string;
+  routePathIds: string[];
+  requiredNeeds: RequiredNeedSnapshot;
+}) {
+  const need = requiredNeeds.needs.find((candidate) => candidate.outcome === "missing" || candidate.outcome === "requires_verification");
+  if (!need) return null;
+
+  const normalizedQuestion = normalizeForMatch(question)
+    .replace(/(?:toi ten la|my name is)\s+[^,.!?]+/g, " ")
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  const location = locationAnchorFromQuestion(question);
+  const terms = scopedNeedTerms(normalizedQuestion, need.id);
+  const route = need.id === "route" ? routePathIds[0]?.replace(/[^a-z0-9]+/gi, " ") : undefined;
+  const locationScope = location && !terms.split(" ").includes(location) ? location : undefined;
+  const query = [need.id === "freshness" ? "thong tin hien tai" : undefined, terms, locationScope, route]
+    .filter((value): value is string => Boolean(value))
+    .join(" ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  return query || null;
+}
+
+function scopedNeedTerms(question: string, need: RequiredNeedId) {
+  if (need === "freshness") {
+    const marker = freshnessKeywords.map(normalizeForMatch).find((keyword) => question.includes(keyword));
+    if (marker) return question.slice(question.indexOf(marker)).split(" ").filter((term) => term !== "o").slice(0, 6).join(" ");
+  }
+  if (need === "route") return question.split(" ").filter((term) => !["the", "nao", "xin", "hay", "cho", "toi"].includes(term)).slice(0, 10).join(" ");
+  return question.split(" ").filter((term) => !["goi", "y", "lich", "trinh", "ke", "hoach", "hay", "cho", "toi"].includes(term)).slice(0, 8).join(" ");
 }
 
 function selectRequiredNeedContributors(question: string, knowledge: KnowledgeSearchResult[], _planningExecutionRef: PlanningExecutionRef | undefined, routePathIds: string[]) {
@@ -799,13 +834,20 @@ function hasBothLegEndpoints(question: string, origin: string | null, destinatio
 }
 
 function decisionForRenderedKnowledge(bundle: ContextPrioritySourceBundle, renderedCardIds: string[]): RetrievalDecision {
-  const requiredNeeds = bundle.requiredNeedQuestion === undefined
+  const evaluatedNeeds = bundle.requiredNeedQuestion === undefined
     ? boundRequiredNeedSnapshot({ version: "required-needs-v1", needs: bundle.retrievalDecision.requiredNeeds.needs.map((need) => ({ ...need, evidenceCardIds: need.evidenceCardIds.filter((id) => renderedCardIds.includes(id)) })) })
     : evaluateRequiredNeeds({ question: bundle.requiredNeedQuestion, knowledge: bundle.knowledge, planningExecutionRef: bundle.planningExecutionRef, renderedCardIds, requiredNeedIds: bundle.retrievalDecision.requiredNeeds.needs.map((need) => need.id), routePathIds: selectedRoutePathIds(bundle.tripAnswerContext, bundle.requiredNeedQuestion) });
-  const gap = requiredNeeds.needs.some((need) => need.outcome === "missing" || need.outcome === "requires_clarification");
-  const reasons = gap && !bundle.retrievalDecision.webSearchTriggerReasons.includes("no_active_knowledge")
-    ? [...bundle.retrievalDecision.webSearchTriggerReasons, "no_active_knowledge" as const]
-    : bundle.retrievalDecision.webSearchTriggerReasons;
+  const requiredNeeds = bundle.retrievalDecision.conflictDetected ? requireVerificationForConflictedNeed(evaluatedNeeds) : evaluatedNeeds;
+  const webNeed = requiredNeeds.needs.find((need) => need.outcome === "missing" || need.outcome === "requires_verification");
+  const reasons = webNeed
+    ? bundle.retrievalDecision.conflictDetected
+      ? ["source_conflict" as const]
+      : webNeed.id === "freshness"
+        ? ["freshness_sensitive_request" as const]
+        : webNeed.outcome === "missing"
+          ? ["no_active_knowledge" as const]
+          : ["selected_knowledge_requires_verification" as const]
+    : [];
   const knowledgePolicySummary = bundle.retrievalDecision.knowledgePolicySummary && {
     ...bundle.retrievalDecision.knowledgePolicySummary,
     selectedCardIds: renderedCardIds,
@@ -815,7 +857,7 @@ function decisionForRenderedKnowledge(bundle: ContextPrioritySourceBundle, rende
       caveatOnly: bundle.knowledge.filter((item) => renderedCardIds.includes(item.id) && item.policy === "caveat_only").length,
     },
   };
-  return { ...bundle.retrievalDecision, approvedKnowledgeSelectedCount: renderedCardIds.length, requiredNeeds, webSearchTriggered: bundle.retrievalDecision.webSearchTriggered || gap, webSearchTriggerReasons: reasons, knowledgePolicySummary };
+  return { ...bundle.retrievalDecision, approvedKnowledgeSelectedCount: renderedCardIds.length, requiredNeeds, webSearchTriggered: Boolean(webNeed), webSearchTriggerReasons: reasons, knowledgePolicySummary };
 }
 
 function appendPlanningModeSection(lines: string[], bundle: ContextPrioritySourceBundle) {

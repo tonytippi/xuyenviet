@@ -2,7 +2,7 @@
 title: 'Verify Fresh Facts And Finalize Through Existing AI Ask'
 type: 'feature'
 created: '2026-08-17'
-status: 'ready-for-dev'
+status: 'done'
 baseline_revision: '06a0c397a721d9ac74c372f96d2e9d09f65d9cbe'
 review_loop_iteration: 0
 followup_review_recommended: false
@@ -88,6 +88,18 @@ Web result capture and web-search Usage remain the existing pre-generation behav
 - `pnpm exec vitest run --project integration tests/scoped-web-answer.integration.test.ts` -- focused serial PostgreSQL evidence passes with approved `DATABASE_URL_TEST`.
 - `pnpm typecheck` -- strict TypeScript passes.
 - `pnpm build` -- production build passes.
+
+### 2026-08-17 - Bounded Recovery Results
+
+- Implemented the scoped web-query seam in `source-bundle.ts`. Web admission remains driven solely by missing or verification-required rendered needs, and the existing web capture, Usage, and AI Ask fenced finalization paths are unchanged.
+- `pnpm exec vitest run tests/scoped-web-answer.test.ts` -- passed: 1 file, 5 tests.
+- `pnpm exec vitest run tests/ai-ask-stream-execution.test.ts -t "does not persist a partial snapshot|writes a replay"` -- passed: 1 file, 3 tests; validates retained stale-fence discard and replay behavior.
+- `pnpm typecheck` -- passed.
+- `pnpm build` -- passed. Existing admin `img` lint warnings remain outside Story 21.6 scope.
+- `pnpm test:unit -- tests/scoped-web-answer.test.ts tests/required-need-retrieval.test.ts` -- not usable for this focused story because the unit project allowlist excludes both files; Vitest reported no test files.
+- `pnpm exec vitest run tests/required-need-retrieval.test.ts` -- 11 passed, 2 failed on existing expectations unrelated to this story: route clarification without `current_plan`, and rendered-card cap expectation.
+- `pnpm exec vitest run tests/ai-ask-stream-execution.test.ts` -- 16 passed, 12 failed on existing baseline expectations unrelated to this story, including stale provenance count/handle expectations and invalid random idempotency keys. The directly targeted stale-fence/replay cases above pass.
+- `git diff --check` -- passed.
 
 ## Reconciliation History
 
