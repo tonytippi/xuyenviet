@@ -75,6 +75,7 @@
     { "idx": 70, "version": "7", "when": 1788355200000, "tag": "0070_discovery_vietnamese_eligibility", "breakpoints": true },
     { "idx": 71, "version": "7", "when": 1788441600000, "tag": "0071_discovery_eligibility_query_builder_provenance", "breakpoints": true },
     { "idx": 72, "version": "7", "when": 1788528000000, "tag": "0072_discovery_activate_vietnamese_query_builder", "breakpoints": true },
-    { "idx": 73, "version": "7", "when": 1789477200000, "tag": "0073_normalize_knowledge_province_references", "breakpoints": true }
+    { "idx": 73, "version": "7", "when": 1789477200000, "tag": "0073_normalize_knowledge_province_references", "breakpoints": true },
+    { "idx": 74, "version": "7", "when": 1789563600000, "tag": "0074_add_province_suggestion_model_purpose", "breakpoints": true }
   ]
 }

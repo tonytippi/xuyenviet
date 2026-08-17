@@ -1,22 +1,42 @@
 import { and, asc, desc, eq, gt, inArray, lt, or, sql } from "drizzle-orm";
 import { YoutubeDiscoveryActionRequiredCursorValidationError, YoutubeDiscoveryBrowseCursorValidationError, YoutubeDiscoveryHealthCursorValidationError, YoutubeDiscoveryMissionCursorValidationError, YoutubeDiscoveryReviewCursorValidationError, type AdminYoutubeDiscoveryDependencies, type AdminYoutubeDiscoveryPort } from "@xuyenviet/domain";
-import type { AdminYoutubeDiscoveryActionRequiredItem, AdminYoutubeDiscoveryHealthIncidentCursor, AdminYoutubeDiscoveryHealthIncidentDetail, AdminYoutubeDiscoveryMissionCandidate, AdminYoutubeDiscoveryPausedRun, RequestPrincipal } from "@xuyenviet/contracts";
-import { adminYoutubeDiscoveryActionRequiredPageSize, adminYoutubeDiscoveryBrowsePageSize, adminYoutubeDiscoveryHealthIncidentPageSize, adminYoutubeDiscoveryHealthStageWindowHours, adminYoutubeDiscoveryMissionPageSize, adminYoutubeDiscoveryReviewPageSize, encodeAdminYoutubeDiscoveryActionRequiredCursor, encodeAdminYoutubeDiscoveryBrowseCursor, encodeAdminYoutubeDiscoveryHealthIncidentCursor, encodeAdminYoutubeDiscoveryMissionCandidateCursor, encodeAdminYoutubeDiscoveryMissionQueryCursor, encodeAdminYoutubeDiscoveryReviewCursor } from "@xuyenviet/contracts";
+import type { AdminKnowledgeProvinceSuggestion, AdminYoutubeDiscoveryActionRequiredItem, AdminYoutubeDiscoveryHealthIncidentCursor, AdminYoutubeDiscoveryHealthIncidentDetail, AdminYoutubeDiscoveryMissionCandidate, AdminYoutubeDiscoveryPausedRun, RequestPrincipal } from "@xuyenviet/contracts";
+import { adminYoutubeDiscoveryActionRequiredPageSize, adminYoutubeDiscoveryBrowsePageSize, adminYoutubeDiscoveryHealthIncidentPageSize, adminYoutubeDiscoveryHealthStageWindowHours, adminYoutubeDiscoveryMissionPageSize, adminYoutubeDiscoveryReviewPageSize, encodeAdminYoutubeDiscoveryActionRequiredCursor, encodeAdminYoutubeDiscoveryBrowseCursor, encodeAdminYoutubeDiscoveryHealthIncidentCursor, encodeAdminYoutubeDiscoveryMissionCandidateCursor, encodeAdminYoutubeDiscoveryMissionQueryCursor, encodeAdminYoutubeDiscoveryReviewCursor, parseAdminKnowledgeProvinceSuggestion } from "@xuyenviet/contracts";
 import type { YoutubeCaptureEligibilityPort } from "@xuyenviet/domain";
 import { getDb } from "./client";
 import { createSystemAuditActor, createUserAuditActor, type AuditActor } from "./actors";
 import { recordAuditEvent } from "./audit-writers";
 import { createYoutubeDiscoveryPolicyVersion } from "./youtube-discovery";
+import { getAdminKnowledgeProvinceCoverage } from "./admin-knowledge-coverage";
+import { completeYoutubeDiscoveryProvinceSuggestion } from "./gateway";
+import { getAiGatewayPricingSnapshot, selectActiveAiGatewayModel } from "./models";
+import { writeAiUsageEvent } from "./usage";
+import { aiUsagePromptVersions, aiUsagePurposes } from "./usage-constants";
 import { aiUsageEvents, youtubeDiscoveryAppearances, youtubeDiscoveryCandidateJobs, youtubeDiscoveryCandidateReviewStates, youtubeDiscoveryCandidates, youtubeDiscoveryKnowledgeHandoffs, youtubeDiscoveryPlanningLeases, youtubeDiscoveryPolicyVersions, youtubeDiscoveryQueryProposals, youtubeDiscoveryRankingHistory, youtubeDiscoveryRecommendations, youtubeDiscoveryRuns } from "./schema";
 
 const validText = (value: unknown) => typeof value === "string" && value.trim() === value && /^[\p{L}\p{N} '-]{1,240}$/u.test(value);
 const validPriority = (value: unknown) => Number.isSafeInteger(value) && (value as number) >= 1 && (value as number) <= 100;
 const validCadence = (value: unknown) => Number.isSafeInteger(value) && (value as number) >= 15 && (value as number) <= 10_080;
+function parseProvinceSuggestion(content: string, canonicalProvinceId: string): AdminKnowledgeProvinceSuggestion | null {
+  try { const parsed: unknown = JSON.parse(content); const suggestion = parseAdminKnowledgeProvinceSuggestion(parsed); return suggestion?.canonicalProvinceId === canonicalProvinceId ? suggestion : null; } catch { return null; }
+}
 const handoffTimeoutMs = 5_000;
 export type AdminYoutubeDiscoveryDatabase = Pick<ReturnType<typeof getDb>, "execute" | "insert" | "select" | "transaction" | "update" | "delete">;
 
 export function createPostgresAdminYoutubeDiscoveryPort(captureEligibility: YoutubeCaptureEligibilityPort = { async check() { return "unavailable"; } }, db: AdminYoutubeDiscoveryDatabase = getDb(), handoff: AdminYoutubeDiscoveryDependencies["knowledgeHandoff"] = { async submit() { return "reconciling"; }, async lookup() { return "reconciling"; } }, actionOwners: NonNullable<AdminYoutubeDiscoveryDependencies["actionOwners"]> = { async listKnowledgeRecommendations() { return { items: [], admitsCursor: false }; } }, missionActionFrontier: NonNullable<AdminYoutubeDiscoveryDependencies["missionActionFrontier"]> = { async listMissionNeeds() { return { items: [], admitsCursor: false }; } }, missionOwners: NonNullable<AdminYoutubeDiscoveryDependencies["missionOwners"]> = { async listMissionCoverage() { return { items: [], nextCursor: null }; }, async getMissionDetail() { return null; } }): AdminYoutubeDiscoveryPort {
   return {
+    async listProvinceCoverage() { return getAdminKnowledgeProvinceCoverage(db); },
+    async suggestProvinceQuery(principal, canonicalProvinceId) {
+      const coverage = await getAdminKnowledgeProvinceCoverage(db);
+      const selected = coverage.items.find((item) => item.canonicalProvinceId === canonicalProvinceId);
+      if (!selected) return null;
+      const model = await selectActiveAiGatewayModel({ purpose: "youtube_discovery_province_suggestion", requiredCapabilities: { textInput: true, extraction: true }, db });
+      if (!model) return null;
+      const result = await completeYoutubeDiscoveryProvinceSuggestion({ model: model.gatewayModelName, messages: [{ role: "system", content: "Chỉ trả về JSON chính xác với canonicalProvinceId, need, reason, queryText. Viết tiếng Việt. Query YouTube tự nhiên, không URL. Không thêm trường." }, { role: "user", content: JSON.stringify({ canonicalProvinceId: selected.canonicalProvinceId, currentName: selected.currentName, legacyNames: selected.legacyNames, topics: selected.topics, freshnessSensitiveCount: selected.freshnessSensitiveCount, latestUpdatedAt: selected.latestUpdatedAt }) }] });
+      const suggestion = result.ok ? parseProvinceSuggestion(result.content, canonicalProvinceId) : null;
+      await db.transaction(async (transaction) => { await writeAiUsageEvent(transaction, { initiatedByUserId: principal.userId, executorSystem: "system-youtube-discovery", purpose: aiUsagePurposes.youtubeDiscoveryProvinceSuggestion, provider: result.provider, model: result.model, aiGatewayModelId: model.id, promptVersion: aiUsagePromptVersions.youtubeDiscoveryProvinceSuggestion, status: suggestion ? "success" : "failure", latencyMs: result.latencyMs, promptTokens: result.ok ? result.usage.promptTokens : null, completionTokens: result.ok ? result.usage.completionTokens : null, totalTokens: result.ok ? result.usage.totalTokens : null, cachedPromptTokens: result.ok ? result.usage.cachedPromptTokens : null, cacheWritePromptTokens: result.ok ? result.usage.cacheWritePromptTokens : null, pricingSnapshot: getAiGatewayPricingSnapshot(model), errorCode: suggestion ? null : result.ok ? "invalid_output" : result.errorCode, providerRequestId: result.requestMetadata.providerRequestId }); await recordAuditEvent({ actor: actorFor(principal), operation: "create", targetType: "youtube_discovery_province_suggestion", targetId: canonicalProvinceId, afterSummary: JSON.stringify({ canonicalProvinceId, outcome: suggestion ? "valid" : "unavailable", promptVersion: aiUsagePromptVersions.youtubeDiscoveryProvinceSuggestion }) }, transaction); });
+      return suggestion;
+    },
     async list() {
       const rows = await db.select({ id: youtubeDiscoveryQueryProposals.id, origin: youtubeDiscoveryQueryProposals.origin, queryText: youtubeDiscoveryQueryProposals.queryText, reason: youtubeDiscoveryQueryProposals.reason, priority: youtubeDiscoveryQueryProposals.priority, enabled: youtubeDiscoveryQueryProposals.enabled, cadenceMinutes: youtubeDiscoveryQueryProposals.cadenceMinutes, nextDueAt: youtubeDiscoveryQueryProposals.nextDueAt, policyEnabled: youtubeDiscoveryPolicyVersions.enabled }).from(youtubeDiscoveryQueryProposals).leftJoin(youtubeDiscoveryPolicyVersions, eq(youtubeDiscoveryPolicyVersions.isCurrent, true)).orderBy(asc(youtubeDiscoveryQueryProposals.createdAt)).limit(200);
       return { items: rows.map((row) => ({ id: row.id, origin: row.origin, queryText: row.queryText, reason: row.reason, priority: row.priority, enabled: row.enabled, cadenceMinutes: row.cadenceMinutes, nextRunAt: row.enabled && row.policyEnabled === true ? row.nextDueAt?.toISOString() ?? null : null, pausedReason: !row.enabled ? "operator" : row.policyEnabled !== true ? "global" : null })) };

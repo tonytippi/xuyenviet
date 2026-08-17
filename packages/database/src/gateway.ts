@@ -65,7 +65,7 @@ export type AiGatewayExtractionFailure = {
 
 export type AiGatewayExtractionResult = AiGatewaySuccess | AiGatewayExtractionFailure;
 
-export type AiGatewayCompletionPurpose = "ai_ask" | "extraction" | "evaluation" | "trip_proposal_draft" | "youtube_discovery_triage";
+export type AiGatewayCompletionPurpose = "ai_ask" | "extraction" | "evaluation" | "trip_proposal_draft" | "youtube_discovery_triage" | "youtube_discovery_province_suggestion";
 
 export async function streamInitialAiAskAnswer({
   model,
@@ -229,6 +229,9 @@ export async function completeTripChangeProposalDraft({
 export async function completeYoutubeDiscoveryTriage({ model, messages, abortSignal }: { model: string; messages: GatewayMessage[]; abortSignal?: AbortSignal }): Promise<AiGatewayExtractionResult> {
   return completeGatewayPrompt({ model, messages, abortSignal, purpose: "youtube_discovery_triage", maxTokens: 300 });
 }
+export async function completeYoutubeDiscoveryProvinceSuggestion({ model, messages, abortSignal }: { model: string; messages: GatewayMessage[]; abortSignal?: AbortSignal }): Promise<AiGatewayExtractionResult> {
+  return completeGatewayPrompt({ model, messages, abortSignal, purpose: "youtube_discovery_province_suggestion", maxTokens: 300 });
+}
 
 async function completeGatewayPrompt({
   model,
@@ -341,7 +344,7 @@ function buildGatewayUrl() {
 }
 
 function getGatewayTimeoutMs(purpose?: AiGatewayCompletionPurpose) {
-  const configuredValue = purpose === "extraction" || purpose === "evaluation" || purpose === "trip_proposal_draft" || purpose === "youtube_discovery_triage" ? process.env.AI_GATEWAY_EXTRACTION_TIMEOUT_MS ?? process.env.AI_GATEWAY_TIMEOUT_MS : process.env.AI_GATEWAY_TIMEOUT_MS;
+  const configuredValue = purpose === "extraction" || purpose === "evaluation" || purpose === "trip_proposal_draft" || purpose === "youtube_discovery_triage" || purpose === "youtube_discovery_province_suggestion" ? process.env.AI_GATEWAY_EXTRACTION_TIMEOUT_MS ?? process.env.AI_GATEWAY_TIMEOUT_MS : process.env.AI_GATEWAY_TIMEOUT_MS;
 
   if (!configuredValue) {
     return defaultGatewayTimeoutMs;
@@ -366,7 +369,7 @@ function logGatewayFailure(details: {
   reason?: string;
   purpose?: "answer" | AiGatewayCompletionPurpose;
 }) {
-  console.warn(details.purpose === "extraction" || details.purpose === "evaluation" || details.purpose === "trip_proposal_draft" || details.purpose === "youtube_discovery_triage" ? `AI Gateway ${details.purpose} failed` : "AI Gateway answer generation failed", {
+  console.warn(details.purpose === "extraction" || details.purpose === "evaluation" || details.purpose === "trip_proposal_draft" || details.purpose === "youtube_discovery_triage" || details.purpose === "youtube_discovery_province_suggestion" ? `AI Gateway ${details.purpose} failed` : "AI Gateway answer generation failed", {
     errorCode: details.errorCode,
     latencyMs: details.latencyMs,
     model: details.model,

@@ -33,6 +33,8 @@ beforeEach(async () => {
   port = { list: vi.fn().mockResolvedValue({ items: [query] }), listReview: vi.fn().mockResolvedValue({ items: [], nextCursor: null }), getReview: vi.fn().mockResolvedValue(null), acceptReview: vi.fn().mockResolvedValue({ outcome: "submitted" }), deferReview: vi.fn().mockResolvedValue({ outcome: "deferred" }), skipReview: vi.fn().mockResolvedValue({ outcome: "skipped" }), create: vi.fn().mockResolvedValue(query), edit: vi.fn().mockResolvedValue(query), reprioritize: vi.fn().mockResolvedValue(query), pause: vi.fn().mockResolvedValue({ ...query, enabled: false, nextRunAt: null, pausedReason: "operator" }), resume: vi.fn().mockResolvedValue(query), listActionRequired: vi.fn().mockResolvedValue({ items: [], nextCursor: null }), listMissionCoverage: vi.fn().mockResolvedValue({ items: [], nextCursor: null }), listMissionQueries: vi.fn().mockResolvedValue({ items: [], nextCursor: null }), listMissionCandidates: vi.fn().mockResolvedValue({ items: [], nextCursor: null }), missionFunnel: vi.fn().mockResolvedValue({ asOf: "2026-08-07T00:00:00.000Z", discovered: 0, enriched: 0, triaged: 0, recommended: 0, pendingReview: 0, accepted: 0, deferred: 0, skipped: 0 }), getMissionDetail: vi.fn().mockResolvedValue(null), healthOverview: vi.fn().mockResolvedValue({ asOf: "2026-08-07T00:00:00.000Z", lastUpdatedAt: null, planning: { state: "no_run", at: null, lastUpdatedAt: null, nextRunAt: null, retryCount: null, category: "unavailable", freshness: "unavailable" }, querySchedule: { enabled: null, cadenceMinutes: null, nextRunAt: null, lastUpdatedAt: null, freshness: "unavailable" }, latestQueryRun: { state: "no_run", at: null, lastUpdatedAt: null, nextRunAt: null, retryCount: null, category: "unavailable", freshness: "unavailable" }, throughput: { windowHours: 24, discovered: 0, enriched: 0, triaged: 0, recommended: 0, lastUpdatedAt: null }, backlog: { pending: 0, deferred: 0, oldestDeferredAt: null, deferredAge: "unavailable", lastUpdatedAt: null }, incidents: [], usage: { availability: "missing", requests: 0, totalTokens: null, costMicros: null, lastUpdatedAt: null, freshness: "unavailable" } }), getHealthIncident: vi.fn().mockResolvedValue(null) };
   port.listBrowse = vi.fn().mockResolvedValue({ items: [], nextCursor: null });
   port.listForeignFallback = vi.fn().mockResolvedValue({ items: [] });
+  port.listProvinceCoverage = vi.fn().mockResolvedValue({ items: [] });
+  port.suggestProvinceQuery = vi.fn().mockResolvedValue(null);
   port.setEnabled = vi.fn().mockResolvedValue({ enabled: false, version: 2, createdAt: "2026-08-07T00:00:00.000Z", changed: true });
   port.healthOverview.mockResolvedValue({ asOf: "2026-08-07T00:00:00.000Z", lastUpdatedAt: null, policy: { enabled: null }, planning: { state: "no_run", at: null, lastUpdatedAt: null, nextRunAt: null, retryCount: null, category: "unavailable", freshness: "unavailable" }, querySchedule: { enabled: null, cadenceMinutes: null, nextRunAt: null, lastUpdatedAt: null, freshness: "unavailable" }, latestQueryRun: { state: "no_run", at: null, lastUpdatedAt: null, nextRunAt: null, retryCount: null, category: "unavailable", freshness: "unavailable" }, pausedRuns: [], throughput: { windowHours: 24, discovered: 0, enriched: 0, triaged: 0, recommended: 0, lastUpdatedAt: null, freshness: "unavailable" }, backlog: { pending: 0, deferred: 0, candidateQueued: 0, candidateRetrying: 0, candidateRunning: 0, oldestDeferredAt: null, deferredAge: "unavailable", lastUpdatedAt: null }, quality: { tooShort: 0, durationUnknown: 0, nonVietnamese: 0, languageUnknown: 0, foreignFallback: 0, vietnameseConsider: 0, considered: 0, vietnameseFitPercent: null, durationViolations: 0 }, incidents: [], usage: { availability: "missing", requests: 0, totalTokens: null, costMicros: null, lastUpdatedAt: null, freshness: "unavailable" } });
   identities = createPostgresApiIdentityRepository(getTestDatabaseUrl(), browserAuth.sessionLookupKey, browserAuth.oauthTransactionProtectionKey);
@@ -45,6 +47,31 @@ beforeEach(async () => {
 afterEach(async () => { await app.close(); await identities.close(); });
 
 describe("admin YouTube Discovery direct API", () => {
+  test("denies unauthorized and malformed province suggestion requests before port admission", async () => {
+    await request(app.getHttpServer()).post("/v1/admin/knowledge/youtube-discovery/province-suggestion").send({ canonicalProvinceId: "vn-21-da-nang" }).expect(401);
+    const traveler = await browserSession("traveler", "traveler");
+    await request(app.getHttpServer()).post("/v1/admin/knowledge/youtube-discovery/province-suggestion").set({ Cookie: traveler.cookie, Origin: "https://admin.xuyenviet.app", "x-xuyenviet-csrf": traveler.csrf }).send({ canonicalProvinceId: "vn-21-da-nang" }).expect(403);
+    const operator = await browserSession("operator", "operator");
+    const headers = { Cookie: operator.cookie, Origin: "https://admin.xuyenviet.app", "x-xuyenviet-csrf": operator.csrf };
+    await request(app.getHttpServer()).post("/v1/admin/knowledge/youtube-discovery/province-suggestion").set(headers).send({ canonicalProvinceId: "vn-21-da-nang", demand: "unsafe" }).expect(400);
+    await request(app.getHttpServer()).post("/v1/admin/knowledge/youtube-discovery/province-suggestion").set(headers).send({ canonicalProvinceId: "not-a-canonical-id" }).expect(400);
+    await request(app.getHttpServer()).post("/v1/admin/knowledge/youtube-discovery/province-suggestion").set(headers).send({ canonicalProvinceId: "vn-99-foreign" }).expect(400);
+    expect(port.suggestProvinceQuery).not.toHaveBeenCalled();
+  });
+
+  test("forwards an authorized exact province suggestion command and fails closed for unavailable output", async () => {
+    const operator = await browserSession("operator", "operator");
+    const headers = { Cookie: operator.cookie, Origin: "https://admin.xuyenviet.app", "x-xuyenviet-csrf": operator.csrf };
+    const suggestion = { canonicalProvinceId: "vn-21-da-nang", need: "Cần thêm thông tin đường đi.", reason: "Chủ đề còn ít.", queryText: "kinh nghiệm lái xe Đà Nẵng" };
+    port.suggestProvinceQuery.mockResolvedValueOnce(suggestion);
+    await request(app.getHttpServer()).post("/v1/admin/knowledge/youtube-discovery/province-suggestion").set(headers).send({ canonicalProvinceId: "vn-21-da-nang" }).expect(201, suggestion);
+    expect(port.suggestProvinceQuery).toHaveBeenCalledWith(expect.objectContaining({ userId: "operator", email: "operator@example.com" }), "vn-21-da-nang");
+    port.suggestProvinceQuery.mockResolvedValueOnce(null);
+    await request(app.getHttpServer()).post("/v1/admin/knowledge/youtube-discovery/province-suggestion").set(headers).send({ canonicalProvinceId: "vn-21-da-nang" }).expect(503);
+    port.suggestProvinceQuery.mockResolvedValueOnce({ ...suggestion, canonicalProvinceId: "vn-01-ha-noi" });
+    await request(app.getHttpServer()).post("/v1/admin/knowledge/youtube-discovery/province-suggestion").set(headers).send({ canonicalProvinceId: "vn-21-da-nang" }).expect(503);
+  });
+
   test("denies anonymous and traveler commands before port admission", async () => {
     await request(app.getHttpServer()).post("/v1/admin/knowledge/youtube-discovery").send({ queryText: "Da Lat route", priority: 50, cadenceMinutes: 60 }).expect(401);
     const traveler = await browserSession("traveler", "traveler");

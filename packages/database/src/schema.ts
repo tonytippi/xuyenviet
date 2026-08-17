@@ -59,7 +59,7 @@ export type DomainOutboxStatus = (typeof domainOutboxStatusValues)[number];
 export const aiAskDomainOutboxEventTypeValues = ["ai_ask.context_extraction.v1", "ai_ask.answer_annotation.v1", "ai_ask.trip_proposal_draft.v1"] as const;
 export type AiAskDomainOutboxEventType = (typeof aiAskDomainOutboxEventTypeValues)[number];
 
-export const aiGatewayModelPurposeValues = ["ai_ask_initial_answer", "extraction", "embeddings", "evaluation", "youtube_discovery_triage"] as const;
+export const aiGatewayModelPurposeValues = ["ai_ask_initial_answer", "extraction", "embeddings", "evaluation", "youtube_discovery_triage", "youtube_discovery_province_suggestion"] as const;
 export type AiGatewayModelPurpose = (typeof aiGatewayModelPurposeValues)[number];
 
 export const sourceKindValues = ["url", "facebook", "youtube", "copied_post", "pasted_text", "screenshot"] as const;
@@ -1546,7 +1546,7 @@ export const aiGatewayModels = pgTable(
     index("ai_gateway_models_default_idx").on(model.purpose, model.defaultForPurpose),
     check(
       "ai_gateway_models_purpose_check",
-      sql`${model.purpose} in ('ai_ask_initial_answer', 'extraction', 'embeddings', 'evaluation', 'youtube_discovery_triage')`,
+      sql`${model.purpose} in ('ai_ask_initial_answer', 'extraction', 'embeddings', 'evaluation', 'youtube_discovery_triage', 'youtube_discovery_province_suggestion')`,
     ),
     check("ai_gateway_models_display_label_not_empty_check", sql`length(btrim(${model.displayLabel})) > 0`),
     check("ai_gateway_models_gateway_model_name_not_empty_check", sql`length(btrim(${model.gatewayModelName})) > 0`),

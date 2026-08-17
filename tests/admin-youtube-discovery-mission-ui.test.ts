@@ -1,8 +1,8 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, test } from "vitest";
-import { parseAdminYoutubeDiscoveryMissionCoveragePage } from "@xuyenviet/contracts";
-import { YoutubeDiscoveryMissionQuality, validateMissionQueryDraft } from "../apps/admin/app/knowledge/youtube-discovery/mission/mission";
+import { parseAdminYoutubeDiscoveryMissionCoveragePage, type AdminKnowledgeProvinceCoverage } from "@xuyenviet/contracts";
+import { filterProvinceCoverage, YoutubeDiscoveryMissionQuality, validateMissionQueryDraft } from "../apps/admin/app/knowledge/youtube-discovery/mission/mission";
 
 describe("Mission UI interaction boundary", () => {
   test("rejects unsafe responses before presentation", () => {
@@ -16,6 +16,16 @@ describe("Mission UI interaction boundary", () => {
     expect(validateMissionQueryDraft({ queryText: "Đèo Prenn", priority: "25", cadenceMinutes: "60" }, true)).toEqual({});
     expect(validateMissionQueryDraft({ queryText: "Đèo Prenn", priority: "25", cadenceMinutes: "10081" }, true)).toEqual({ cadenceMinutes: "Chu kỳ phải từ 15 đến 10080 phút." });
     expect(validateMissionQueryDraft({ queryText: "Đèo Prenn", priority: "", cadenceMinutes: "60" }, false)).toEqual({ priority: "Ưu tiên phải từ 1 đến 100." });
+  });
+
+  test("searches canonical current and official legacy province names locally", () => {
+    const provinces: AdminKnowledgeProvinceCoverage[] = [
+      { canonicalProvinceId: "vn-01-ha-noi", currentName: "Hà Nội", legacyNames: ["Hà Tây"], topics: [], freshnessSensitiveCount: 0, latestUpdatedAt: null },
+      { canonicalProvinceId: "vn-79-ho-chi-minh", currentName: "Hồ Chí Minh", legacyNames: ["Sài Gòn"], topics: [], freshnessSensitiveCount: 0, latestUpdatedAt: null },
+    ];
+    expect(filterProvinceCoverage(provinces, "ha tay")).toEqual([provinces[0]]);
+    expect(filterProvinceCoverage(provinces, "sai gon")).toEqual([provinces[1]]);
+    expect(filterProvinceCoverage(provinces, "Đà Nẵng")).toEqual([]);
   });
 
   test("renders the bounded Vietnamese-first quality proof", () => {

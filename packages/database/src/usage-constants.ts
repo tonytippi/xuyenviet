@@ -5,6 +5,7 @@ export const aiUsagePurposes = {
   webSearchFallback: "web_search_fallback",
   tripChangeProposalDraft: "trip_proposal_draft",
   youtubeDiscoveryTriage: "youtube_discovery_triage",
+  youtubeDiscoveryProvinceSuggestion: "youtube_discovery_province_suggestion",
 } as const;
 
 export const aiUsagePromptVersions = {
@@ -18,6 +19,7 @@ export const aiUsagePromptVersions = {
   webSearchFallback: "web_search_fallback_v1",
   tripChangeProposalDraft: "trip_change_proposal_draft_v1",
   youtubeDiscoveryTriage: "youtube_discovery_triage_v1",
+  youtubeDiscoveryProvinceSuggestion: "youtube_discovery_province_suggestion_v1",
 } as const;
 
 export const aiUsageProviders = {

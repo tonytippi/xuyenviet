@@ -474,7 +474,7 @@ development_status:
   # Epic 23 reuses the existing candidate review and Knowledge intake handoff.
   epic-23: in-progress
   23-1-normalize-current-and-legacy-province-references: review
-  23-2-show-province-coverage-and-propose-vietnamese-queries: backlog
+  23-2-show-province-coverage-and-propose-vietnamese-queries: review
   23-3-run-confirmed-queries-immediately-and-show-progress: backlog
   epic-23-retrospective: optional
 
