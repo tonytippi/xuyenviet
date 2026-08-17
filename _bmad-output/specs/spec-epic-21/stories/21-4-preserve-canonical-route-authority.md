@@ -5,7 +5,7 @@ created: '2026-08-16'
 status: 'done'
 baseline_revision: '0496ce120b4032508068a2649573925670fd0fdd'
 review_loop_iteration: 0
-followup_review_recommended: true
+followup_review_recommended: false
 context:
   - '_bmad-output/specs/spec-epic-21/story-contracts.md'
   - '_bmad-output/specs/spec-epic-21/SPEC.md'
@@ -79,6 +79,15 @@ deferred: []
   - [medium] [patch] Startup validation now requires every static coverage path to match its coverage endpoints after normalization.
   - [medium] [patch] Focused integration coverage verifies stale item-version and non-transport set-path operations remain pending and leave route state unchanged.
 
+### 2026-08-17 — Follow-up review pass
+- intent_gap: 0
+- bad_spec: 0
+- patch: 1 (medium 1)
+- defer: 0
+- reject: 19
+- addressed_findings:
+  - [medium] [patch] The AI proposal creation validator now accepts set/clear route operations only for an existing transport leg and validates set-path IDs against the static manifest, so the normal proposal path reaches the existing Apply transaction safely.
+
 ## Auto Run Result
 
 Status: ready-for-dev
@@ -97,7 +106,7 @@ Files changed:
 - `packages/database/src/trip-plan-commands.ts` and `packages/database/src/traveler-proposal-commands.ts` — version-fenced set and clear operations through existing proposal Apply.
 - `tests/route-authority.test.ts`, `tests/route-authority.integration.test.ts`, `tests/drizzle-migration-plan.test.ts`, and `vitest.config.ts` — focused resolver, migration, and persistence evidence.
 
-Review findings: 2 medium patches applied; 0 deferred; 17 rejected as beyond the exact story contract. Follow-up review recommendation: true (patched high: 0, medium: 2, low: 0; score: 6).
+Review findings: follow-up pass applied 1 medium patch; 0 deferred; 19 rejected as noise or outside the exact contract. Follow-up review recommendation: false (patched high: 0, medium: 1, low: 0; score: 3).
 
 Verification:
 - `pnpm test:unit -- tests/route-authority.test.ts tests/drizzle-migration-plan.test.ts` — passed (44 files, 369 tests); the unit wrapper ran its configured project beyond the focused arguments.

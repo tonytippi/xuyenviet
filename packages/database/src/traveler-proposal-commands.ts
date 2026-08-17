@@ -20,7 +20,7 @@ export type DismissTripChangeProposalResult = { success: true; proposal: Termina
 export type ExpireTripChangeProposalInput = { tripProjectId: string; proposalId: string; now?: Date };
 export type ExpireTripChangeProposalResult = { success: true; proposal: TerminalProposalRow } | { success: false; reason: "not_found" };
 export type TerminalProposalRow = { id: string; userId: string; status: "pending" | "applied" | "dismissed" | "expired"; rationale: string; operations: unknown; alternatives: unknown; expiresAt: Date | null; createdAt: Date; terminalTimestamp: Date | null; affectedItems: ProposalAffectedItem[]; beforeAfter: ProposalBeforeAfter[] };
-export type ProposalAffectedItem = { itemId: string; kind: TripPlanItemKind; label: string; change: "create" | "update" | "remove" | "reorder" | "change-state" | "upsert-constraints" };
+export type ProposalAffectedItem = { itemId: string; kind: TripPlanItemKind; label: string; change: "create" | "update" | "remove" | "reorder" | "change-state" | "set-leg-path" | "clear-leg-path" | "upsert-constraints" };
 export type ProposalBeforeAfter = { operation: string; before: string | null; after: string | null };
 
 class ProposalOperationFailure extends Error { constructor(readonly reason: "refresh_required" | "not_found" | "expired") { super(reason); } }

@@ -1,6 +1,6 @@
 import { and, eq } from "drizzle-orm";
 
-import { getDb, normalizeConstraints, normalizePlanItem } from "@xuyenviet/database";
+import { getDb, isCanonicalRoutePathId, normalizeConstraints, normalizePlanItem } from "@xuyenviet/database";
 import { tripChangeProposals, tripPlanItems, tripProjects, type TripChangeProposalStatus, type TripPlanAnchorRole, type TripPlanItemKind, type TripPlanItemState, type TripPlanItemType } from "@xuyenviet/database";
 import { createSystemAuditActor } from "../audit/actors";
 import { recordAuditEvent } from "../audit/events";
@@ -29,11 +29,13 @@ export type TripChangeProposalOperation =
   | { kind: "remove-item"; itemId: string }
   | { kind: "reorder-item"; itemId: string; parentItemId?: string | null; ordinal: number }
   | { kind: "change-item-state"; itemId: string; state: TripPlanItemState; backupTargetItemId?: string | null }
+  | { kind: "set-leg-path"; itemId: string; pathId: string }
+  | { kind: "clear-leg-path"; itemId: string }
   | { kind: "upsert-constraints"; constraints: TripChangeProposalConstraintsDraft; expectedConstraintsVersion?: number | null };
 export type RejectedOperation = { index: number; reason: string };
 export type KnownPlanItem = { id: string; kind: TripPlanItemKind; anchorRole: TripPlanAnchorRole | null; type: TripPlanItemType | null; state: TripPlanItemState; label: string; notes: string | null; plannedAt: Date | null; ordinal: number; parentItemId: string | null; backupTargetItemId: string | null; transportOriginLabel: string | null; transportDestinationLabel: string | null; accommodationPlaceAreaLabel: string | null };
 export type ValidateProposalOperationsContext = { knownItems: KnownPlanItem[]; tripProjectId: string };
-export type TripChangeProposalAffectedItemRef = { itemId: string; kind: TripPlanItemKind; label: string; change: "create" | "update" | "remove" | "reorder" | "change-state" | "upsert-constraints" };
+export type TripChangeProposalAffectedItemRef = { itemId: string; kind: TripPlanItemKind; label: string; change: "create" | "update" | "remove" | "reorder" | "change-state" | "set-leg-path" | "clear-leg-path" | "upsert-constraints" };
 export type TripChangeProposalBeforeAfterSummary = { operation: string; before: string | null; after: string | null };
 export type TripChangeProposalAlternativeSummary = { summary: string };
 export type OwnedTripChangeProposalSummary = { id: string; tripProjectId: string; status: TripChangeProposalStatus; rationale: string; expiresAt: Date | null; createdAt: Date; affectedItems: TripChangeProposalAffectedItemRef[]; beforeAfter: TripChangeProposalBeforeAfterSummary[]; alternatives: TripChangeProposalAlternativeSummary[]; hasAlternatives: boolean };
@@ -55,7 +57,7 @@ export function validateProposalOperations(operations: unknown, context: Validat
       references.push({ id: `proposal-create-${index}`, kind: item.kind, tripProjectId: context.tripProjectId, parentItemId, backupTargetItemId: item.backupTargetItemId ?? null });
       return valid.push({ kind: "create-item", item, parentItemId, ordinal: value.ordinal });
     }
-    if ((value.kind === "update-item" || value.kind === "remove-item" || value.kind === "reorder-item" || value.kind === "change-item-state") && (typeof value.itemId !== "string" || !known.has(value.itemId))) return rejected.push({ index, reason: "item references unknown or cross-project item" });
+    if ((value.kind === "update-item" || value.kind === "remove-item" || value.kind === "reorder-item" || value.kind === "change-item-state" || value.kind === "set-leg-path" || value.kind === "clear-leg-path") && (typeof value.itemId !== "string" || !known.has(value.itemId))) return rejected.push({ index, reason: "item references unknown or cross-project item" });
     if (value.kind === "update-item" && isRecord(value.changes) && hasOnlyKeys(value, ["kind", "itemId", "changes"])) {
       const knownItem = known.get(value.itemId as string)!;
       const changes = normalizeItemChanges(value.changes, knownItem);
@@ -93,6 +95,16 @@ export function validateProposalOperations(operations: unknown, context: Validat
       const reference = references.find((entry) => entry.id === item.id);
       if (reference) reference.backupTargetItemId = backupTargetItemId;
       return valid.push({ kind: "change-item-state", itemId: item.id, state: value.state as TripPlanItemState, backupTargetItemId });
+    }
+    if (value.kind === "set-leg-path" && hasOnlyKeys(value, ["kind", "itemId", "pathId"]) && typeof value.pathId === "string") {
+      const item = known.get(value.itemId as string)!;
+      if (item.type !== "transport" || !isCanonicalRoutePathId(value.pathId)) return rejected.push({ index, reason: "set-leg-path invalid" });
+      return valid.push({ kind: "set-leg-path", itemId: item.id, pathId: value.pathId });
+    }
+    if (value.kind === "clear-leg-path" && hasOnlyKeys(value, ["kind", "itemId"])) {
+      const item = known.get(value.itemId as string)!;
+      if (item.type !== "transport") return rejected.push({ index, reason: "clear-leg-path invalid" });
+      return valid.push({ kind: "clear-leg-path", itemId: item.id });
     }
     if (value.kind === "upsert-constraints" && hasOnlyKeys(value, ["kind", "constraints", "expectedConstraintsVersion"]) && isRecord(value.constraints)) {
       try {
