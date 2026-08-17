@@ -117,10 +117,16 @@ pnpm typecheck
 **Then** canonical references change atomically
 **And** no background publisher, registry table, Worker operation, or runtime activation state is introduced.
 
+**Given** Story 21.4 persists an owner-confirmed canonical route path
+**When** its schema change runs after final Story 21.1 migration `0073`
+**Then** exactly `drizzle/migrations/0074_add_trip_plan_item_canonical_route_path_id.sql` adds nullable `canonical_route_path_id` to existing `trip_plan_items`
+**And** it adds no other column, table, backfill, or persisted manifest state.
+
 ### Tasks
 
 - [ ] NEW `packages/database/src/route-coverage.ts`: define and startup-validate one small typed code-owned route/coverage manifest plus its pure resolver.
 - [ ] UPDATE `packages/contracts/src/planning-context.ts`: add canonical path references and resolver result types only.
+- [ ] NEW `drizzle/migrations/0074_add_trip_plan_item_canonical_route_path_id.sql`; UPDATE `packages/database/src/schema.ts`: add only nullable `canonical_route_path_id` to existing `trip_plan_items`. Do not amend `0073` or add another migration.
 - [ ] UPDATE `packages/database/src/trip-plan-commands.ts` and `packages/database/src/traveler-proposal-commands.ts`: support owner-authorized, version-fenced set/clear operations using existing Trip storage.
 - [ ] UPDATE `packages/database/src/source-bundle.ts`: consume the pure resolver and surface bounded route limitations without live-navigation claims.
 - [ ] NEW `tests/route-authority.test.ts` and `tests/route-authority.integration.test.ts`: cover `RP-01` through `RP-08`, owner isolation, reopen persistence, and stale references.

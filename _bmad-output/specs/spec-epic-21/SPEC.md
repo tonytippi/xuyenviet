@@ -73,7 +73,7 @@ is disproportionate before users or durable data exist.
 - Add at most one new table: `planning_context_sessions`, storing one bounded JSON document per active conversation/session.
 - Reuse `assistant_retrieval_decisions` for one bounded required-need/evidence/web/render snapshot. Reuse existing conversation/message, Trip/recommendation/proposal, AI Ask command, Usage, provenance, feedback, and audit storage.
 - Planning profiles, required-need definitions, and supported-route registry/coverage are validated versioned code constants, not database tables.
-- Use exactly one Epic 21 migration: `drizzle/migrations/0073_clean_break_trip_aware_planning.sql`, finalized in Story 21.1 and never amended by later stories. Migrations `0066` through `0072` already exist.
+- `drizzle/migrations/0073_clean_break_trip_aware_planning.sql` is final for Story 21.1 and must never be amended. Reserve exactly one later Epic 21 migration, `drizzle/migrations/0074_add_trip_plan_item_canonical_route_path_id.sql`, solely for Story 21.4 to add nullable `canonical_route_path_id` to existing `trip_plan_items`. Migrations `0066` through `0072` already exist.
 - Use flat bounded session slots, four planning modes, a static route manifest, four required-need outcomes, and four recommendation states. Add no generic graph, claim, workflow, evaluation, release, or finalization framework.
 - Add no backfill, dual write, shadow execution, read mode, read-policy row, gate profile, evaluation run, cutover record, cleanup report, feature flag, parallel endpoint, new service, queue, cache, Worker kind, model purpose, or environment authority.
 - Clean break is legal only on an explicitly disposable target. Use the repository's guarded `pnpm db:reset` flow. If durable user data or a non-disposable environment is discovered, stop and require expand-migrate-contract design.
@@ -94,7 +94,7 @@ is disproportionate before users or durable data exist.
 ## Success Signal
 
 All eight stories complete sequentially through folder-plus-ID dispatch. The disposable
-target resets, migrates through `0073`, and seeds successfully; all canonical fixtures,
+target resets, migrates through `0074`, and seeds successfully; all canonical fixtures,
 focused unit and serial integration tests, lint, typecheck, and build pass; active code,
 config, tests, scripts, and runbooks contain no card-count threshold or rollout-control
 authority; and `sprint-status.yaml` is synchronized after each story.
