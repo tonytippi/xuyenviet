@@ -2,9 +2,10 @@
 title: 'Preserve Canonical Route Authority'
 type: 'feature'
 created: '2026-08-16'
-status: 'ready-for-dev'
+status: 'done'
+baseline_revision: '0496ce120b4032508068a2649573925670fd0fdd'
 review_loop_iteration: 0
-followup_review_recommended: false
+followup_review_recommended: true
 context:
   - '_bmad-output/specs/spec-epic-21/story-contracts.md'
   - '_bmad-output/specs/spec-epic-21/SPEC.md'
@@ -68,6 +69,16 @@ deferred: []
 
 ## Review Triage Log
 
+### 2026-08-17 — Review pass
+- intent_gap: 0
+- bad_spec: 0
+- patch: 2 (medium 2)
+- defer: 0
+- reject: 17
+- addressed_findings:
+  - [medium] [patch] Startup validation now requires every static coverage path to match its coverage endpoints after normalization.
+  - [medium] [patch] Focused integration coverage verifies stale item-version and non-transport set-path operations remain pending and leave route state unchanged.
+
 ## Auto Run Result
 
 Status: ready-for-dev
@@ -75,6 +86,26 @@ Status: ready-for-dev
 Status history: blocked on 2026-08-16. The prior block found that canonical route references required durable Trip-leg storage, while final migration `0073` created only `planning_context_sessions`. No code or sprint-status change was made.
 
 Resolution: product owner approved the exact minimal correction on 2026-08-17. Story 21.4 is ready for development with exactly one new migration, `0074_add_trip_plan_item_canonical_route_path_id.sql`, adding only nullable `canonical_route_path_id` to existing `trip_plan_items`. `0073` remains unamended. The static code-owned manifest validates IDs during Apply; clearing writes `null`; an absent manifest entry resolves `stale`. No other schema, persistence, worker, service, queue, flag, endpoint, or dependency is authorized.
+
+Summary: Implemented static canonical-route coverage and owner-confirmed proposal Apply operations. The only new migration is `0074_add_trip_plan_item_canonical_route_path_id.sql`, which adds nullable `canonical_route_path_id` to `trip_plan_items`.
+
+Files changed:
+- `drizzle/migrations/0074_add_trip_plan_item_canonical_route_path_id.sql` — adds the sole nullable canonical route path reference.
+- `drizzle/migrations/meta/_journal.json` and `packages/database/src/schema.ts` — register and map that column.
+- `packages/database/src/route-coverage.ts` — static validated manifest and pure resolver.
+- `packages/contracts/src/planning-context.ts`, `packages/database/src/answer-context.ts`, `packages/database/src/source-bundle.ts` — expose bounded canonical-route applicability.
+- `packages/database/src/trip-plan-commands.ts` and `packages/database/src/traveler-proposal-commands.ts` — version-fenced set and clear operations through existing proposal Apply.
+- `tests/route-authority.test.ts`, `tests/route-authority.integration.test.ts`, `tests/drizzle-migration-plan.test.ts`, and `vitest.config.ts` — focused resolver, migration, and persistence evidence.
+
+Review findings: 2 medium patches applied; 0 deferred; 17 rejected as beyond the exact story contract. Follow-up review recommendation: true (patched high: 0, medium: 2, low: 0; score: 6).
+
+Verification:
+- `pnpm test:unit -- tests/route-authority.test.ts tests/drizzle-migration-plan.test.ts` — passed (44 files, 369 tests); the unit wrapper ran its configured project beyond the focused arguments.
+- `pnpm exec vitest run --project integration tests/route-authority.integration.test.ts` — passed (1 file, 4 tests).
+- `pnpm typecheck` — passed across all workspace packages.
+- `git diff --check` — passed.
+
+Residual risks: The manifest is intentionally a small static, code-owned list; it does not claim live navigation or coverage beyond its listed endpoint pairs.
 
 ## Verification
 

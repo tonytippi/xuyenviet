@@ -7,6 +7,7 @@ import type { KnowledgeSearchResult } from "./knowledge-search";
 import { aiUsageMechanisms, aiUsagePromptVersions, aiUsageProviders, aiUsagePurposes } from "./usage-events";
 import { writeAiUsageEvent } from "./usage";
 import { captureWebSearchResults, searchWebForSourceBundle, type NormalizedWebSearchResult } from "./web-search";
+import { resolveRouteApplicability } from "./route-coverage";
 
 type SourceBundleDependencies = {
   loadAnswerContext: typeof loadAnswerContext;
@@ -636,7 +637,20 @@ function selectedFactIndexes(facts: AnswerContextFact[], rendered: AnswerContext
 function appendStructuredTripContext(lines: string[], context: TripAnswerContext | undefined, limit = maxContextFacts) {
   if (!context) return;
   if (context.constraints) lines.push(`- constraintsVersion=${context.constraints.version} values=${formatPromptValue(JSON.stringify(context.constraints.values), 700)}`);
-  for (const item of context.planItems.slice(0, limit)) lines.push(`- planItem=${JSON.stringify(item.id)} version=${item.version} kind=${item.kind} anchorRole=${JSON.stringify(item.anchorRole)} type=${JSON.stringify(item.type)} state=${item.state} label=${formatPromptValue(item.label, 160)} ordinal=${item.ordinal} parentItemId=${JSON.stringify(item.parentItemId)}`);
+  for (const item of context.planItems.slice(0, limit)) {
+    lines.push(`- planItem=${JSON.stringify(item.id)} version=${item.version} kind=${item.kind} anchorRole=${JSON.stringify(item.anchorRole)} type=${JSON.stringify(item.type)} state=${item.state} label=${formatPromptValue(item.label, 160)} ordinal=${item.ordinal} parentItemId=${JSON.stringify(item.parentItemId)}`);
+    if (item.type === "transport") appendRouteApplicability(lines, item);
+  }
+}
+
+function appendRouteApplicability(lines: string[], item: Pick<TripAnswerContext["planItems"][number], "canonicalRoutePathId" | "transportOriginLabel" | "transportDestinationLabel">) {
+  const route = resolveRouteApplicability({ canonicalRoutePathId: item.canonicalRoutePathId, originLabel: item.transportOriginLabel, destinationLabel: item.transportDestinationLabel });
+  if (route.kind === "selected") lines.push(`  route=selected pathId=${JSON.stringify(route.pathId)}; only this owner-confirmed path may support hard route applicability.`);
+  if (route.kind === "complete") lines.push(`  route=complete pathIds=${JSON.stringify(route.pathIds)}; static coverage supports these alternatives only.`);
+  if (route.kind === "partial") lines.push(`  route=partial pathIds=${JSON.stringify(route.pathIds)}; coverage is incomplete, so do not exclude other routes or make hard route claims.`);
+  if (route.kind === "ambiguous") lines.push(`  route=ambiguous pathIds=${JSON.stringify(route.pathIds)}; ask for one route choice or present bounded alternatives.`);
+  if (route.kind === "unsupported") lines.push("  route=unsupported; endpoint labels are query aids only and cannot authorize a route choice or hard route claim.");
+  if (route.kind === "stale") lines.push(`  route=stale pathId=${JSON.stringify(route.pathId)}; do not replace it automatically and require an owner-confirmed refresh.`);
 }
 
 function appendPlanningModeSection(lines: string[], bundle: ContextPrioritySourceBundle) {

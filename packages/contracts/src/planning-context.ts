@@ -34,6 +34,14 @@ export type PlanningExecutionRef = {
   proposalUpdatedAt: string | null;
   sessionRevision: number | null;
 };
+export type CanonicalRoutePathReference = string;
+export type RouteResolution =
+  | { kind: "selected"; pathId: CanonicalRoutePathReference }
+  | { kind: "complete"; pathIds: CanonicalRoutePathReference[] }
+  | { kind: "partial"; pathIds: CanonicalRoutePathReference[] }
+  | { kind: "ambiguous"; pathIds: CanonicalRoutePathReference[] }
+  | { kind: "unsupported" }
+  | { kind: "stale"; pathId: string };
 export type PlanningContextSession = {
   intent: PlanningSessionIntent;
   slots: Partial<Record<PlanningSessionSlotName, string>>;

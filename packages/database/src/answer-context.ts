@@ -37,6 +37,9 @@ export type TripAnswerContextPlanItem = {
   label: string;
   ordinal: number;
   parentItemId: string | null;
+  canonicalRoutePathId: string | null;
+  transportOriginLabel: string | null;
+  transportDestinationLabel: string | null;
 };
 export type TripAnswerContext = {
   version: typeof tripAnswerContextVersion;
@@ -121,7 +124,7 @@ export async function loadAnswerContext({ userId, conversationId, tripProjectId 
   if (!scope) return emptyContext(true, []);
 
   const [itemRows, constraintRows, conversationRows] = await Promise.all([
-    db.select({ id: tripPlanItems.id, version: tripPlanItems.version, kind: tripPlanItems.kind, anchorRole: tripPlanItems.anchorRole, type: tripPlanItems.type, state: tripPlanItems.state, label: tripPlanItems.label, ordinal: tripPlanItems.ordinal, parentItemId: tripPlanItems.parentItemId })
+    db.select({ id: tripPlanItems.id, version: tripPlanItems.version, kind: tripPlanItems.kind, anchorRole: tripPlanItems.anchorRole, type: tripPlanItems.type, state: tripPlanItems.state, label: tripPlanItems.label, ordinal: tripPlanItems.ordinal, parentItemId: tripPlanItems.parentItemId, canonicalRoutePathId: tripPlanItems.canonicalRoutePathId, transportOriginLabel: tripPlanItems.transportOriginLabel, transportDestinationLabel: tripPlanItems.transportDestinationLabel })
       .from(tripPlanItems).where(and(eq(tripPlanItems.tripProjectId, tripProjectId), eq(tripPlanItems.userId, userId)))
       .orderBy(sql`${tripPlanItems.parentItemId} asc nulls first`, asc(tripPlanItems.ordinal), asc(tripPlanItems.id)).limit(maxPlanItems),
     db.select().from(tripProjectConstraints).where(and(eq(tripProjectConstraints.tripProjectId, tripProjectId), eq(tripProjectConstraints.userId, userId))).limit(1),

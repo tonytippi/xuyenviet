@@ -3,6 +3,7 @@ import { and, eq } from "drizzle-orm";
 import { toUserAuditActor } from "./actors";
 import { getDb } from "./client";
 import { validatePlanReferencesRules } from "./plan-references";
+import { isCanonicalRoutePathId } from "./route-coverage";
 import { auditEvents, tripPlanItems, tripProjectConstraints, tripProjects, type TripPlanAnchorRole, type TripPlanItemKind, type TripPlanItemState, type TripPlanItemType } from "./schema";
 
 export type TripPlanCommandTransaction = Parameters<ReturnType<typeof getDb>["transaction"]>[0] extends (transaction: infer T) => unknown ? T : never;
@@ -124,6 +125,17 @@ export async function changeInternalTripPlanItemStateInTransaction(transaction: 
   if (!item) return { success: false, reason: "not_found" }; if (item.version !== expectedItemVersion) return { success: false, reason: "refresh_required" };
   await validateReferences(transaction, tripProjectId, actor.userId, { kind: item.kind, parentItemId: item.parentItemId, backupTargetItemId }, itemId);
   await transaction.update(tripPlanItems).set({ state, backupTargetItemId, version: item.version + 1, updatedAt: new Date() }).where(eq(tripPlanItems.id, itemId));
+  const aggregateVersion = await advanceAggregate(transaction, tripProjectId, actor.userId, project.version);
+  await recordAggregateAudit(transaction, actor, "update", "trip_plan_item", itemId, tripProjectId, aggregateVersion);
+  return { success: true, aggregateVersion, itemId };
+}
+
+export async function setInternalTripPlanItemCanonicalRoutePathInTransaction(transaction: TripPlanCommandTransaction, actor: TripPlanCommandActor, tripProjectId: string, expectedAggregateVersion: number, itemId: string, expectedItemVersion: number, canonicalRoutePathId: string | null): Promise<AggregateMutationResult> {
+  if (canonicalRoutePathId !== null && !isCanonicalRoutePathId(canonicalRoutePathId)) return { success: false, reason: "invalid" };
+  const project = await lockAggregate(transaction, tripProjectId, actor.userId, expectedAggregateVersion); if (!project.success) return project;
+  const [item] = await transaction.select({ version: tripPlanItems.version, type: tripPlanItems.type }).from(tripPlanItems).where(and(eq(tripPlanItems.id, itemId), eq(tripPlanItems.tripProjectId, tripProjectId), eq(tripPlanItems.userId, actor.userId))).limit(1);
+  if (!item) return { success: false, reason: "not_found" }; if (item.version !== expectedItemVersion) return { success: false, reason: "refresh_required" }; if (item.type !== "transport") return { success: false, reason: "invalid" };
+  await transaction.update(tripPlanItems).set({ canonicalRoutePathId, version: item.version + 1, updatedAt: new Date() }).where(eq(tripPlanItems.id, itemId));
   const aggregateVersion = await advanceAggregate(transaction, tripProjectId, actor.userId, project.version);
   await recordAggregateAudit(transaction, actor, "update", "trip_plan_item", itemId, tripProjectId, aggregateVersion);
   return { success: true, aggregateVersion, itemId };

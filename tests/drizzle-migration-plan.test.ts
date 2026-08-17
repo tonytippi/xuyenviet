@@ -14,4 +14,12 @@ describe("Epic 21 migration plan", () => {
     expect(migration).toContain('"planning_context_sessions_revision_check"');
     expect(migration).not.toMatch(/ALTER TABLE|DROP TABLE|INSERT INTO|UPDATE |DELETE FROM/);
   });
+
+  test("reserves 0074 for only the nullable canonical route path reference", async () => {
+    const migrationDirectory = resolve(process.cwd(), "drizzle/migrations");
+    const migrationNames = await readdir(migrationDirectory);
+    expect(migrationNames.filter((name) => name.startsWith("0074_"))).toEqual(["0074_add_trip_plan_item_canonical_route_path_id.sql"]);
+    const migration = await readFile(resolve(migrationDirectory, "0074_add_trip_plan_item_canonical_route_path_id.sql"), "utf8");
+    expect(migration.trim()).toBe('ALTER TABLE "trip_plan_items" ADD COLUMN "canonical_route_path_id" text;');
+  });
 });
