@@ -1,10 +1,12 @@
 import { and, eq } from "drizzle-orm";
-import { beforeEach, describe, expect, test } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import { createPostgresTravelerCommandPort } from "@xuyenviet/database";
+import { createAiAskStreamExecutionPort, setAiAskStreamTestDependencies } from "../packages/database/src/ai-ask-stream-execution";
 import { acceptTripCreationRecommendation, createPostgresTripRecommendationReadRepository } from "../packages/database/src/trip-recommendations";
 import {
   aiAskCommands,
+  aiUsageEvents,
   assistantResponseProvenance,
   assistantRetrievalDecisions,
   auditEvents,
@@ -120,6 +122,55 @@ async function acceptRecommendation(userId: string, conversationId: string, key:
 
 describe("planning deletion clean break", () => {
   beforeEach(async () => { await resetTestDatabase(); });
+  afterEach(() => { setAiAskStreamTestDependencies(undefined); vi.unstubAllGlobals(); });
+
+  test.each(["conversation", "Trip project"] as const)("discards an admitted AI Ask without answer-side writes when owner deletes its %s", async (deletedResource) => {
+    await testDb.insert(users).values({ id: "owner", email: "owner@example.com" });
+    const tripProjectId = "deletion-race-trip";
+    const conversationId = "deletion-race-conversation";
+    if (deletedResource === "Trip project") {
+      await testDb.insert(tripProjects).values({ id: tripProjectId, userId: "owner", title: "Deletion race" });
+      await testDb.insert(conversations).values({ id: conversationId, userId: "owner", tripProjectId });
+      await testDb.update(tripProjects).set({ primaryConversationId: conversationId }).where(eq(tripProjects.id, tripProjectId));
+    } else {
+      await testDb.insert(conversations).values({ id: conversationId, userId: "owner" });
+    }
+    let releaseFinalization!: () => void;
+    const finalizationPaused = new Promise<void>((resolve) => { releaseFinalization = resolve; });
+    setAiAskStreamTestDependencies({
+      prepareOwnedPlanningClarification: vi.fn().mockImplementation(async () => {
+        await finalizationPaused;
+        return { kind: "question", session: {} as never, question: "Bạn sẽ xuất phát từ đâu?" };
+      }),
+    });
+
+    const admission = await createAiAskStreamExecutionPort().admit({
+      question: "Tôi muốn đi Huế",
+      idempotencyKey: `deletion-race-${deletedResource === "Trip project" ? "project" : "conversation"}`.padEnd(24, "x"),
+      conversationId,
+      ...(deletedResource === "Trip project" ? { tripProjectId } : {}),
+    }, { userId: "owner", sessionId: "session-1", roles: ["traveler"], authorizationVersion: 1 }, "planning-deletion-race", new AbortController().signal);
+    if (admission.kind !== "admitted") throw new Error("Expected admitted AI Ask execution.");
+    const iterator = admission.execution[Symbol.asyncIterator]();
+    await expect(iterator.next()).resolves.toMatchObject({ value: { type: "preparing" } });
+
+    const command = createPostgresTravelerCommandPort();
+    if (deletedResource === "Trip project") await expect(command.deleteTripProject("owner", tripProjectId)).resolves.toEqual({ success: true });
+    else await expect(command.deleteConversation("owner", conversationId)).resolves.toEqual({ success: true });
+    releaseFinalization();
+
+    const terminal = await iterator.next();
+    expect(terminal).toMatchObject({ done: false, value: { type: "error", code: "refresh_required" } });
+    await expect(iterator.next()).resolves.toMatchObject({ done: true });
+    await expect(testDb.select({ status: aiAskCommands.status, terminalResult: aiAskCommands.terminalResult }).from(aiAskCommands)).resolves.toEqual([
+      { status: "discarded", terminalResult: expect.objectContaining({ type: "error", code: "refresh_required" }) },
+    ]);
+    await expect(testDb.select().from(messages).where(eq(messages.role, "assistant"))).resolves.toEqual([]);
+    await expect(testDb.select().from(tripAnswerContextSnapshots)).resolves.toEqual([]);
+    await expect(testDb.select().from(assistantRetrievalDecisions)).resolves.toEqual([]);
+    await expect(testDb.select().from(assistantResponseProvenance)).resolves.toEqual([]);
+    await expect(testDb.select().from(aiUsageEvents)).resolves.toEqual([]);
+  });
 
   test("deletes a conversation graph through the owner command, scrubs replay, and preserves another owner", async () => {
     await testDb.insert(users).values([{ id: "owner", email: "owner@example.com" }, { id: "other", email: "other@example.com" }]);

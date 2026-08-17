@@ -158,7 +158,7 @@ describe("compiled worker adapters", () => {
     await resetTestDatabase();
     buildWorker();
     for (const adapter of adapters) {
-      const events = await runCompiledAdapter(adapter, `boundary-${adapter}`);
+      const events = await runCompiledAdapter(adapter, `boundary-${adapter}`, adapter === "discovery" ? { YOUTUBE_DATA_API_KEY: "test-only-discovery-key" } : undefined);
       expectCompiledWorkerEvent(events, { capability: adapter === "discovery" ? "youtube.discovery" : expect.any(String), resultCode: "no_work" });
     }
   });
