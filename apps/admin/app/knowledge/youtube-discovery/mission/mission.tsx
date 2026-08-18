@@ -198,7 +198,7 @@ export function YoutubeDiscoveryMission() {
   </main>;
 }
 
-function ProvinceCoverage({ provinces, setStatus }: { provinces: AdminKnowledgeProvinceCoverage[]; setStatus: (value: string) => void }) {
+export function ProvinceCoverage({ provinces, setStatus }: { provinces: AdminKnowledgeProvinceCoverage[]; setStatus: (value: string) => void }) {
   const [search, setSearch] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [suggestion, setSuggestion] = useState<ProvinceSuggestionState>(null);
@@ -214,6 +214,8 @@ function ProvinceCoverage({ provinces, setStatus }: { provinces: AdminKnowledgeP
     suggestionRequest.current += 1;
     setSelectedId(item.canonicalProvinceId);
     setSuggestion(null);
+    setSuggesting(false);
+    setCreating(false);
     setErrors({});
     setStatus(`Đã chọn ${item.currentName}.`);
   }
@@ -242,6 +244,7 @@ function ProvinceCoverage({ provinces, setStatus }: { provinces: AdminKnowledgeP
 
   async function createQuery() {
     if (!suggestion || creating) return;
+    const id = suggestionRequest.current;
     const next = validateMissionQueryDraft(suggestion.draft, true);
     if (Object.keys(next).length) {
       setErrors(next);
@@ -252,16 +255,17 @@ function ProvinceCoverage({ provinces, setStatus }: { provinces: AdminKnowledgeP
     setStatus("Đang tạo truy vấn theo lịch.");
     try {
       const result = await post("/v1/admin/knowledge/youtube-discovery", { queryText: suggestion.draft.queryText.trim(), priority: Number(suggestion.draft.priority), cadenceMinutes: Number(suggestion.draft.cadenceMinutes) });
-      if (!result.response.ok || !parseAdminYoutubeDiscoveryQuery(result.body)) throw new Error("create");
+      if (!result.response.ok || !parseAdminYoutubeDiscoveryQuery(result.body) || id !== suggestionRequest.current) throw new Error("create");
       setSuggestion(null);
       setErrors({});
       setStatus("Đã tạo truy vấn theo lịch. Truy vấn chưa chạy ngay.");
     } catch {
+      if (id !== suggestionRequest.current) return;
       setErrors({ queryText: "Không thể tạo truy vấn. Bản nháp vẫn được giữ lại." });
       setStatus("Không thể tạo truy vấn. Bản nháp vẫn được giữ lại.");
       requestAnimationFrame(() => firstError.current?.focus());
     } finally {
-      setCreating(false);
+      if (id === suggestionRequest.current) setCreating(false);
     }
   }
 

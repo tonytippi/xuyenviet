@@ -7,7 +7,7 @@ vi.mock("@/db/gateway", async (importOriginal) => ({
 }));
 
 import { createPostgresAdminYoutubeDiscoveryPort, createSystemAuditActor, createYoutubeDiscoveryPolicyVersion } from "@xuyenviet/database";
-import type { RequestPrincipal } from "@xuyenviet/contracts";
+import { parseAdminKnowledgeProvinceCoverageList, type RequestPrincipal } from "@xuyenviet/contracts";
 import { completeYoutubeDiscoveryProvinceSuggestion } from "@/db/gateway";
 import { knowledgeProvinceReferenceFixture } from "@/db/knowledge-geography";
 import { aiGatewayModels, aiUsageEvents, auditEvents, knowledgeCards, sourceCaptureVersions, youtubeDiscoveryCandidateJobs, youtubeDiscoveryCandidates, youtubeDiscoveryKnowledgeHandoffs, youtubeDiscoveryQueryProposals, youtubeDiscoveryRuns } from "@/db/schema";
@@ -33,6 +33,7 @@ describe.sequential("Story 23.2 province coverage and suggestions", () => {
 
     const coverage = await createPostgresAdminYoutubeDiscoveryPort(undefined, testDb).listProvinceCoverage();
     expect(coverage.items).toHaveLength(knowledgeProvinceReferenceFixture.filter((reference) => reference.id === reference.currentUnitId).length);
+    expect(parseAdminKnowledgeProvinceCoverageList(coverage)).toEqual(coverage);
     expect(coverage.items.find((item) => item.canonicalProvinceId === daNang)).toMatchObject({ canonicalProvinceId: daNang, currentName: "Đà Nẵng", legacyNames: ["Quảng Nam"], topics: [{ topic: "place", count: 2 }, { topic: "warning", count: 1 }], freshnessSensitiveCount: 1 });
     expect(coverage.items.find((item) => item.canonicalProvinceId === daNang)!.latestUpdatedAt).toContain("2026-08-13");
     expect(coverage.items.find((item) => item.canonicalProvinceId === "vn-01-ha-noi")).toEqual({ canonicalProvinceId: "vn-01-ha-noi", currentName: "Hà Nội", legacyNames: [], topics: [], freshnessSensitiveCount: 0, latestUpdatedAt: null });

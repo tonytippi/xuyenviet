@@ -86,7 +86,14 @@ export type AdminKnowledgeProvinceSuggestionCommand = Readonly<{ canonicalProvin
 export type AdminKnowledgeProvinceSuggestion = Readonly<{ canonicalProvinceId: string; need: string; reason: string; queryText: string }>;
 
 export function parseAdminKnowledgeProvinceCoverageList(value: unknown): AdminKnowledgeProvinceCoverageList | null {
-  return record(value) && exactKeys(value, ["items"]) && Array.isArray(value.items) && value.items.length <= 34 && value.items.every((item) => record(item) && exactKeys(item, ["canonicalProvinceId", "currentName", "legacyNames", "topics", "freshnessSensitiveCount", "latestUpdatedAt"]) && provinceId(item.canonicalProvinceId) && requiredText(item.currentName, 160) && Array.isArray(item.legacyNames) && item.legacyNames.length <= 29 && item.legacyNames.every((name) => requiredText(name, 160)) && Array.isArray(item.topics) && item.topics.length <= 13 && item.topics.every((topic) => record(topic) && exactKeys(topic, ["topic", "count"]) && requiredText(topic.topic, 80) && nonNegativeInteger(topic.count)) && nonNegativeInteger(item.freshnessSensitiveCount) && (item.latestUpdatedAt === null || isoTimestamp(item.latestUpdatedAt))) ? value as AdminKnowledgeProvinceCoverageList : null;
+  if (!record(value) || !exactKeys(value, ["items"]) || !Array.isArray(value.items) || value.items.length !== governedKnowledgeProvinceIds.length) return null;
+  const items = value.items;
+  const ids = new Set<string>();
+  for (const item of items) {
+    if (!record(item) || !exactKeys(item, ["canonicalProvinceId", "currentName", "legacyNames", "topics", "freshnessSensitiveCount", "latestUpdatedAt"]) || !provinceId(item.canonicalProvinceId) || !requiredText(item.currentName, 160) || !Array.isArray(item.legacyNames) || item.legacyNames.length > 29 || !item.legacyNames.every((name) => requiredText(name, 160)) || !Array.isArray(item.topics) || item.topics.length > 13 || !item.topics.every((topic) => record(topic) && exactKeys(topic, ["topic", "count"]) && requiredText(topic.topic, 80) && nonNegativeInteger(topic.count)) || !nonNegativeInteger(item.freshnessSensitiveCount) || item.latestUpdatedAt !== null && !isoTimestamp(item.latestUpdatedAt)) return null;
+    ids.add(item.canonicalProvinceId);
+  }
+  return ids.size === governedKnowledgeProvinceIds.length ? value as AdminKnowledgeProvinceCoverageList : null;
 }
 export function parseAdminKnowledgeProvinceSuggestionCommand(value: unknown): AdminKnowledgeProvinceSuggestionCommand | null { return record(value) && exactKeys(value, ["canonicalProvinceId"]) && provinceId(value.canonicalProvinceId) ? value as AdminKnowledgeProvinceSuggestionCommand : null; }
 export function parseAdminKnowledgeProvinceSuggestion(value: unknown): AdminKnowledgeProvinceSuggestion | null { return record(value) && exactKeys(value, ["canonicalProvinceId", "need", "reason", "queryText"]) && provinceId(value.canonicalProvinceId) && vietnameseText(value.need, 240) && vietnameseText(value.reason, 320) && vietnameseText(value.queryText, 240) && safeQueryText(value.queryText) ? value as AdminKnowledgeProvinceSuggestion : null; }

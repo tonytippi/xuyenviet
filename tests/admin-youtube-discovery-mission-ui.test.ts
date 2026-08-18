@@ -1,8 +1,14 @@
-import { createElement } from "react";
+// @vitest-environment happy-dom
+
+import { act, createElement } from "react";
+import { createRoot } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import { parseAdminYoutubeDiscoveryMissionCoveragePage, type AdminKnowledgeProvinceCoverage } from "@xuyenviet/contracts";
-import { filterProvinceCoverage, YoutubeDiscoveryMissionQuality, validateMissionQueryDraft } from "../apps/admin/app/knowledge/youtube-discovery/mission/mission";
+import { filterProvinceCoverage, ProvinceCoverage, YoutubeDiscoveryMissionQuality, validateMissionQueryDraft } from "../apps/admin/app/knowledge/youtube-discovery/mission/mission";
+
+const roots: ReturnType<typeof createRoot>[] = [];
+afterEach(() => { while (roots.length) roots.pop()!.unmount(); vi.unstubAllGlobals(); });
 
 describe("Mission UI interaction boundary", () => {
   test("rejects unsafe responses before presentation", () => {
@@ -26,6 +32,28 @@ describe("Mission UI interaction boundary", () => {
     expect(filterProvinceCoverage(provinces, "ha tay")).toEqual([provinces[0]]);
     expect(filterProvinceCoverage(provinces, "sai gon")).toEqual([provinces[1]]);
     expect(filterProvinceCoverage(provinces, "Đà Nẵng")).toEqual([]);
+  });
+
+  test("unlocks a new province and ignores a stale suggestion response", async () => {
+    const provinces: AdminKnowledgeProvinceCoverage[] = [
+      { canonicalProvinceId: "vn-01-ha-noi", currentName: "Hà Nội", legacyNames: [], topics: [], freshnessSensitiveCount: 0, latestUpdatedAt: null },
+      { canonicalProvinceId: "vn-21-da-nang", currentName: "Đà Nẵng", legacyNames: [], topics: [], freshnessSensitiveCount: 0, latestUpdatedAt: null },
+    ];
+    let resolveSuggestion!: (value: Response) => void;
+    const suggestion = new Promise<Response>((resolve) => { resolveSuggestion = resolve; });
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({ csrfToken: "csrf" }), { status: 200 })).mockReturnValueOnce(suggestion));
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    roots.push(root);
+    await act(async () => { root.render(createElement(ProvinceCoverage, { provinces, setStatus: vi.fn() })); });
+    const click = async (name: string) => { await act(async () => { Array.from(container.querySelectorAll("button")).find((button) => button.textContent?.includes(name))!.click(); }); };
+    await click("Hà Nội");
+    await click("Đề xuất truy vấn tiếng Việt");
+    await click("Đà Nẵng");
+    expect(Array.from(container.querySelectorAll("button")).find((button) => button.textContent?.includes("Đề xuất truy vấn tiếng Việt"))?.disabled).toBe(false);
+    await act(async () => { resolveSuggestion(new Response(JSON.stringify({ canonicalProvinceId: "vn-01-ha-noi", need: "Cần bổ sung thông tin đường đi", reason: "Chủ đề còn ít", queryText: "kinh nghiệm lái xe Hà Nội" }), { status: 201 })); await Promise.resolve(); });
+    expect(container.textContent).not.toContain("Đề xuất tạm thời");
   });
 
   test("renders the bounded Vietnamese-first quality proof", () => {
