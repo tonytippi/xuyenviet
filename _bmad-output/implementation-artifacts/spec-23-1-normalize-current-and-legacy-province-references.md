@@ -63,6 +63,9 @@ context:
 - Given a new or eligible existing Knowledge record has an exact unambiguous current or legacy province-level label, when normalization runs, then its original label remains available, its canonical current province/city is resolved deterministically, and search can match either name.
 - Given a label is ambiguous, granular, multi-place, or unmapped, when normalization runs, then no canonical geography is set and no AI, nationwide fallback, or unrelated Knowledge/evidence/publication/retrieval/source-lifecycle state changes occur.
 
+### Review Findings
+- [x] [Review][Patch] Enforce canonical current-unit IDs in normalized geography fields [drizzle/migrations/0075_enforce_canonical_knowledge_province_references.sql:1]
+
 ## Design Notes
 
 Use the canonical card as the durable grouping target and retain `locationName` unchanged because it may be a place below province scope. The new fields record only a separately retained source label and nullable current-unit reference. This intentionally supports exact governed data today without treating free-form location metadata as authoritative geography.

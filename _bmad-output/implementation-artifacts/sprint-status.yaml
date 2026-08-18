@@ -1,5 +1,5 @@
 # generated: 2026-07-25
-# last_updated: 08-17-2026 (Story 23.1 implementation and review completed.)
+# last_updated: 08-18-2026 (Stories 23.1 and 23.2 review repairs completed.)
 # project: xuyenviet
 # project_key: NOKEY
 # tracking_system: file-system
@@ -33,7 +33,7 @@
 #   - done: Completed
 
 generated: 2026-07-25
-last_updated: 08-17-2026
+last_updated: 08-18-2026
 project: xuyenviet
 project_key: NOKEY
 tracking_system: file-system
@@ -473,8 +473,8 @@ development_status:
   # suggestions, immediate operator-confirmed runs, and safe progress tracking.
   # Epic 23 reuses the existing candidate review and Knowledge intake handoff.
   epic-23: in-progress
-  23-1-normalize-current-and-legacy-province-references: review
-  23-2-show-province-coverage-and-propose-vietnamese-queries: review
+  23-1-normalize-current-and-legacy-province-references: done
+  23-2-show-province-coverage-and-propose-vietnamese-queries: done
   23-3-run-confirmed-queries-immediately-and-show-progress: backlog
   epic-23-retrospective: optional
 

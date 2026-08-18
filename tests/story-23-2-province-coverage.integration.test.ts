@@ -27,7 +27,7 @@ describe.sequential("Story 23.2 province coverage and suggestions", () => {
     await insertCard({ id: "active-place", type: "place", lifecycleState: "active", normalizedCurrentProvinceId: daNang, normalizedCurrentProvinceName: "Đà Nẵng", freshnessSensitive: true, updatedAt: new Date("2026-08-12T00:00:00.000Z") });
     const latestUpdatedAt = new Date("2026-08-13T12:00:00.000Z");
     await insertCard({ id: "active-warning", type: "warning", lifecycleState: "active", normalizedCurrentProvinceId: daNang, normalizedCurrentProvinceName: "Đà Nẵng", freshnessSensitive: false, updatedAt: latestUpdatedAt });
-    await insertCard({ id: "active-legacy", type: "place", lifecycleState: "active", normalizedCurrentProvinceId: "legacy-quang-nam", normalizedCurrentProvinceName: "Quảng Nam", freshnessSensitive: false, updatedAt: new Date("2026-08-11T00:00:00.000Z") });
+    await insertCard({ id: "active-legacy", type: "place", lifecycleState: "active", normalizedCurrentProvinceId: daNang, normalizedCurrentProvinceName: "Đà Nẵng", freshnessSensitive: false, updatedAt: new Date("2026-08-11T00:00:00.000Z") });
     await insertCard({ id: "pending", type: "place", lifecycleState: "pending_operator", normalizedCurrentProvinceId: daNang, normalizedCurrentProvinceName: "Đà Nẵng", freshnessSensitive: true });
     await insertCard({ id: "unresolved", type: "food", lifecycleState: "active", normalizedCurrentProvinceId: null, normalizedCurrentProvinceName: null, freshnessSensitive: true });
 
@@ -37,6 +37,7 @@ describe.sequential("Story 23.2 province coverage and suggestions", () => {
     expect(coverage.items.find((item) => item.canonicalProvinceId === daNang)).toMatchObject({ canonicalProvinceId: daNang, currentName: "Đà Nẵng", legacyNames: ["Quảng Nam"], topics: [{ topic: "place", count: 2 }, { topic: "warning", count: 1 }], freshnessSensitiveCount: 1 });
     expect(coverage.items.find((item) => item.canonicalProvinceId === daNang)!.latestUpdatedAt).toContain("2026-08-13");
     expect(coverage.items.find((item) => item.canonicalProvinceId === "vn-01-ha-noi")).toEqual({ canonicalProvinceId: "vn-01-ha-noi", currentName: "Hà Nội", legacyNames: [], topics: [], freshnessSensitiveCount: 0, latestUpdatedAt: null });
+    await expect(insertCard({ id: "legacy-id", type: "place", lifecycleState: "active", normalizedCurrentProvinceId: "legacy-quang-nam", normalizedCurrentProvinceName: "Quảng Nam", freshnessSensitive: false })).rejects.toMatchObject({ cause: { message: expect.stringContaining("normalized_current_province_id must reference a current unit") } });
   });
 
   test("sends only selected aggregate metadata and records safe usage and audit for a valid suggestion", async () => {
@@ -64,7 +65,10 @@ describe.sequential("Story 23.2 province coverage and suggestions", () => {
     vi.mocked(completeYoutubeDiscoveryProvinceSuggestion).mockResolvedValue({ ok: true, provider: "ai_gateway", model: "test-model", latencyMs: 8, usage: { promptTokens: 11, completionTokens: 22, totalTokens: 33, cachedPromptTokens: null, cacheWritePromptTokens: null }, content: JSON.stringify({ canonicalProvinceId: daNang, need: "unsafe", reason: "unsafe", queryText: "https://unsafe.example" }), requestMetadata: { providerRequestId: "request-invalid" }, reportedSourceHandles: null } as never);
     await expect(createPostgresAdminYoutubeDiscoveryPort(undefined, testDb).suggestProvinceQuery(principal, daNang)).resolves.toBeNull();
     await expect(sideEffects()).resolves.toEqual({ queries: 0, runs: 0, candidates: 0, candidateJobs: 0, handoffs: 0, captures: 0, cards: 0 });
-    await expect(testDb.select({ status: aiUsageEvents.status, errorCode: aiUsageEvents.errorCode }).from(aiUsageEvents)).resolves.toEqual([{ status: "failure", errorCode: "invalid_output" }]);
+    vi.mocked(completeYoutubeDiscoveryProvinceSuggestion).mockRejectedValueOnce(new Error("network"));
+    await expect(createPostgresAdminYoutubeDiscoveryPort(undefined, testDb).suggestProvinceQuery(principal, daNang)).resolves.toBeNull();
+    await expect(testDb.select({ status: aiUsageEvents.status, errorCode: aiUsageEvents.errorCode }).from(aiUsageEvents)).resolves.toContainEqual({ status: "failure", errorCode: "gateway_network_error" });
+    await expect(testDb.select({ status: aiUsageEvents.status, errorCode: aiUsageEvents.errorCode }).from(aiUsageEvents)).resolves.toEqual([{ status: "failure", errorCode: "invalid_output" }, { status: "failure", errorCode: "gateway_network_error" }]);
     vi.mocked(completeYoutubeDiscoveryProvinceSuggestion).mockResolvedValueOnce({ ok: false, provider: "ai_gateway", model: "test-model", latencyMs: 8, errorCode: "gateway_network_error", failureKind: "other", requestMetadata: { providerRequestId: null } } as never);
     await expect(createPostgresAdminYoutubeDiscoveryPort(undefined, testDb).suggestProvinceQuery(principal, daNang)).resolves.toBeNull();
     await expect(sideEffects()).resolves.toEqual({ queries: 0, runs: 0, candidates: 0, candidateJobs: 0, handoffs: 0, captures: 0, cards: 0 });

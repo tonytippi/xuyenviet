@@ -8,6 +8,7 @@ import { parseAdminYoutubeDiscoveryMissionCoveragePage, type AdminKnowledgeProvi
 import { filterProvinceCoverage, ProvinceCoverage, YoutubeDiscoveryMissionQuality, validateMissionQueryDraft } from "../apps/admin/app/knowledge/youtube-discovery/mission/mission";
 
 const roots: ReturnType<typeof createRoot>[] = [];
+(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 afterEach(() => { while (roots.length) roots.pop()!.unmount(); vi.unstubAllGlobals(); });
 
 describe("Mission UI interaction boundary", () => {
@@ -53,6 +54,30 @@ describe("Mission UI interaction boundary", () => {
     await click("Đà Nẵng");
     expect(Array.from(container.querySelectorAll("button")).find((button) => button.textContent?.includes("Đề xuất truy vấn tiếng Việt"))?.disabled).toBe(false);
     await act(async () => { resolveSuggestion(new Response(JSON.stringify({ canonicalProvinceId: "vn-01-ha-noi", need: "Cần bổ sung thông tin đường đi", reason: "Chủ đề còn ít", queryText: "kinh nghiệm lái xe Hà Nội" }), { status: 201 })); await Promise.resolve(); });
+    expect(container.textContent).not.toContain("Đề xuất tạm thời");
+  });
+
+  test("turns a valid selected-province suggestion into a scheduled query", async () => {
+    const provinces: AdminKnowledgeProvinceCoverage[] = [{ canonicalProvinceId: "vn-21-da-nang", currentName: "Đà Nẵng", legacyNames: [], topics: [], freshnessSensitiveCount: 0, latestUpdatedAt: null }];
+    let resolveSuggestion!: (value: Response) => void;
+    const suggestion = new Promise<Response>((resolve) => { resolveSuggestion = resolve; });
+    const fetch = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({ csrfToken: "csrf" }), { status: 200 })).mockReturnValueOnce(suggestion).mockResolvedValueOnce(new Response(JSON.stringify({ csrfToken: "csrf" }), { status: 200 })).mockResolvedValueOnce(new Response(JSON.stringify({ id: "query", origin: "operator", reason: "operator_request", queryText: "kinh nghiệm lái xe Đà Nẵng", priority: 50, enabled: true, cadenceMinutes: 60, nextRunAt: "2026-08-18T00:00:00.000Z", pausedReason: null }), { status: 201 }));
+    vi.stubEnv("NEXT_PUBLIC_API_ORIGIN", "https://api.test");
+    vi.stubGlobal("fetch", fetch);
+    const container = document.createElement("div"); document.body.append(container);
+    const root = createRoot(container); roots.push(root);
+    await act(async () => { root.render(createElement(ProvinceCoverage, { provinces, setStatus: vi.fn() })); });
+    const click = async (name: string) => { await act(async () => { Array.from(container.querySelectorAll("button")).find((button) => button.textContent?.includes(name))!.click(); }); };
+    await click("Đà Nẵng");
+    Array.from(container.querySelectorAll("button")).find((button) => button.textContent?.includes("Đề xuất truy vấn tiếng Việt"))!.click();
+    for (let index = 0; index < 10 && fetch.mock.calls.length < 2; index += 1) await Promise.resolve();
+    await act(async () => {
+      resolveSuggestion(new Response(JSON.stringify({ canonicalProvinceId: "vn-21-da-nang", need: "Cần thêm thông tin", reason: "Chủ đề còn ít", queryText: "kinh nghiệm lái xe Đà Nẵng" }), { status: 201 }));
+    });
+    for (let index = 0; index < 10 && !container.textContent?.includes("Đề xuất tạm thời"); index += 1) await act(async () => { await Promise.resolve(); });
+    expect(container.textContent).toContain("Đề xuất tạm thời");
+    await click("Tạo truy vấn");
+    expect(fetch).toHaveBeenLastCalledWith("https://api.test/v1/admin/knowledge/youtube-discovery", expect.objectContaining({ method: "POST", body: JSON.stringify({ queryText: "kinh nghiệm lái xe Đà Nẵng", priority: 50, cadenceMinutes: 60 }) }));
     expect(container.textContent).not.toContain("Đề xuất tạm thời");
   });
 

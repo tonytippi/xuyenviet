@@ -66,6 +66,12 @@ context:
 - Given a gateway result is valid, when it is rendered, then it exactly binds to the selected geography and provides a concise Vietnamese knowledge need, reason, and safe natural Vietnamese YouTube query; the operator can edit, dismiss transiently, or create a scheduled query proposal without starting Discovery.
 - Given malformed input/output, unavailable model service, unauthorized access, or a failed query command, when the flow handles it, then it fails closed with practical Vietnamese recovery, retains any browser draft, records no unsafe payload, and creates no Discovery run, candidate, capture, or Knowledge record.
 
+### Review Findings
+- [x] [Review][Patch] Reject coverage lists whose IDs are not exactly the governed canonical set [packages/contracts/src/youtube-discovery/index.ts:88]
+- [x] [Review][Patch] Record safe usage and audit outcomes when the province-suggestion gateway throws [packages/database/src/admin-youtube-discovery.ts:35]
+- [x] [Review][Patch] Run the pure province coverage contract suite under `pnpm test:unit` [vitest.config.ts:6]
+- [x] [Review][Patch] Verify the successful selected-province suggestion-to-query UI flow [tests/admin-youtube-discovery-mission-ui.test.ts:37]
+
 ## Design Notes
 
 Suggestions are transient because the approved scope requires only edit/dismiss before an operator creates a query, not durable suggestion workflow state. The UI must label the next action `Tạo truy vấn`; it must not render or invoke `Chạy ngay` until Story 23.3 owns immediate admission.

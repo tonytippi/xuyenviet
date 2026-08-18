@@ -47,6 +47,7 @@ const unitTests = [
   "tests/admin-youtube-discovery-review-ui.test.ts",
   "tests/admin-youtube-discovery-health-ui.test.ts",
   "tests/admin-youtube-discovery-mission-ui.test.ts",
+  "tests/story-23-2-province-coverage-contract.test.ts",
 ];
 
 export default defineConfig({
