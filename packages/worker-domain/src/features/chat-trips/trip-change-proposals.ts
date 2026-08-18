@@ -1,6 +1,6 @@
 import { and, eq } from "drizzle-orm";
 
-import { getDb, isCanonicalRoutePathId, normalizeConstraints, normalizePlanItem } from "@xuyenviet/database";
+import { canonicalRoutePathMatchesEndpoints, getDb, isCanonicalRoutePathId, normalizeConstraints, normalizePlanItem } from "@xuyenviet/database";
 import { tripChangeProposals, tripPlanItems, tripProjects, type TripChangeProposalStatus, type TripPlanAnchorRole, type TripPlanItemKind, type TripPlanItemState, type TripPlanItemType } from "@xuyenviet/database";
 import { createSystemAuditActor } from "../audit/actors";
 import { recordAuditEvent } from "../audit/events";
@@ -98,7 +98,7 @@ export function validateProposalOperations(operations: unknown, context: Validat
     }
     if (value.kind === "set-leg-path" && hasOnlyKeys(value, ["kind", "itemId", "pathId"]) && typeof value.pathId === "string") {
       const item = known.get(value.itemId as string)!;
-      if (item.type !== "transport" || !isCanonicalRoutePathId(value.pathId)) return rejected.push({ index, reason: "set-leg-path invalid" });
+      if (item.type !== "transport" || !isCanonicalRoutePathId(value.pathId) || !canonicalRoutePathMatchesEndpoints(value.pathId, item.transportOriginLabel, item.transportDestinationLabel)) return rejected.push({ index, reason: "set-leg-path invalid" });
       return valid.push({ kind: "set-leg-path", itemId: item.id, pathId: value.pathId });
     }
     if (value.kind === "clear-leg-path" && hasOnlyKeys(value, ["kind", "itemId"])) {

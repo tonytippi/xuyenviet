@@ -123,3 +123,7 @@ Residual risks: The manifest is intentionally a small static, code-owned list; i
 **Commands:**
 - `git diff --check` -- expected: no whitespace errors in the approved planning correction.
 - `git status --short` -- expected: clean after the planning correction commit.
+
+### Review Findings
+
+- [x] [Review][Patch] Reject canonical paths whose manifest endpoints do not match the transport leg [packages/database/src/trip-plan-commands.ts:134] — Fixed by validating normalized manifest endpoints in both AI proposal validation and the authoritative Apply write, with a rejected cross-endpoint proposal regression.

@@ -26,6 +26,11 @@ export function isCanonicalRoutePathId(value: string): value is CanonicalRoutePa
   return pathById.has(value);
 }
 
+export function canonicalRoutePathMatchesEndpoints(pathId: string, originLabel: string | null, destinationLabel: string | null) {
+  const path = pathById.get(pathId);
+  return Boolean(path && originLabel && destinationLabel && endpointKey(path.origin, path.destination) === endpointKey(originLabel, destinationLabel));
+}
+
 export function resolveRouteApplicability(input: { canonicalRoutePathId: string | null; originLabel: string | null; destinationLabel: string | null }): RouteResolution {
   if (input.canonicalRoutePathId) return pathById.has(input.canonicalRoutePathId) ? { kind: "selected", pathId: input.canonicalRoutePathId } : { kind: "stale", pathId: input.canonicalRoutePathId };
   if (!input.originLabel || !input.destinationLabel) return { kind: "unsupported" };

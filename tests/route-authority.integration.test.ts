@@ -11,7 +11,7 @@ describe("canonical route path Apply", () => {
   test("atomically sets and clears an owner-confirmed path which persists after reload", async () => {
     await testDb.insert(users).values([{ id: "owner", email: "owner@example.com" }, { id: "other", email: "other@example.com" }]);
     await testDb.insert(tripProjects).values({ id: "trip", userId: "owner", title: "Đà Nẵng" });
-    await testDb.insert(tripPlanItems).values({ id: "leg", tripProjectId: "trip", userId: "owner", kind: "leg", type: "transport", state: "planned", label: "Chặng chính", ordinal: 0, version: 1 });
+    await testDb.insert(tripPlanItems).values({ id: "leg", tripProjectId: "trip", userId: "owner", kind: "leg", type: "transport", state: "planned", label: "Chặng chính", ordinal: 0, version: 1, transportOriginLabel: "Hà Nội", transportDestinationLabel: "Đà Nẵng" });
     await testDb.insert(tripChangeProposals).values({ id: "set", tripProjectId: "trip", userId: "owner", creatorClass: "owner_command", rationale: "Chọn cung đường", operations: [{ kind: "set-leg-path", itemId: "leg", pathId: "hanoi-da-nang-national-1a" }], expectedAggregateVersion: 1, expectedItemVersions: { leg: 1 } });
 
     await expect(applyTripChangeProposal("other", { tripProjectId: "trip", proposalId: "set" })).resolves.toEqual({ success: false, reason: "not_found" });
@@ -31,6 +31,17 @@ describe("canonical route path Apply", () => {
 
     await expect(applyTripChangeProposal("owner", { tripProjectId: "trip", proposalId: "invalid" })).resolves.toEqual({ success: false, reason: "refresh_required" });
     await expect(testDb.select({ status: tripChangeProposals.status }).from(tripChangeProposals).where(eq(tripChangeProposals.id, "invalid"))).resolves.toEqual([{ status: "pending" }]);
+  });
+
+  test("rejects a manifest path for another transport leg without granting route authority", async () => {
+    await testDb.insert(users).values({ id: "owner", email: "owner@example.com" });
+    await testDb.insert(tripProjects).values({ id: "trip", userId: "owner", title: "Quy Nhơn" });
+    await testDb.insert(tripPlanItems).values({ id: "leg", tripProjectId: "trip", userId: "owner", kind: "leg", type: "transport", state: "planned", label: "Đà Nẵng đến Quy Nhơn", ordinal: 0, version: 1, transportOriginLabel: "Đà Nẵng", transportDestinationLabel: "Quy Nhơn" });
+    await testDb.insert(tripChangeProposals).values({ id: "wrong-endpoints", tripProjectId: "trip", userId: "owner", creatorClass: "owner_command", rationale: "Chọn cung đường", operations: [{ kind: "set-leg-path", itemId: "leg", pathId: "hanoi-da-nang-national-1a" }], expectedAggregateVersion: 1, expectedItemVersions: { leg: 1 } });
+
+    await expect(applyTripChangeProposal("owner", { tripProjectId: "trip", proposalId: "wrong-endpoints" })).resolves.toEqual({ success: false, reason: "refresh_required" });
+    await expect(testDb.select({ pathId: tripPlanItems.canonicalRoutePathId, version: tripPlanItems.version }).from(tripPlanItems).where(eq(tripPlanItems.id, "leg"))).resolves.toEqual([{ pathId: null, version: 1 }]);
+    await expect(testDb.select({ status: tripChangeProposals.status }).from(tripChangeProposals).where(eq(tripChangeProposals.id, "wrong-endpoints"))).resolves.toEqual([{ status: "pending" }]);
   });
 
   test("rejects a stale set-path fence without changing the stored route or proposal", async () => {
