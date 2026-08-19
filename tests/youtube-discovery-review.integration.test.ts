@@ -5,8 +5,8 @@ import { asc, desc, eq, sql } from "drizzle-orm";
 import { parseAdminYoutubeDiscoveryBrowseCursor, parseAdminYoutubeDiscoveryReviewCursor, type RequestPrincipal } from "@xuyenviet/contracts";
 import { YoutubeDiscoveryBrowseCursorValidationError, YoutubeDiscoveryReviewCursorValidationError } from "@xuyenviet/domain";
 
-import { aiGatewayModels, auditEvents, claimNextYoutubeDiscoveryRun, createPostgresAdminYoutubeDiscoveryPort, createSystemAuditActor, createUserAuditActor, createYoutubeDiscoveryPolicyVersion, createYoutubeDiscoveryQueryProposal, createYoutubeDiscoveryRun, finishYoutubeDiscoveryRun, getYoutubeDiscoveryRecommendationBundle, persistYoutubeDiscoveryCandidates, persistYoutubeDiscoveryEnrichment, persistYoutubeDiscoveryRecommendation, persistYoutubeDiscoveryTriage, selectYoutubeDiscoveryTriageModel, youtubeDiscoveryAppearances, youtubeDiscoveryCandidateReviewStates, youtubeDiscoveryCandidates, youtubeDiscoveryKnowledgeHandoffs, youtubeDiscoveryRecommendations } from "@xuyenviet/database";
-import { resetTestDatabase, seedTestOperator, testDb } from "./helpers/db";
+import { auditEvents, claimNextYoutubeDiscoveryRun, createPostgresAdminYoutubeDiscoveryPort, createSystemAuditActor, createUserAuditActor, createYoutubeDiscoveryPolicyVersion, createYoutubeDiscoveryQueryProposal, createYoutubeDiscoveryRun, finishYoutubeDiscoveryRun, getYoutubeDiscoveryRecommendationBundle, persistYoutubeDiscoveryCandidates, persistYoutubeDiscoveryEnrichment, persistYoutubeDiscoveryRecommendation, persistYoutubeDiscoveryTriage, selectYoutubeDiscoveryTriageModel, youtubeDiscoveryAppearances, youtubeDiscoveryCandidateReviewStates, youtubeDiscoveryCandidates, youtubeDiscoveryKnowledgeHandoffs, youtubeDiscoveryRecommendations } from "@xuyenviet/database";
+import { resetTestDatabase, seedAiPurposeModel, seedTestOperator, testDb } from "./helpers/db";
 
 describe.sequential("YouTube Discovery review read model", () => {
   beforeEach(async () => {
@@ -22,7 +22,7 @@ describe.sequential("YouTube Discovery review read model", () => {
     const claim = (await claimNextYoutubeDiscoveryRun({ workerId: "review-read-model" }, testDb)).claim!;
     const videos = Array.from({ length: 21 }, (_, index) => `rv${String(index).padStart(9, "0")}`);
     expect(await persistYoutubeDiscoveryCandidates(claim, videos.map((videoId, resultOrdinal) => ({ videoId, canonicalUrl: `https://www.youtube.com/watch?v=${videoId}`, resultOrdinal, searchTranche: "medium" as const })), testDb)).toBe("completed");
-    await testDb.insert(aiGatewayModels).values({ id: "review-model", gatewayModelName: "test/review", displayLabel: "Review", purpose: "youtube_discovery_triage", active: true, defaultForPurpose: true, supportsTextInput: true, supportsExtraction: true, pricingUnitTokens: 1_000_000 });
+    await seedAiPurposeModel({ id: "review-model", gatewayModelName: "test/review", displayLabel: "Review", purpose: "youtube_discovery_triage", active: true, supportsTextInput: true, supportsExtraction: true, pricingUnitTokens: 1_000_000 });
     const model = await selectYoutubeDiscoveryTriageModel(testDb);
     if (!model) throw new Error("expected review triage model");
 

@@ -1,7 +1,7 @@
-import { and, asc, desc, eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 
 import { getDb } from "./client";
-import { aiGatewayModels, type AiGatewayModelPurpose } from "./schema";
+import { aiGatewayModels, aiPurposes, type AiGatewayModelPurpose } from "./schema";
 
 export type AiModelCapabilityRequirement = {
   textInput?: boolean;
@@ -62,7 +62,7 @@ export async function selectActiveAiGatewayModel({
   requiredCapabilities: AiModelCapabilityRequirement;
   db?: AiModelDb;
 }) {
-  const conditions = [eq(aiGatewayModels.purpose, purpose), eq(aiGatewayModels.active, true), eq(aiGatewayModels.defaultForPurpose, true)];
+  const conditions = [eq(aiPurposes.purpose, purpose), eq(aiGatewayModels.active, true)];
 
   if (requiredCapabilities.textInput) conditions.push(eq(aiGatewayModels.supportsTextInput, true));
   if (requiredCapabilities.imageInput) conditions.push(eq(aiGatewayModels.supportsImageInput, true));
@@ -74,12 +74,12 @@ export async function selectActiveAiGatewayModel({
 
   const [model] = await db
     .select()
-    .from(aiGatewayModels)
+    .from(aiPurposes)
+    .innerJoin(aiGatewayModels, eq(aiPurposes.aiGatewayModelId, aiGatewayModels.id))
     .where(and(...conditions))
-    .orderBy(desc(aiGatewayModels.defaultForPurpose), desc(aiGatewayModels.pricingEffectiveAt), asc(aiGatewayModels.gatewayModelName))
     .limit(1);
 
-  return model ?? null;
+  return model?.ai_gateway_models ?? null;
 }
 
 export function getAiGatewayPricingSnapshot(model: SelectedAiGatewayModel): AiGatewayPricingSnapshot {

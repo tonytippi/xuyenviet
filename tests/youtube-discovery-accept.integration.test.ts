@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import type { RequestPrincipal } from "@xuyenviet/contracts";
 import { and, eq } from "drizzle-orm";
-import { aiGatewayModels, auditEvents, claimNextYoutubeDiscoveryCandidateJob, claimNextYoutubeDiscoveryRun, createPostgresAdminYoutubeDiscoveryPort, createSystemAuditActor, createUserAuditActor, createYoutubeDiscoveryPolicyVersion, createYoutubeDiscoveryQueryProposal, createYoutubeDiscoveryRun, finishYoutubeDiscoveryCandidateJob, finishYoutubeDiscoveryRun, getYoutubeDiscoveryRecommendationBundle, persistYoutubeDiscoveryCandidates, persistYoutubeDiscoveryEnrichment, persistYoutubeDiscoveryRecommendation, persistYoutubeDiscoveryTriage, reconcileYoutubeDiscoveryKnowledgeHandoffs, retainYoutubeDiscoveryRecords, selectYoutubeDiscoveryTriageModel, users, youtubeDiscoveryAppearances, youtubeDiscoveryCandidateReviewStates, youtubeDiscoveryCandidates, youtubeDiscoveryKnowledgeHandoffs, youtubeDiscoveryRecommendations } from "@xuyenviet/database";
-import { resetTestDatabase, seedTestOperator, testDb } from "./helpers/db";
+import { auditEvents, claimNextYoutubeDiscoveryCandidateJob, claimNextYoutubeDiscoveryRun, createPostgresAdminYoutubeDiscoveryPort, createSystemAuditActor, createUserAuditActor, createYoutubeDiscoveryPolicyVersion, createYoutubeDiscoveryQueryProposal, createYoutubeDiscoveryRun, finishYoutubeDiscoveryCandidateJob, finishYoutubeDiscoveryRun, getYoutubeDiscoveryRecommendationBundle, persistYoutubeDiscoveryCandidates, persistYoutubeDiscoveryEnrichment, persistYoutubeDiscoveryRecommendation, persistYoutubeDiscoveryTriage, reconcileYoutubeDiscoveryKnowledgeHandoffs, retainYoutubeDiscoveryRecords, selectYoutubeDiscoveryTriageModel, users, youtubeDiscoveryAppearances, youtubeDiscoveryCandidateReviewStates, youtubeDiscoveryCandidates, youtubeDiscoveryKnowledgeHandoffs, youtubeDiscoveryRecommendations } from "@xuyenviet/database";
+import { resetTestDatabase, seedAiPurposeModel, seedTestOperator, testDb } from "./helpers/db";
 
 const principal: RequestPrincipal = { userId: "operator", email: "operator@example.com", roles: ["operator"], sessionId: "accept-session", authorizationVersion: 1 };
 const secondPrincipal: RequestPrincipal = { userId: "operator-two", email: "operator-two@example.com", roles: ["operator"], sessionId: "accept-session-two", authorizationVersion: 1 };
@@ -189,7 +189,7 @@ async function seedReview() {
   if (!candidateClaim) throw new Error("expected candidate claim");
   await persistYoutubeDiscoveryEnrichment(candidateClaim, { videoId, durationSeconds: 180, defaultAudioLanguage: "vi", signals: [] }, testDb);
   await testDb.update(youtubeDiscoveryAppearances).set({ languageFit: "vi", durationFit: "eligible", eligibilityReason: "eligible_vietnamese", queryBuilderVersion: 2, languageClassifierVersion: 1, minimumUsefulDurationSeconds: 180 }).where(eq(youtubeDiscoveryAppearances.runId, claim.id));
-  await testDb.insert(aiGatewayModels).values({ id: "accept-model", gatewayModelName: "test/accept", displayLabel: "Accept", purpose: "youtube_discovery_triage", active: true, defaultForPurpose: true, supportsTextInput: true, supportsExtraction: true, pricingUnitTokens: 1_000_000 });
+    await seedAiPurposeModel({ id: "accept-model", gatewayModelName: "test/accept", displayLabel: "Accept", purpose: "youtube_discovery_triage", active: true, supportsTextInput: true, supportsExtraction: true, pricingUnitTokens: 1_000_000 });
   const model = (await selectYoutubeDiscoveryTriageModel(testDb))!;
   const [candidate] = await testDb.select({ id: youtubeDiscoveryCandidates.id, canonicalUrl: youtubeDiscoveryCandidates.canonicalUrl }).from(youtubeDiscoveryCandidates).where(eq(youtubeDiscoveryCandidates.videoId, videoId));
   if (!candidate) throw new Error("expected candidate");

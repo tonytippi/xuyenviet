@@ -1,7 +1,7 @@
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 
-import { knowledgeProvinceReferences, schema, users } from "@/db/schema";
+import { aiGatewayModels, aiPurposes, knowledgeProvinceReferences, schema, users, type AiGatewayModelPurpose } from "@/db/schema";
 import { knowledgeProvinceReferenceEffectiveDate, knowledgeProvinceReferenceFixture, knowledgeProvinceReferenceProvenance, knowledgeProvinceReferenceVersion } from "@/db/knowledge-geography";
 
 import { getTestDatabaseUrl } from "./env-file";
@@ -46,6 +46,27 @@ export async function resetTestDatabase() {
 
 export async function seedTestOperator() {
   await testDb.insert(users).values({ id: "operator", email: "operator@example.com" });
+}
+
+export async function seedAiPurposeModel(input: {
+  id: string;
+  gatewayModelName: string;
+  displayLabel: string;
+  purpose: AiGatewayModelPurpose;
+  active?: boolean;
+  supportsTextInput?: boolean;
+  supportsImageInput?: boolean;
+  supportsStreaming?: boolean;
+  supportsEmbeddings?: boolean;
+  supportsExtraction?: boolean;
+  supportsEvaluation?: boolean;
+  pricingUnitTokens?: number;
+  pricingEffectiveAt?: Date;
+  mapPurpose?: boolean;
+}) {
+  const { purpose, mapPurpose = true, ...model } = input;
+  await testDb.insert(aiGatewayModels).values(model);
+  if (mapPurpose) await testDb.insert(aiPurposes).values({ purpose, aiGatewayModelId: input.id });
 }
 
 export async function closeTestDatabase() {

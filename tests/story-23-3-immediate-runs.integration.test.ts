@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, test } from "vitest";
 import { and, eq, sql } from "drizzle-orm";
 import type { RequestPrincipal } from "@xuyenviet/contracts";
-import { auditEvents, createPostgresAdminYoutubeDiscoveryPort, createSystemAuditActor, createUserAuditActor, createYoutubeDiscoveryPolicyVersion, createYoutubeDiscoveryQueryProposal, claimNextYoutubeDiscoveryCandidateJob, claimNextYoutubeDiscoveryRun, finishYoutubeDiscoveryCandidateJob, finishYoutubeDiscoveryRun, getYoutubeDiscoveryRecommendationBundle, knowledgeCards, knowledgeRecommendations, persistYoutubeDiscoveryCandidates, persistYoutubeDiscoveryEligibility, persistYoutubeDiscoveryEnrichment, persistYoutubeDiscoveryRecommendation, persistYoutubeDiscoveryTriage, retryYoutubeDiscoveryRun, selectYoutubeDiscoveryTriageModel, users, youtubeDiscoveryCandidateReviewStates, youtubeDiscoveryCandidates, youtubeDiscoveryCandidateJobs, youtubeDiscoveryKnowledgeHandoffs, youtubeDiscoveryQueryProposals, youtubeDiscoveryRuns, aiGatewayModels } from "@xuyenviet/database";
-import { resetTestDatabase, seedTestOperator, testDb } from "./helpers/db";
+import { auditEvents, createPostgresAdminYoutubeDiscoveryPort, createSystemAuditActor, createUserAuditActor, createYoutubeDiscoveryPolicyVersion, createYoutubeDiscoveryQueryProposal, claimNextYoutubeDiscoveryCandidateJob, claimNextYoutubeDiscoveryRun, finishYoutubeDiscoveryCandidateJob, finishYoutubeDiscoveryRun, getYoutubeDiscoveryRecommendationBundle, knowledgeCards, knowledgeRecommendations, persistYoutubeDiscoveryCandidates, persistYoutubeDiscoveryEligibility, persistYoutubeDiscoveryEnrichment, persistYoutubeDiscoveryRecommendation, persistYoutubeDiscoveryTriage, retryYoutubeDiscoveryRun, selectYoutubeDiscoveryTriageModel, users, youtubeDiscoveryCandidateReviewStates, youtubeDiscoveryCandidates, youtubeDiscoveryCandidateJobs, youtubeDiscoveryKnowledgeHandoffs, youtubeDiscoveryQueryProposals, youtubeDiscoveryRuns, aiPurposes } from "@xuyenviet/database";
+import { resetTestDatabase, seedAiPurposeModel, seedTestOperator, testDb } from "./helpers/db";
 import { bindYoutubeDiscoveryExecutionPorts, runYoutubeDiscoveryPoll } from "../packages/worker-domain/src/features/youtube-discovery/execution";
 
 const principal: RequestPrincipal = { userId: "operator", email: "operator@example.com", roles: ["operator"], sessionId: "story-23-3", authorizationVersion: 1 };
@@ -100,8 +100,8 @@ describe.sequential("Story 23.3 immediate Discovery runs", () => {
     if (!candidateJob) throw new Error("expected candidate job claim");
     const [candidate] = await testDb.select({ id: youtubeDiscoveryCandidates.id }).from(youtubeDiscoveryCandidates).where(eq(youtubeDiscoveryCandidates.videoId, "story233video"));
     if (!candidate) throw new Error("expected candidate");
-    const models = await testDb.select({ id: aiGatewayModels.id }).from(aiGatewayModels).where(eq(aiGatewayModels.purpose, "youtube_discovery_triage"));
-    if (!models.length) await testDb.insert(aiGatewayModels).values({ id: "story-23-3-model", gatewayModelName: "test/story-23-3", displayLabel: "Story 23.3", purpose: "youtube_discovery_triage", active: true, defaultForPurpose: true, supportsTextInput: true, supportsExtraction: true, pricingUnitTokens: 1_000_000 });
+    const models = await testDb.select({ id: aiPurposes.aiGatewayModelId }).from(aiPurposes).where(eq(aiPurposes.purpose, "youtube_discovery_triage"));
+    if (!models.length) await seedAiPurposeModel({ id: "story-23-3-model", gatewayModelName: "test/story-23-3", displayLabel: "Story 23.3", purpose: "youtube_discovery_triage", active: true, supportsTextInput: true, supportsExtraction: true, pricingUnitTokens: 1_000_000 });
     const model = await selectYoutubeDiscoveryTriageModel(testDb);
     if (!model) throw new Error("expected triage model");
     await persistYoutubeDiscoveryEnrichment(candidateJob, { videoId: "story233video", durationSeconds: 180, defaultAudioLanguage: "vi", signals: [] }, testDb);

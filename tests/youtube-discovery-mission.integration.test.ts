@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, test } from "vitest";
 import { eq, sql } from "drizzle-orm";
 import { parseAdminYoutubeDiscoveryMissionCandidateCursor } from "@xuyenviet/contracts";
-import { auditEvents, claimNextYoutubeDiscoveryRun, createPostgresAdminYoutubeDiscoveryPort, createSystemAuditActor, createUserAuditActor, createYoutubeDiscoveryPolicyVersion, createYoutubeDiscoveryQueryProposal, createYoutubeDiscoveryRun, finishYoutubeDiscoveryRun, getYoutubeDiscoveryRecommendationBundle, persistYoutubeDiscoveryCandidates, persistYoutubeDiscoveryEnrichment, persistYoutubeDiscoveryRecommendation, persistYoutubeDiscoveryTriage, selectYoutubeDiscoveryTriageModel, youtubeDiscoveryAppearances, youtubeDiscoveryCandidateReviewStates, youtubeDiscoveryKnowledgeHandoffs, youtubeDiscoveryQueryProposals, youtubeDiscoveryRecommendations, youtubeDiscoveryRuns, aiGatewayModels, youtubeDiscoveryCandidates } from "@xuyenviet/database";
-import { resetTestDatabase, seedTestOperator, testDb } from "./helpers/db";
+import { auditEvents, claimNextYoutubeDiscoveryRun, createPostgresAdminYoutubeDiscoveryPort, createSystemAuditActor, createUserAuditActor, createYoutubeDiscoveryPolicyVersion, createYoutubeDiscoveryQueryProposal, createYoutubeDiscoveryRun, finishYoutubeDiscoveryRun, getYoutubeDiscoveryRecommendationBundle, persistYoutubeDiscoveryCandidates, persistYoutubeDiscoveryEnrichment, persistYoutubeDiscoveryRecommendation, persistYoutubeDiscoveryTriage, selectYoutubeDiscoveryTriageModel, youtubeDiscoveryAppearances, youtubeDiscoveryCandidateReviewStates, youtubeDiscoveryKnowledgeHandoffs, youtubeDiscoveryQueryProposals, youtubeDiscoveryRecommendations, youtubeDiscoveryRuns, aiPurposes, youtubeDiscoveryCandidates } from "@xuyenviet/database";
+import { resetTestDatabase, seedAiPurposeModel, seedTestOperator, testDb } from "./helpers/db";
 
 const actionId = "mission-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const principal = { userId: "operator", email: "operator@example.com", roles: ["operator"], sessionId: "mission-session", authorizationVersion: 1 };
@@ -76,8 +76,8 @@ async function completeCandidate(policyVersionId: string, queryProposalId: strin
   await persistYoutubeDiscoveryCandidates(claim, [{ videoId, canonicalUrl: `https://www.youtube.com/watch?v=${videoId}`, resultOrdinal: 0, searchTranche: "medium" }], testDb);
   await persistYoutubeDiscoveryEnrichment(claim, { videoId, title: "Đường đèo Việt Nam", durationSeconds: 180, defaultAudioLanguage: "vi", signals: [] }, testDb);
   await testDb.update(youtubeDiscoveryAppearances).set({ languageFit: "vi", durationFit: "eligible", eligibilityReason: "eligible_vietnamese", queryBuilderVersion: 2, languageClassifierVersion: 1, minimumUsefulDurationSeconds: 180 }).where(eq(youtubeDiscoveryAppearances.runId, claim.id));
-  const existingModel = await testDb.select({ id: aiGatewayModels.id }).from(aiGatewayModels).where(eq(aiGatewayModels.purpose, "youtube_discovery_triage"));
-  if (!existingModel.length) await testDb.insert(aiGatewayModels).values({ id: "mission-model", gatewayModelName: "test/mission", displayLabel: "Mission", purpose: "youtube_discovery_triage", active: true, defaultForPurpose: true, supportsTextInput: true, supportsExtraction: true, pricingUnitTokens: 1_000_000 });
+  const existingModel = await testDb.select({ id: aiPurposes.aiGatewayModelId }).from(aiPurposes).where(eq(aiPurposes.purpose, "youtube_discovery_triage"));
+  if (!existingModel.length) await seedAiPurposeModel({ id: "mission-model", gatewayModelName: "test/mission", displayLabel: "Mission", purpose: "youtube_discovery_triage", active: true, supportsTextInput: true, supportsExtraction: true, pricingUnitTokens: 1_000_000 });
   const model = await selectYoutubeDiscoveryTriageModel(testDb); const [candidate] = await testDb.select({ id: youtubeDiscoveryCandidates.id }).from(youtubeDiscoveryCandidates).where(eq(youtubeDiscoveryCandidates.videoId, videoId));
   if (!model || !candidate) throw new Error("expected candidate");
   await persistYoutubeDiscoveryTriage(claim, { candidateId: candidate.id, status: "succeeded", assessment: { relevanceScore: 1, expectedValueScore: 1, freshnessFitScore: 1, commercialRiskScore: 0, duplicateRiskScore: 0, signals: [] }, model, provider: "ai_gateway", modelName: model.gatewayModelName, latencyMs: 1 }, testDb);

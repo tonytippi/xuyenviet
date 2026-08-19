@@ -1543,9 +1543,7 @@ export const aiGatewayModels = pgTable(
       .$defaultFn(() => crypto.randomUUID()),
     gatewayModelName: text("gateway_model_name").notNull(),
     displayLabel: text("display_label").notNull(),
-    purpose: text("purpose").$type<AiGatewayModelPurpose>().notNull(),
     active: boolean("active").default(true).notNull(),
-    defaultForPurpose: boolean("default_for_purpose").default(false).notNull(),
     supportsTextInput: boolean("supports_text_input").default(false).notNull(),
     supportsImageInput: boolean("supports_image_input").default(false).notNull(),
     supportsImageOutput: boolean("supports_image_output").default(false).notNull(),
@@ -1566,18 +1564,10 @@ export const aiGatewayModels = pgTable(
     updatedAt: timestamp("updated_at", { mode: "date" }).defaultNow().notNull(),
   },
   (model) => [
-    uniqueIndex("ai_gateway_models_gateway_model_purpose_idx").on(model.gatewayModelName, model.purpose),
-    index("ai_gateway_models_purpose_active_idx").on(model.purpose, model.active),
-    uniqueIndex("ai_gateway_models_one_default_per_purpose_idx").on(model.purpose).where(sql`${model.defaultForPurpose} = true`),
-    index("ai_gateway_models_default_idx").on(model.purpose, model.defaultForPurpose),
-    check(
-      "ai_gateway_models_purpose_check",
-      sql`${model.purpose} in ('ai_ask_initial_answer', 'extraction', 'embeddings', 'evaluation', 'youtube_discovery_triage', 'youtube_discovery_province_suggestion')`,
-    ),
+    index("ai_gateway_models_gateway_model_name_idx").on(model.gatewayModelName),
     check("ai_gateway_models_display_label_not_empty_check", sql`length(btrim(${model.displayLabel})) > 0`),
     check("ai_gateway_models_gateway_model_name_not_empty_check", sql`length(btrim(${model.gatewayModelName})) > 0`),
     check("ai_gateway_models_pricing_unit_positive_check", sql`${model.pricingUnitTokens} > 0`),
-    check("ai_gateway_models_default_active_check", sql`${model.defaultForPurpose} = false or ${model.active} = true`),
     check(
       "ai_gateway_models_priced_currency_check",
       sql`(${model.inputTokenPriceMicros} is null and ${model.outputTokenPriceMicros} is null and ${model.cacheReadTokenPriceMicros} is null and ${model.cacheWriteTokenPriceMicros} is null) or ${model.pricingCurrency} is not null`,
@@ -1592,6 +1582,20 @@ export const aiGatewayModels = pgTable(
       "ai_gateway_models_cache_write_price_non_negative_check",
       sql`${model.cacheWriteTokenPriceMicros} is null or ${model.cacheWriteTokenPriceMicros} >= 0`,
     ),
+  ],
+);
+
+export const aiPurposes = pgTable(
+  "ai_purposes",
+  {
+    purpose: text("purpose").$type<AiGatewayModelPurpose>().primaryKey(),
+    aiGatewayModelId: text("ai_gateway_model_id").notNull().references(() => aiGatewayModels.id, { onDelete: "restrict" }),
+    createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { mode: "date" }).defaultNow().notNull(),
+  },
+  (assignment) => [
+    index("ai_purposes_ai_gateway_model_id_idx").on(assignment.aiGatewayModelId),
+    check("ai_purposes_purpose_check", sql`${assignment.purpose} in ('ai_ask_initial_answer', 'extraction', 'embeddings', 'evaluation', 'youtube_discovery_triage', 'youtube_discovery_province_suggestion')`),
   ],
 );
 

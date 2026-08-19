@@ -4,8 +4,8 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { createAiAskStreamExecutionPort, setAiAskStreamTestDependencies } from "../packages/database/src/ai-ask-stream-execution";
 import { assembleContextPrioritySourceBundle } from "../packages/database/src/source-bundle";
 import { choosePrivateTripRecommendation, createPostgresTripRecommendationReadRepository } from "../packages/database/src/trip-recommendations";
-import { aiAskCommands, aiGatewayModels, assistantResponseProvenance, chatContext, conversations, domainOutbox, messages, planningContextSessions, tripAnswerContextSnapshots, tripProjects, users } from "../packages/database/src/schema";
-import { resetTestDatabase, testDb } from "./helpers/db";
+import { aiAskCommands, assistantResponseProvenance, chatContext, conversations, domainOutbox, messages, planningContextSessions, tripAnswerContextSnapshots, tripProjects, users } from "../packages/database/src/schema";
+import { resetTestDatabase, seedAiPurposeModel, testDb } from "./helpers/db";
 
 describe("private recommendation next-turn answer context", () => {
   beforeEach(async () => { await resetTestDatabase(); });
@@ -29,7 +29,7 @@ describe("private recommendation next-turn answer context", () => {
     await expect(choosePrivateTripRecommendation("owner", { decisionId: recommendation.tripContextRecommendation.decisionId })).resolves.toEqual({ success: true });
     await expect(testDb.select({ tripProjectId: conversations.tripProjectId }).from(conversations).where(eq(conversations.id, "ordinary-conversation"))).resolves.toEqual([{ tripProjectId: null }]);
 
-    await testDb.insert(aiGatewayModels).values({ id: "answer-model", gatewayModelName: "test/answer", displayLabel: "Test answer model", purpose: "ai_ask_initial_answer", defaultForPurpose: true, supportsTextInput: true, supportsStreaming: true });
+    await seedAiPurposeModel({ id: "answer-model", gatewayModelName: "test/answer", displayLabel: "Test answer model", purpose: "ai_ask_initial_answer", supportsTextInput: true, supportsStreaming: true });
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
       const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
       if (url === "https://api.tavily.com/search") return new Response(JSON.stringify({ results: [] }), { status: 200, headers: { "content-type": "application/json" } });

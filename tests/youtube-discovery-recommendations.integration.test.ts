@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { eq, sql } from "drizzle-orm";
 
-import { aiGatewayModels, claimNextYoutubeDiscoveryRun, createSystemAuditActor, createUserAuditActor, createYoutubeDiscoveryPolicyVersion, createYoutubeDiscoveryQueryProposal, createYoutubeDiscoveryRun, finishYoutubeDiscoveryRun, getYoutubeDiscoveryRecommendationBundle, persistYoutubeDiscoveryCandidates, persistYoutubeDiscoveryEnrichment, persistYoutubeDiscoveryRecommendation, persistYoutubeDiscoveryTriage, retainYoutubeDiscoveryRecords, selectYoutubeDiscoveryTriageModel, youtubeDiscoveryCandidateReviewStates, youtubeDiscoveryCandidates, youtubeDiscoveryCommentSignals, youtubeDiscoveryKnowledgeHandoffs, youtubeDiscoveryRankingHistory, youtubeDiscoveryRecommendations, youtubeDiscoveryTriages } from "@xuyenviet/database";
-import { resetTestDatabase, seedTestOperator, testDb } from "./helpers/db";
+import { claimNextYoutubeDiscoveryRun, createSystemAuditActor, createUserAuditActor, createYoutubeDiscoveryPolicyVersion, createYoutubeDiscoveryQueryProposal, createYoutubeDiscoveryRun, finishYoutubeDiscoveryRun, getYoutubeDiscoveryRecommendationBundle, persistYoutubeDiscoveryCandidates, persistYoutubeDiscoveryEnrichment, persistYoutubeDiscoveryRecommendation, persistYoutubeDiscoveryTriage, retainYoutubeDiscoveryRecords, selectYoutubeDiscoveryTriageModel, youtubeDiscoveryCandidateReviewStates, youtubeDiscoveryCandidates, youtubeDiscoveryCommentSignals, youtubeDiscoveryKnowledgeHandoffs, youtubeDiscoveryRankingHistory, youtubeDiscoveryRecommendations, youtubeDiscoveryTriages } from "@xuyenviet/database";
+import { resetTestDatabase, seedAiPurposeModel, seedTestOperator, testDb } from "./helpers/db";
 
 describe.sequential("YouTube Discovery recommendation persistence", () => {
   beforeEach(resetTestDatabase);
@@ -16,7 +16,7 @@ describe.sequential("YouTube Discovery recommendation persistence", () => {
     const videoId = "abcDEF12345";
     await persistYoutubeDiscoveryCandidates(claim, [{ videoId, canonicalUrl: `https://www.youtube.com/watch?v=${videoId}`, resultOrdinal: 0, searchTranche: "medium" }], testDb);
     await persistYoutubeDiscoveryEnrichment(claim, { videoId, signals: [] }, testDb);
-    await testDb.insert(aiGatewayModels).values({ id: "recommendation-model", gatewayModelName: "test/recommendation", displayLabel: "Recommendation", purpose: "youtube_discovery_triage", active: true, defaultForPurpose: true, supportsTextInput: true, supportsExtraction: true, pricingUnitTokens: 1_000_000 });
+    await seedAiPurposeModel({ id: "recommendation-model", gatewayModelName: "test/recommendation", displayLabel: "Recommendation", purpose: "youtube_discovery_triage", active: true, supportsTextInput: true, supportsExtraction: true, pricingUnitTokens: 1_000_000 });
     const model = (await selectYoutubeDiscoveryTriageModel(testDb))!;
     const [candidate] = await testDb.select({ id: youtubeDiscoveryCandidates.id }).from(youtubeDiscoveryCandidates).where(eq(youtubeDiscoveryCandidates.videoId, videoId));
     await persistYoutubeDiscoveryTriage(claim, { candidateId: candidate.id, status: "succeeded", assessment: { relevanceScore: 1, expectedValueScore: 1, freshnessFitScore: 1, commercialRiskScore: 0, duplicateRiskScore: 0, signals: [] }, model, provider: "ai_gateway", modelName: model.gatewayModelName, latencyMs: 1 }, testDb);
@@ -59,7 +59,7 @@ describe.sequential("YouTube Discovery recommendation persistence", () => {
     const videoId = "abcDEF12345";
     await persistYoutubeDiscoveryCandidates(claim, [{ videoId, canonicalUrl: `https://www.youtube.com/watch?v=${videoId}`, resultOrdinal: 0, searchTranche: "medium" }], testDb);
     await persistYoutubeDiscoveryEnrichment(claim, { videoId, signals: [{ signal: "practical_question_demand", count: 1, score: 10 }] }, testDb);
-    await testDb.insert(aiGatewayModels).values({ id: "recommendation-expiry-model", gatewayModelName: "test/recommendation-expiry", displayLabel: "Recommendation expiry", purpose: "youtube_discovery_triage", active: true, defaultForPurpose: true, supportsTextInput: true, supportsExtraction: true, pricingUnitTokens: 1_000_000 });
+    await seedAiPurposeModel({ id: "recommendation-expiry-model", gatewayModelName: "test/recommendation-expiry", displayLabel: "Recommendation expiry", purpose: "youtube_discovery_triage", active: true, supportsTextInput: true, supportsExtraction: true, pricingUnitTokens: 1_000_000 });
     const model = (await selectYoutubeDiscoveryTriageModel(testDb))!;
     const [candidate] = await testDb.select({ id: youtubeDiscoveryCandidates.id }).from(youtubeDiscoveryCandidates).where(eq(youtubeDiscoveryCandidates.videoId, videoId));
     await persistYoutubeDiscoveryTriage(claim, { candidateId: candidate!.id, status: "succeeded", assessment: { relevanceScore: 1, expectedValueScore: 1, freshnessFitScore: 1, commercialRiskScore: 0, duplicateRiskScore: 0, signals: ["practical_question_demand"] }, model, provider: "ai_gateway", modelName: model.gatewayModelName, latencyMs: 1 }, testDb);
@@ -84,7 +84,7 @@ describe.sequential("YouTube Discovery recommendation persistence", () => {
     const nonProvenancedClaim = (await claimNextYoutubeDiscoveryRun({ workerId: "recommendation-unprovenanced-test" }, testDb)).claim!;
     await persistYoutubeDiscoveryCandidates(nonProvenancedClaim, [{ videoId, canonicalUrl: `https://www.youtube.com/watch?v=${videoId}`, resultOrdinal: 0, searchTranche: "medium" }], testDb);
     await persistYoutubeDiscoveryEnrichment(nonProvenancedClaim, { videoId, signals: [] }, testDb);
-    await testDb.insert(aiGatewayModels).values({ id: "recommendation-provenance-model", gatewayModelName: "test/recommendation-provenance", displayLabel: "Recommendation provenance", purpose: "youtube_discovery_triage", active: true, defaultForPurpose: true, supportsTextInput: true, supportsExtraction: true, pricingUnitTokens: 1_000_000 });
+    await seedAiPurposeModel({ id: "recommendation-provenance-model", gatewayModelName: "test/recommendation-provenance", displayLabel: "Recommendation provenance", purpose: "youtube_discovery_triage", active: true, supportsTextInput: true, supportsExtraction: true, pricingUnitTokens: 1_000_000 });
     const model = (await selectYoutubeDiscoveryTriageModel(testDb))!;
     const [candidate] = await testDb.select({ id: youtubeDiscoveryCandidates.id }).from(youtubeDiscoveryCandidates).where(eq(youtubeDiscoveryCandidates.videoId, videoId));
     if (!candidate) throw new Error("expected candidate");
@@ -117,7 +117,7 @@ describe.sequential("YouTube Discovery recommendation persistence", () => {
     const videoId = "abcDEF12345";
     await persistYoutubeDiscoveryCandidates(claim, [{ videoId, canonicalUrl: `https://www.youtube.com/watch?v=${videoId}`, resultOrdinal: 0, searchTranche: "medium" }], testDb);
     await persistYoutubeDiscoveryEnrichment(claim, { videoId, signals: [] }, testDb);
-    await testDb.insert(aiGatewayModels).values({ id: "recommendation-trigger-model", gatewayModelName: "test/recommendation-trigger", displayLabel: "Recommendation trigger", purpose: "youtube_discovery_triage", active: true, defaultForPurpose: true, supportsTextInput: true, supportsExtraction: true, pricingUnitTokens: 1_000_000 });
+    await seedAiPurposeModel({ id: "recommendation-trigger-model", gatewayModelName: "test/recommendation-trigger", displayLabel: "Recommendation trigger", purpose: "youtube_discovery_triage", active: true, supportsTextInput: true, supportsExtraction: true, pricingUnitTokens: 1_000_000 });
     const model = (await selectYoutubeDiscoveryTriageModel(testDb))!;
     const [candidate] = await testDb.select({ id: youtubeDiscoveryCandidates.id }).from(youtubeDiscoveryCandidates).where(eq(youtubeDiscoveryCandidates.videoId, videoId));
     await persistYoutubeDiscoveryTriage(claim, { candidateId: candidate!.id, status: "succeeded", assessment: { relevanceScore: 1, expectedValueScore: 1, freshnessFitScore: 1, commercialRiskScore: 0, duplicateRiskScore: 0, signals: [] }, model, provider: "ai_gateway", modelName: model.gatewayModelName, latencyMs: 1 }, testDb);

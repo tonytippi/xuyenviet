@@ -10,7 +10,7 @@ vi.mock("@xuyenviet/database", async (importOriginal) => ({
   selectActiveAiGatewayModel: vi.fn(),
 }));
 
-import { aiGatewayModels, knowledgeCards, knowledgeIngestionCandidates, knowledgeProvinceReferences, sources, userRoles } from "@/db/schema";
+import { knowledgeCards, knowledgeIngestionCandidates, knowledgeProvinceReferences, sources, userRoles } from "@/db/schema";
 import { knowledgeProvinceReferenceFixture } from "@/db/knowledge-geography";
 import { completeExtraction, selectActiveAiGatewayModel } from "@xuyenviet/database";
 import { claimNextKnowledgeIngestionCandidate, claimNextKnowledgeIngestionJob } from "@/features/knowledge/ingestion-jobs";
@@ -20,7 +20,7 @@ import { processNextApprovedKnowledgeIndexingBatch } from "@/features/knowledge/
 import { indexApprovedKnowledgeCard, searchApprovedKnowledge } from "@/features/knowledge/search";
 import { appendSourceCaptureVersion } from "@/features/knowledge/source-captures";
 
-import { resetTestDatabase, seedTestOperator, testDb } from "./helpers/db";
+import { resetTestDatabase, seedAiPurposeModel, seedTestOperator, testDb } from "./helpers/db";
 
 describe.sequential("Knowledge province geography persistence", () => {
   beforeEach(async () => {
@@ -58,7 +58,7 @@ describe.sequential("Knowledge province geography persistence", () => {
 
   test("persists deterministic legacy geography through direct extraction", async () => {
     const capture = await appendSourceCaptureVersion(testDb, { sourceId: "source", captureKind: "url", rawText: "Nguồn có nội dung đủ điều kiện.", metadata: { kind: "submitted" } });
-    await testDb.insert(aiGatewayModels).values({ id: "model", gatewayModelName: "test-model", displayLabel: "Test model", purpose: "extraction", supportsTextInput: true, supportsExtraction: true });
+    await seedAiPurposeModel({ id: "model", gatewayModelName: "test-model", displayLabel: "Test model", purpose: "extraction", supportsTextInput: true, supportsExtraction: true });
     vi.mocked(selectActiveAiGatewayModel).mockResolvedValue({ id: "model", gatewayModelName: "test-model" } as never);
     vi.mocked(completeExtraction).mockResolvedValue({ ok: true, provider: "test", model: "test-model", latencyMs: 1, usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2, cachedPromptTokens: null, cacheWritePromptTokens: null }, content: JSON.stringify({ drafts: [{ type: "place", title: "Điểm dừng", location_name: "Quảng Nam", route_segment: null, summary: "Thông tin vận hành đã được diễn giải.", practical_details: {}, tags: [], confidence: "curated", freshness_sensitive: false }] }) } as never);
 

@@ -1,7 +1,7 @@
 import { BadRequestException, Body, Controller, Get, HttpCode, HttpStatus, Inject, Param, Post, Put, Req, ServiceUnavailableException } from "@nestjs/common";
 
-import { parseAdminAiGatewayModelInput, type AdminAiGatewayModelInput, type AdminAiGatewayModelUpdate, type RequestPrincipal } from "@xuyenviet/contracts";
-import { archiveAdminAiGatewayModel, createAdminAiGatewayModel, setDefaultAdminAiGatewayModel, updateAdminAiGatewayModel, type AdminAiModelCatalogPort, AdminAiModelCatalogPolicyError } from "@xuyenviet/domain";
+import { parseAdminAiGatewayModelInput, parseAdminAiPurposeAssignment, type AdminAiGatewayModelInput, type AdminAiGatewayModelUpdate, type AdminAiPurposeAssignment, type RequestPrincipal } from "@xuyenviet/contracts";
+import { archiveAdminAiGatewayModel, assignAdminAiPurpose, createAdminAiGatewayModel, updateAdminAiGatewayModel, type AdminAiModelCatalogPort, AdminAiModelCatalogPolicyError } from "@xuyenviet/domain";
 
 import { AllowsAdminBrowserSession, RequiresAdminCapability } from "../auth/admin-capability.decorator";
 
@@ -23,8 +23,8 @@ export class AdminAiModelsController {
   @Put(":id")
   async update(@Param("id") id: string, @Body() body: unknown, @Req() request: { principal?: RequestPrincipal }) { return this.run(request.principal, parseAdminAiGatewayModelInput(body, true) as AdminAiGatewayModelUpdate | null, (principal, input) => updateAdminAiGatewayModel(this.catalog, principal, id, input)); }
 
-  @Post(":id/default")
-  async setDefault(@Param("id") id: string, @Req() request: { principal?: RequestPrincipal }) { return this.run(request.principal, {}, (principal) => setDefaultAdminAiGatewayModel(this.catalog, principal, id)); }
+  @Post("assignments")
+  async assign(@Body() body: unknown, @Req() request: { principal?: RequestPrincipal }) { return this.run(request.principal, parseAdminAiPurposeAssignment(body), (principal, input) => assignAdminAiPurpose(this.catalog, principal, input as AdminAiPurposeAssignment)); }
 
   @Post(":id/archive")
   async archive(@Param("id") id: string, @Req() request: { principal?: RequestPrincipal }) { return this.run(request.principal, {}, (principal) => archiveAdminAiGatewayModel(this.catalog, principal, id)); }

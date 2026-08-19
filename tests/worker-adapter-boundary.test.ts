@@ -8,12 +8,12 @@ import { eq } from "drizzle-orm";
 import { describe, expect, test } from "vitest";
 import type { OperationalTelemetryEvent } from "@xuyenviet/contracts";
 
-import { aiAskCommands, aiGatewayModels, conversations, domainOutbox, domainOutboxEffects, knowledgeCards, knowledgeExtractionJobs, knowledgeIndexDirtyMarkers, knowledgeIngestionCandidates, knowledgeIngestionJobs, messages, sourceCaptureVersions, sources } from "@/db/schema";
+import { aiAskCommands, aiGatewayModels, aiPurposes, conversations, domainOutbox, domainOutboxEffects, knowledgeCards, knowledgeExtractionJobs, knowledgeIndexDirtyMarkers, knowledgeIngestionCandidates, knowledgeIngestionJobs, messages, sourceCaptureVersions, sources } from "@/db/schema";
 import { acquireAiAskCommand, finalizeAiAskCommand } from "@/features/ai/ai-ask-commands";
 import { hashCaptureText } from "@/features/knowledge/source-captures";
 
 import { WorkerRuntime, createChildProcessAdapters } from "../apps/worker/src/runtime";
-import { resetTestDatabase, seedTestOperator, testDb } from "./helpers/db";
+import { resetTestDatabase, seedAiPurposeModel, seedTestOperator, testDb } from "./helpers/db";
 import { getTestDatabaseUrl } from "./helpers/env-file";
 
 const root = resolve(import.meta.dirname, "..");
@@ -195,7 +195,7 @@ describe("compiled worker adapters", () => {
     await expect(testDb.select().from(knowledgeExtractionJobs).where(eq(knowledgeExtractionJobs.id, extraction.id))).resolves.toMatchObject([{ status: "failed", lastErrorCode: "model_unavailable" }]);
 
     const retryExtraction = await seedExtractionJob("compiled-retry-extraction");
-    await testDb.insert(aiGatewayModels).values({ id: "compiled-retry-extraction-model", gatewayModelName: "compiled-retry-extraction-model", displayLabel: "Compiled retry extraction model", purpose: "extraction", active: true, defaultForPurpose: true, supportsTextInput: true, supportsExtraction: true, pricingUnitTokens: 1_000_000, pricingEffectiveAt: new Date("2026-01-01T00:00:00.000Z") });
+    await seedAiPurposeModel({ id: "compiled-retry-extraction-model", gatewayModelName: "compiled-retry-extraction-model", displayLabel: "Compiled retry extraction model", purpose: "extraction", active: true, supportsTextInput: true, supportsExtraction: true, pricingUnitTokens: 1_000_000, pricingEffectiveAt: new Date("2026-01-01T00:00:00.000Z") });
     const retryGateway = createServer((_, response) => { response.writeHead(503).end(); });
     await new Promise<void>((resolve, reject) => retryGateway.once("error", reject).listen(0, "127.0.0.1", resolve));
     const retryAddress = retryGateway.address();
@@ -216,7 +216,7 @@ describe("compiled worker adapters", () => {
 
     const ingestion = await seedIngestionJob("compiled-terminal-candidate");
     await testDb.update(knowledgeIngestionJobs).set({ candidateCount: 1 }).where(eq(knowledgeIngestionJobs.id, ingestion.id));
-    await testDb.insert(aiGatewayModels).values({ id: "compiled-candidate-extraction-model", gatewayModelName: "compiled-candidate-extraction-model", displayLabel: "Compiled candidate extraction model", purpose: "extraction", active: false, defaultForPurpose: false, supportsTextInput: true, supportsExtraction: true, pricingUnitTokens: 1_000_000, pricingEffectiveAt: new Date("2026-01-01T00:00:00.000Z") });
+    await seedAiPurposeModel({ id: "compiled-candidate-extraction-model", gatewayModelName: "compiled-candidate-extraction-model", displayLabel: "Compiled candidate extraction model", purpose: "extraction", active: false, supportsTextInput: true, supportsExtraction: true, pricingUnitTokens: 1_000_000, pricingEffectiveAt: new Date("2026-01-01T00:00:00.000Z"), mapPurpose: false });
     const [candidate] = await testDb.insert(knowledgeIngestionCandidates).values({ ingestionJobId: ingestion.id, sourceId: ingestion.sourceId, captureVersionId: ingestion.captureVersionId, fingerprint: "compiled-terminal-candidate", type: "general_travel_tip", title: "Candidate", summary: "Candidate summary", conditions: [], freshnessSensitive: false, spanStart: 0, spanEnd: 1, extractionModelId: "compiled-candidate-extraction-model", extractionPromptVersion: "test", processingStatus: "queued", nextRunAt: new Date(0) }).returning();
     const candidateEvents = await runCompiledAdapter("ingestion", "compiled-terminal-candidate-worker");
     expectCompiledWorkerEvent(candidateEvents, { capability: "knowledge.ingestion", resultCode: "failure", durableId: candidate.id });
@@ -245,13 +245,12 @@ describe("compiled worker adapters", () => {
     await resetTestDatabase();
     await seedTestOperator();
     const first = await seedIngestionJob("drain-first", "Điểm dừng trên đèo Hải Vân có bãi đỗ xe an toàn.");
-    await testDb.insert(aiGatewayModels).values({
+    await seedAiPurposeModel({
       id: "drain-extraction-model",
       gatewayModelName: "drain-extraction-model",
       displayLabel: "Drain extraction model",
-      purpose: "extraction",
       active: true,
-      defaultForPurpose: true,
+      purpose: "extraction",
       supportsTextInput: true,
       supportsExtraction: true,
       pricingUnitTokens: 1_000_000,
@@ -290,8 +289,9 @@ describe("compiled worker adapters", () => {
       ]);
 
       const expiredAt = new Date(Date.now() - 2_000);
-      await testDb.update(knowledgeIngestionJobs).set({ claimedAt: new Date(expiredAt.getTime() - 1), leaseExpiresAt: expiredAt }).where(eq(knowledgeIngestionJobs.id, first.id));
-      await testDb.delete(aiGatewayModels).where(eq(aiGatewayModels.id, "drain-extraction-model"));
+       await testDb.update(knowledgeIngestionJobs).set({ claimedAt: new Date(expiredAt.getTime() - 1), leaseExpiresAt: expiredAt }).where(eq(knowledgeIngestionJobs.id, first.id));
+       await testDb.delete(aiPurposes).where(eq(aiPurposes.aiGatewayModelId, "drain-extraction-model"));
+       await testDb.delete(aiGatewayModels).where(eq(aiGatewayModels.id, "drain-extraction-model"));
       const recoveryEvents = await runCompiledAdapter("ingestion", "recovery-worker");
 
       await expect(testDb.select().from(knowledgeIngestionJobs).where(eq(knowledgeIngestionJobs.id, first.id))).resolves.toMatchObject([

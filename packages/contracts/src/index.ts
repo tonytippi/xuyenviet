@@ -262,26 +262,35 @@ export function parseAdminOverview(value: unknown): AdminOverview | null {
 
 export const aiGatewayModelPurposes = ["ai_ask_initial_answer", "extraction", "embeddings", "evaluation", "youtube_discovery_triage", "youtube_discovery_province_suggestion"] as const;
 export type AiGatewayModelPurpose = (typeof aiGatewayModelPurposes)[number];
-export type AdminAiGatewayModel = { id: string; gatewayModelName: string; displayLabel: string; purpose: AiGatewayModelPurpose; active: boolean; defaultForPurpose: boolean; supportsTextInput: boolean; supportsImageInput: boolean; supportsImageOutput: boolean; supportsEmbeddings: boolean; supportsExtraction: boolean; supportsEvaluation: boolean; supportsStreaming: boolean; supportsCachePricing: boolean; pricingCurrency: string | null; inputTokenPriceMicros: number | null; outputTokenPriceMicros: number | null; cacheReadTokenPriceMicros: number | null; cacheWriteTokenPriceMicros: number | null; pricingUnitTokens: number; pricingVersion: string | null; pricingEffectiveAt: string };
+export type AdminAiGatewayModel = { id: string; gatewayModelName: string; displayLabel: string; active: boolean; supportsTextInput: boolean; supportsImageInput: boolean; supportsImageOutput: boolean; supportsEmbeddings: boolean; supportsExtraction: boolean; supportsEvaluation: boolean; supportsStreaming: boolean; supportsCachePricing: boolean; pricingCurrency: string | null; inputTokenPriceMicros: number | null; outputTokenPriceMicros: number | null; cacheReadTokenPriceMicros: number | null; cacheWriteTokenPriceMicros: number | null; pricingUnitTokens: number; pricingVersion: string | null; pricingEffectiveAt: string };
 export type AdminAiGatewayModelInput = Omit<AdminAiGatewayModel, "id">;
 export type AdminAiGatewayModelUpdate = Partial<AdminAiGatewayModelInput>;
+export type AdminAiPurposeAssignment = { purpose: AiGatewayModelPurpose; aiGatewayModelId: string };
 
 export function parseAdminAiGatewayModelInput(value: unknown, partial = false): AdminAiGatewayModelInput | AdminAiGatewayModelUpdate | null {
   if (!isRecord(value)) return null;
-  const keys = ["gatewayModelName", "displayLabel", "purpose", "active", "defaultForPurpose", "supportsTextInput", "supportsImageInput", "supportsImageOutput", "supportsEmbeddings", "supportsExtraction", "supportsEvaluation", "supportsStreaming", "supportsCachePricing", "pricingCurrency", "inputTokenPriceMicros", "outputTokenPriceMicros", "cacheReadTokenPriceMicros", "cacheWriteTokenPriceMicros", "pricingUnitTokens", "pricingVersion", "pricingEffectiveAt"];
+  const keys = ["gatewayModelName", "displayLabel", "active", "supportsTextInput", "supportsImageInput", "supportsImageOutput", "supportsEmbeddings", "supportsExtraction", "supportsEvaluation", "supportsStreaming", "supportsCachePricing", "pricingCurrency", "inputTokenPriceMicros", "outputTokenPriceMicros", "cacheReadTokenPriceMicros", "cacheWriteTokenPriceMicros", "pricingUnitTokens", "pricingVersion", "pricingEffectiveAt"];
   if (!Object.keys(value).every((key) => keys.includes(key)) || partial && Object.keys(value).length === 0 || !partial && !keys.every((key) => key in value)) return null;
   const text = (item: unknown, maximum: number, nullable = false) => typeof item === "string" && item.trim() === item && item.length > 0 && item.length <= maximum ? item : nullable && item === null ? null : undefined;
   const integer = (item: unknown, nullable = false) => Number.isInteger(item) && (item as number) >= 0 && (item as number) <= 2_147_483_647 ? item as number : nullable && item === null ? null : undefined;
   const parsed: Record<string, unknown> = {};
   for (const key of Object.keys(value)) parsed[key] = value[key];
-  if ("gatewayModelName" in parsed && text(parsed.gatewayModelName, 500) === undefined || "displayLabel" in parsed && text(parsed.displayLabel, 500) === undefined || "purpose" in parsed && !(aiGatewayModelPurposes as readonly string[]).includes(parsed.purpose as string) || ["active", "defaultForPurpose", "supportsTextInput", "supportsImageInput", "supportsImageOutput", "supportsEmbeddings", "supportsExtraction", "supportsEvaluation", "supportsStreaming", "supportsCachePricing"].some((key) => key in parsed && typeof parsed[key] !== "boolean") || ["inputTokenPriceMicros", "outputTokenPriceMicros", "cacheReadTokenPriceMicros", "cacheWriteTokenPriceMicros"].some((key) => key in parsed && integer(parsed[key], true) === undefined) || "pricingUnitTokens" in parsed && (!Number.isInteger(parsed.pricingUnitTokens) || (parsed.pricingUnitTokens as number) <= 0 || (parsed.pricingUnitTokens as number) > 2_147_483_647) || "pricingCurrency" in parsed && text(parsed.pricingCurrency, 16, true) === undefined || "pricingVersion" in parsed && text(parsed.pricingVersion, 500, true) === undefined || "pricingEffectiveAt" in parsed && (typeof parsed.pricingEffectiveAt !== "string" || Number.isNaN(Date.parse(parsed.pricingEffectiveAt)))) return null;
+  if ("gatewayModelName" in parsed && text(parsed.gatewayModelName, 500) === undefined || "displayLabel" in parsed && text(parsed.displayLabel, 500) === undefined || ["active", "supportsTextInput", "supportsImageInput", "supportsImageOutput", "supportsEmbeddings", "supportsExtraction", "supportsEvaluation", "supportsStreaming", "supportsCachePricing"].some((key) => key in parsed && typeof parsed[key] !== "boolean") || ["inputTokenPriceMicros", "outputTokenPriceMicros", "cacheReadTokenPriceMicros", "cacheWriteTokenPriceMicros"].some((key) => key in parsed && integer(parsed[key], true) === undefined) || "pricingUnitTokens" in parsed && (!Number.isInteger(parsed.pricingUnitTokens) || (parsed.pricingUnitTokens as number) <= 0 || (parsed.pricingUnitTokens as number) > 2_147_483_647) || "pricingCurrency" in parsed && text(parsed.pricingCurrency, 16, true) === undefined || "pricingVersion" in parsed && text(parsed.pricingVersion, 500, true) === undefined || "pricingEffectiveAt" in parsed && (typeof parsed.pricingEffectiveAt !== "string" || Number.isNaN(Date.parse(parsed.pricingEffectiveAt)))) return null;
   return parsed as AdminAiGatewayModelInput | AdminAiGatewayModelUpdate;
 }
 
 export function parseAdminAiGatewayModel(value: unknown): AdminAiGatewayModel | null {
-  if (!isRecord(value) || Object.keys(value).sort().join(",") !== "active,cacheReadTokenPriceMicros,cacheWriteTokenPriceMicros,defaultForPurpose,displayLabel,gatewayModelName,id,inputTokenPriceMicros,outputTokenPriceMicros,pricingCurrency,pricingEffectiveAt,pricingUnitTokens,pricingVersion,purpose,supportsCachePricing,supportsEmbeddings,supportsEvaluation,supportsExtraction,supportsImageInput,supportsImageOutput,supportsStreaming,supportsTextInput") return null;
+  if (!isRecord(value) || Object.keys(value).sort().join(",") !== "active,cacheReadTokenPriceMicros,cacheWriteTokenPriceMicros,displayLabel,gatewayModelName,id,inputTokenPriceMicros,outputTokenPriceMicros,pricingCurrency,pricingEffectiveAt,pricingUnitTokens,pricingVersion,supportsCachePricing,supportsEmbeddings,supportsEvaluation,supportsExtraction,supportsImageInput,supportsImageOutput,supportsStreaming,supportsTextInput") return null;
   const { id, ...input } = value;
   return typeof id === "string" && id.length > 0 && parseAdminAiGatewayModelInput(input) ? value as AdminAiGatewayModel : null;
+}
+
+export function parseAdminAiPurposeAssignment(value: unknown): AdminAiPurposeAssignment | null {
+  return isRecord(value) && hasExactKeys(value, ["purpose", "aiGatewayModelId"])
+    && aiGatewayModelPurposes.includes(value.purpose as AiGatewayModelPurpose)
+    && identifier(value.aiGatewayModelId)
+    ? value as AdminAiPurposeAssignment
+    : null;
 }
 
 export type SafeFieldViolation = { field: string; code: string; message: string };

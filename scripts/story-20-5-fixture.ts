@@ -3,7 +3,7 @@ import { createHmac } from "node:crypto";
 import postgres from "postgres";
 import { drizzle } from "drizzle-orm/postgres-js";
 import { and, eq, sql as drizzleSql } from "drizzle-orm";
-import { aiGatewayModels, browserSessions, claimNextYoutubeDiscoveryRun, createSystemAuditActor, createUserAuditActor, createYoutubeDiscoveryQueryProposal, createYoutubeDiscoveryRun, finishYoutubeDiscoveryRun, getYoutubeDiscoveryRecommendationBundle, knowledgeCards, knowledgeRecommendations, persistYoutubeDiscoveryCandidates, persistYoutubeDiscoveryEnrichment, persistYoutubeDiscoveryRecommendation, persistYoutubeDiscoveryTriage, retryYoutubeDiscoveryRun, schema, selectYoutubeDiscoveryTriageModel, youtubeDiscoveryCandidates, youtubeDiscoveryPolicyVersions, youtubeDiscoveryQueryProposals, youtubeDiscoveryRecommendations, youtubeDiscoveryRuns, userRoles, users } from "@xuyenviet/database";
+import { aiGatewayModels, aiPurposes, browserSessions, claimNextYoutubeDiscoveryRun, createSystemAuditActor, createUserAuditActor, createYoutubeDiscoveryQueryProposal, createYoutubeDiscoveryRun, finishYoutubeDiscoveryRun, getYoutubeDiscoveryRecommendationBundle, knowledgeCards, knowledgeRecommendations, persistYoutubeDiscoveryCandidates, persistYoutubeDiscoveryEnrichment, persistYoutubeDiscoveryRecommendation, persistYoutubeDiscoveryTriage, retryYoutubeDiscoveryRun, schema, selectYoutubeDiscoveryTriageModel, youtubeDiscoveryCandidates, youtubeDiscoveryPolicyVersions, youtubeDiscoveryQueryProposals, youtubeDiscoveryRecommendations, youtubeDiscoveryRuns, userRoles, users } from "@xuyenviet/database";
 
 const databaseUrl = required("DATABASE_URL");
 const sessionLookupKey = required("XV_BROWSER_SESSION_LOOKUP_KEY");
@@ -41,7 +41,8 @@ async function main() {
     if (!reviewClaim) throw new Error("Could not claim controlled review run.");
     await persistYoutubeDiscoveryCandidates(reviewClaim, [{ videoId, canonicalUrl: `https://www.youtube.com/watch?v=${videoId}`, resultOrdinal: 0, searchTranche: "medium" }], db);
     await persistYoutubeDiscoveryEnrichment(reviewClaim, { videoId, signals: [] }, db);
-    await db.insert(aiGatewayModels).values({ id: "story-20-5-triage", gatewayModelName: "test/story-20-5", displayLabel: "Story 20.5", purpose: "youtube_discovery_triage", active: true, defaultForPurpose: true, supportsTextInput: true, supportsExtraction: true, pricingUnitTokens: 1_000_000 }).onConflictDoNothing();
+    await db.insert(aiGatewayModels).values({ id: "story-20-5-triage", gatewayModelName: "test/story-20-5", displayLabel: "Story 20.5", active: true, supportsTextInput: true, supportsExtraction: true, pricingUnitTokens: 1_000_000 }).onConflictDoNothing();
+    await db.insert(aiPurposes).values({ purpose: "youtube_discovery_triage", aiGatewayModelId: "story-20-5-triage" }).onConflictDoNothing();
     const model = await selectYoutubeDiscoveryTriageModel(db);
     const [candidate] = await db.select({ id: youtubeDiscoveryCandidates.id }).from(youtubeDiscoveryCandidates).where(eq(youtubeDiscoveryCandidates.videoId, videoId));
     if (!model || !candidate) throw new Error("Could not create controlled candidate.");

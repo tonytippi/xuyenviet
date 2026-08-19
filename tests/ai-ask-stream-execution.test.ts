@@ -3,10 +3,10 @@ import { eq } from "drizzle-orm";
 
 import { createAiAskStreamExecution } from "@xuyenviet/domain";
 import { createAiAskStreamExecutionPort, setAiAskStreamTestDependencies } from "../packages/database/src/ai-ask-stream-execution";
-import { aiAskCommands, aiGatewayModels, aiUsageEvents, assistantResponseProvenance, assistantRetrievalDecisions, conversations, domainOutbox, messages, planningContextSessions, publicMvpEvaluationResults, tripAnswerContextSnapshots, tripChangeProposals, tripProjects, users } from "../packages/database/src/schema";
+import { aiAskCommands, aiUsageEvents, assistantResponseProvenance, assistantRetrievalDecisions, conversations, domainOutbox, messages, planningContextSessions, publicMvpEvaluationResults, tripAnswerContextSnapshots, tripChangeProposals, tripProjects, users } from "../packages/database/src/schema";
 import { renderSourceBundlePromptSection, type ContextPrioritySourceBundle } from "../packages/database/src/source-bundle";
 
-import { resetTestDatabase, testDb } from "./helpers/db";
+import { resetTestDatabase, seedAiPurposeModel, testDb } from "./helpers/db";
 
 describe("AI Ask stream execution", () => {
   beforeEach(async () => {
@@ -85,7 +85,7 @@ describe("AI Ask stream execution", () => {
   ])("preserves the model configuration error when no compatible model is available", async ({ image, expectedError }) => {
     await testDb.insert(users).values({ id: "user-1", email: "user-1@example.com" });
     const [conversation] = await testDb.insert(conversations).values({ userId: "user-1" }).returning({ id: conversations.id });
-    if (image) await testDb.insert(aiGatewayModels).values({ id: "text-only-model", gatewayModelName: "test/text", displayLabel: "Text", purpose: "ai_ask_initial_answer", defaultForPurpose: true, supportsTextInput: true, supportsStreaming: true, supportsImageInput: false });
+    if (image) await seedAiPurposeModel({ id: "text-only-model", gatewayModelName: "test/text", displayLabel: "Text", purpose: "ai_ask_initial_answer", supportsTextInput: true, supportsStreaming: true, supportsImageInput: false });
 
     const events = await collect(await port().admit({ question: "Thời tiết hôm nay thế nào?", idempotencyKey: `model_configuration_${image ? "image" : "none"}`.padEnd(24, "x"), conversationId: conversation.id, image }, principal(), "request-1", new AbortController().signal));
 
@@ -424,7 +424,7 @@ function port() {
 
 async function seedUserAndModel() {
   await testDb.insert(users).values({ id: "user-1", email: "user-1@example.com" });
-  await testDb.insert(aiGatewayModels).values({ id: "answer-model", gatewayModelName: "test/answer", displayLabel: "Test", purpose: "ai_ask_initial_answer", defaultForPurpose: true, supportsTextInput: true, supportsStreaming: true });
+  await seedAiPurposeModel({ id: "answer-model", gatewayModelName: "test/answer", displayLabel: "Test", purpose: "ai_ask_initial_answer", supportsTextInput: true, supportsStreaming: true });
 }
 
 function sourceBundle(overrides?: { warnings?: ContextPrioritySourceBundle["warnings"]; retrievalDecision?: Partial<ContextPrioritySourceBundle["retrievalDecision"]>; web?: ContextPrioritySourceBundle["web"] }): ContextPrioritySourceBundle {

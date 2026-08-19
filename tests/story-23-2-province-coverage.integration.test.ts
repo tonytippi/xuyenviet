@@ -10,8 +10,8 @@ import { createPostgresAdminYoutubeDiscoveryPort, createSystemAuditActor, create
 import { parseAdminKnowledgeProvinceCoverageList, type RequestPrincipal } from "@xuyenviet/contracts";
 import { completeYoutubeDiscoveryProvinceSuggestion } from "@/db/gateway";
 import { knowledgeProvinceReferenceFixture } from "@/db/knowledge-geography";
-import { aiGatewayModels, aiUsageEvents, auditEvents, knowledgeCards, sourceCaptureVersions, youtubeDiscoveryCandidateJobs, youtubeDiscoveryCandidates, youtubeDiscoveryKnowledgeHandoffs, youtubeDiscoveryQueryProposals, youtubeDiscoveryRuns } from "@/db/schema";
-import { resetTestDatabase, seedTestOperator, testDb } from "./helpers/db";
+import { aiUsageEvents, auditEvents, knowledgeCards, sourceCaptureVersions, youtubeDiscoveryCandidateJobs, youtubeDiscoveryCandidates, youtubeDiscoveryKnowledgeHandoffs, youtubeDiscoveryQueryProposals, youtubeDiscoveryRuns } from "@/db/schema";
+import { resetTestDatabase, seedAiPurposeModel, seedTestOperator, testDb } from "./helpers/db";
 
 const principal: RequestPrincipal = { userId: "operator", email: "operator@example.com", roles: ["operator"], sessionId: "story-23-2", authorizationVersion: 1 };
 const daNang = "vn-21-da-nang";
@@ -84,7 +84,7 @@ describe.sequential("Story 23.2 province coverage and suggestions", () => {
 });
 
 async function insertSuggestionModel() {
-  await testDb.insert(aiGatewayModels).values({ id: "suggestion-model", gatewayModelName: "test-model", displayLabel: "Story 23.2", purpose: "youtube_discovery_province_suggestion", active: true, defaultForPurpose: true, supportsTextInput: true, supportsExtraction: true });
+    await seedAiPurposeModel({ id: "suggestion-model", gatewayModelName: "test-model", displayLabel: "Story 23.2", purpose: "youtube_discovery_province_suggestion", active: true, supportsTextInput: true, supportsExtraction: true });
 }
 
 async function insertCard(input: { id: string; type: "place" | "food" | "warning" | "route_note"; lifecycleState: "active" | "pending_operator"; normalizedCurrentProvinceId: string | null; normalizedCurrentProvinceName: string | null; freshnessSensitive: boolean; updatedAt?: Date; title?: string; summary?: string }) {
