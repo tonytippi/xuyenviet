@@ -5,11 +5,13 @@ import { useEffect, useRef, useState } from "react";
 import {
   parseAdminKnowledgeProvinceCoverageList,
   parseAdminKnowledgeProvinceSuggestion,
+  parseAdminYoutubeDiscoveryImmediateRunResult,
   parseAdminYoutubeDiscoveryMissionCandidatePage,
   parseAdminYoutubeDiscoveryMissionCoveragePage,
   parseAdminYoutubeDiscoveryMissionFunnel,
   parseAdminYoutubeDiscoveryMissionQueryPage,
   parseAdminYoutubeDiscoveryQuery,
+  parseAdminYoutubeDiscoveryQueryProgress,
   type AdminKnowledgeProvinceCoverage,
   type AdminKnowledgeProvinceSuggestion,
   type AdminYoutubeDiscoveryMissionCandidate,
@@ -190,7 +192,7 @@ export function YoutubeDiscoveryMission() {
     <p aria-live="polite" role="status" className="mt-4 text-sm text-slate-700">{status}</p>
     {unavailable ? <section className="mt-6 border border-amber-700 bg-[#fbf7ed] p-5"><h2 className="font-semibold">Chưa thể tải dữ liệu</h2><button className="mt-4 min-h-11 border border-emerald-900 px-4 font-semibold" onClick={() => void load(null, false)} type="button">Thử lại</button></section> : funnel ? <Funnel value={funnel} /> : <section className="mt-6 overflow-hidden border border-[#b8c4b9] bg-[#fbf7ed]">
       {view === "province" ? <ProvinceCoverage provinces={provinces} setStatus={setStatus} /> : null}
-      {view === "queries" ? <QueryManagement queries={queries} reload={() => load(null, false, "queries")} setStatus={setStatus} /> : null}
+      {view === "queries" ? <><QueryManagement queries={queries} reload={() => load(null, false, "queries")} setStatus={setStatus} /><ImmediateRuns queries={queries} setStatus={setStatus} /></> : null}
       {view !== "province" && view !== "queries" ? <div className="grid gap-px">{items.map((item) => <MissionRow item={item} key={"actionId" in item ? `${item.actionId}:${"candidateId" in item ? item.candidateId : ""}` : item.id} />)}</div> : null}
       {!items.length && !provinces.length && !loading && view !== "queries" && view !== "province" ? <p className="p-5 text-slate-600">Không có dữ liệu cho chế độ này.</p> : null}
       {cursor ? <div className="border-t border-[#b8c4b9] p-4"><button ref={more} disabled={loading} className="min-h-11 border border-emerald-900 px-4 font-semibold disabled:opacity-50" onClick={() => void load(cursor, true)} type="button">{loading ? "Đang tải" : "Tải thêm"}</button></div> : null}
@@ -209,6 +211,8 @@ export function ProvinceCoverage({ provinces, setStatus }: { provinces: AdminKno
   const filtered = filterProvinceCoverage(provinces, search);
   const firstError = useRef<HTMLInputElement>(null);
   const suggestionRequest = useRef(0);
+  const immediateConfirmation = useRef<string | null>(null);
+  const [immediateQuery, setImmediateQuery] = useState<AdminYoutubeDiscoveryQuery | null>(null);
 
   function choose(item: AdminKnowledgeProvinceCoverage) {
     suggestionRequest.current += 1;
@@ -216,6 +220,8 @@ export function ProvinceCoverage({ provinces, setStatus }: { provinces: AdminKno
     setSuggestion(null);
     setSuggesting(false);
     setCreating(false);
+    setImmediateQuery(null);
+    immediateConfirmation.current = null;
     setErrors({});
     setStatus(`Đã chọn ${item.currentName}.`);
   }
@@ -242,7 +248,7 @@ export function ProvinceCoverage({ provinces, setStatus }: { provinces: AdminKno
     }
   }
 
-  async function createQuery() {
+  async function createQuery(immediate = false) {
     if (!suggestion || creating) return;
     const id = suggestionRequest.current;
     const next = validateMissionQueryDraft(suggestion.draft, true);
@@ -252,13 +258,27 @@ export function ProvinceCoverage({ provinces, setStatus }: { provinces: AdminKno
       return;
     }
     setCreating(true);
-    setStatus("Đang tạo truy vấn theo lịch.");
+    setStatus(immediate ? "Đang tạo truy vấn và xếp lượt chạy ngay." : "Đang tạo truy vấn theo lịch.");
     try {
-      const result = await post("/v1/admin/knowledge/youtube-discovery", { queryText: suggestion.draft.queryText.trim(), priority: Number(suggestion.draft.priority), cadenceMinutes: Number(suggestion.draft.cadenceMinutes) });
-      if (!result.response.ok || !parseAdminYoutubeDiscoveryQuery(result.body) || id !== suggestionRequest.current) throw new Error("create");
+      let query: AdminYoutubeDiscoveryQuery | null = null;
+      if (immediate && immediateQuery) query = immediateQuery;
+      else {
+        const result = await post("/v1/admin/knowledge/youtube-discovery", { queryText: suggestion.draft.queryText.trim(), priority: Number(suggestion.draft.priority), cadenceMinutes: Number(suggestion.draft.cadenceMinutes) });
+        query = parseAdminYoutubeDiscoveryQuery(result.body);
+        if (!result.response.ok || !query || id !== suggestionRequest.current) throw new Error("create");
+        if (immediate) setImmediateQuery(query);
+      }
+      if (immediate) {
+        const confirmationKey = immediateConfirmation.current ?? crypto.randomUUID().replaceAll("-", "");
+        immediateConfirmation.current = confirmationKey;
+        const admitted = await post(`/v1/admin/knowledge/youtube-discovery/${encodeURIComponent(query.id)}/immediate`, { confirmationKey });
+        if (!admitted.response.ok || !parseAdminYoutubeDiscoveryImmediateRunResult(admitted.body)) throw new Error("immediate");
+        immediateConfirmation.current = null;
+        setImmediateQuery(null);
+      }
       setSuggestion(null);
       setErrors({});
-      setStatus("Đã tạo truy vấn theo lịch. Truy vấn chưa chạy ngay.");
+      setStatus(immediate ? "Đã tạo truy vấn và xếp lượt chạy ngay. Worker sẽ xử lý khi còn năng lực." : "Đã tạo truy vấn theo lịch. Truy vấn chưa chạy ngay.");
     } catch {
       if (id !== suggestionRequest.current) return;
       setErrors({ queryText: "Không thể tạo truy vấn. Bản nháp vẫn được giữ lại." });
@@ -271,13 +291,13 @@ export function ProvinceCoverage({ provinces, setStatus }: { provinces: AdminKno
 
   return <div className="grid gap-4 p-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
     <section aria-label="Danh sách tỉnh, thành phố" className="min-w-0"><label className="grid gap-1 font-semibold">Tìm tỉnh, thành phố hoặc tên cũ<input className="min-h-11 border border-slate-500 bg-white px-3 font-normal" value={search} onChange={(event) => setSearch(event.target.value)} /></label><p className="mt-2 text-sm text-slate-600">Tìm theo tên hiện hành hoặc tên cũ chính thức.</p><div className="mt-3 grid gap-2">{filtered.map((item) => <button aria-pressed={selectedId === item.canonicalProvinceId} className="min-h-11 border border-[#b8c4b9] bg-white px-3 py-2 text-left outline-offset-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-emerald-800" key={item.canonicalProvinceId} onClick={() => choose(item)} type="button"><span className="block font-semibold">{item.currentName}</span><span className="block text-sm text-slate-600">{item.legacyNames.length ? `Tên cũ: ${item.legacyNames.join(", ")}` : "Không có tên cũ chính thức"}</span></button>)}</div>{!filtered.length ? <p className="mt-3 text-slate-600">Không tìm thấy tỉnh, thành phố phù hợp.</p> : null}</section>
-    <section aria-label="Chi tiết phủ sóng tỉnh, thành phố" className="min-w-0 border-t border-[#b8c4b9] pt-4 lg:border-l lg:border-t-0 lg:pl-4 lg:pt-0">{detail ? <><h2 className="text-xl font-bold">{detail.currentName}</h2><p className="mt-2 text-sm text-slate-600">Mã phạm vi ổn định: {detail.canonicalProvinceId}</p><dl className="mt-4 grid gap-2 text-sm"><div><dt className="font-semibold">Tên cũ chính thức</dt><dd>{detail.legacyNames.length ? detail.legacyNames.join(", ") : "Không có"}</dd></div><div><dt className="font-semibold">Chủ đề Knowledge đang hoạt động</dt><dd>{detail.topics.length ? detail.topics.map((topic) => `${topic.topic}: ${topic.count}`).join("; ") : "Chưa có"}</dd></div><div><dt className="font-semibold">Ngữ cảnh cần làm mới</dt><dd>{detail.freshnessSensitiveCount}</dd></div><div><dt className="font-semibold">Cập nhật gần nhất</dt><dd>{detail.latestUpdatedAt ? new Intl.DateTimeFormat("vi-VN", { dateStyle: "medium", timeStyle: "short" }).format(new Date(detail.latestUpdatedAt)) : "Chưa có"}</dd></div></dl><p className="mt-4 text-sm text-slate-600">Các số liệu này là ngữ cảnh vận hành, không phải kết luận đủ hoặc thiếu phủ sóng.</p><button className="mt-4 min-h-11 border border-emerald-900 px-4 font-semibold disabled:opacity-50" disabled={suggesting || creating} onClick={() => void requestSuggestion()} type="button">{suggesting ? "Đang đề xuất" : "Đề xuất truy vấn tiếng Việt"}</button>{suggestion ? <SuggestionEditor suggestion={suggestion} errors={errors} creating={creating} firstError={firstError} onChange={(draft) => setSuggestion({ ...suggestion, draft })} onDismiss={() => { suggestionRequest.current += 1; setSuggestion(null); setErrors({}); setStatus("Đã bỏ qua đề xuất này. Không có thay đổi nào được lưu."); }} onCreate={() => void createQuery()} /> : null}</> : <p className="text-slate-600">Chọn một tỉnh, thành phố để xem chi tiết và yêu cầu đề xuất tạm thời.</p>}</section>
+    <section aria-label="Chi tiết phủ sóng tỉnh, thành phố" className="min-w-0 border-t border-[#b8c4b9] pt-4 lg:border-l lg:border-t-0 lg:pl-4 lg:pt-0">{detail ? <><h2 className="text-xl font-bold">{detail.currentName}</h2><p className="mt-2 text-sm text-slate-600">Mã phạm vi ổn định: {detail.canonicalProvinceId}</p><dl className="mt-4 grid gap-2 text-sm"><div><dt className="font-semibold">Tên cũ chính thức</dt><dd>{detail.legacyNames.length ? detail.legacyNames.join(", ") : "Không có"}</dd></div><div><dt className="font-semibold">Chủ đề Knowledge đang hoạt động</dt><dd>{detail.topics.length ? detail.topics.map((topic) => `${topic.topic}: ${topic.count}`).join("; ") : "Chưa có"}</dd></div><div><dt className="font-semibold">Ngữ cảnh cần làm mới</dt><dd>{detail.freshnessSensitiveCount}</dd></div><div><dt className="font-semibold">Cập nhật gần nhất</dt><dd>{detail.latestUpdatedAt ? new Intl.DateTimeFormat("vi-VN", { dateStyle: "medium", timeStyle: "short" }).format(new Date(detail.latestUpdatedAt)) : "Chưa có"}</dd></div></dl><p className="mt-4 text-sm text-slate-600">Các số liệu này là ngữ cảnh vận hành, không phải kết luận đủ hoặc thiếu phủ sóng.</p><button className="mt-4 min-h-11 border border-emerald-900 px-4 font-semibold disabled:opacity-50" disabled={suggesting || creating} onClick={() => void requestSuggestion()} type="button">{suggesting ? "Đang đề xuất" : "Đề xuất truy vấn tiếng Việt"}</button>{suggestion ? <SuggestionEditor suggestion={suggestion} errors={errors} creating={creating} locked={immediateQuery !== null} firstError={firstError} onChange={(draft) => setSuggestion({ ...suggestion, draft })} onDismiss={() => { suggestionRequest.current += 1; setSuggestion(null); setImmediateQuery(null); setErrors({}); setStatus("Đã bỏ qua đề xuất này. Không có thay đổi nào được lưu."); }} onCreate={() => void createQuery()} onImmediate={() => void createQuery(true)} /> : null}</> : <p className="text-slate-600">Chọn một tỉnh, thành phố để xem chi tiết và yêu cầu đề xuất tạm thời.</p>}</section>
   </div>;
 }
 
-function SuggestionEditor({ suggestion, errors, creating, firstError, onChange, onDismiss, onCreate }: { suggestion: NonNullable<ProvinceSuggestionState>; errors: Partial<Record<keyof Draft, string>>; creating: boolean; firstError: React.RefObject<HTMLInputElement | null>; onChange: (draft: Draft) => void; onDismiss: () => void; onCreate: () => void }) {
+function SuggestionEditor({ suggestion, errors, creating, locked, firstError, onChange, onDismiss, onCreate, onImmediate }: { suggestion: NonNullable<ProvinceSuggestionState>; errors: Partial<Record<keyof Draft, string>>; creating: boolean; locked: boolean; firstError: React.RefObject<HTMLInputElement | null>; onChange: (draft: Draft) => void; onDismiss: () => void; onCreate: () => void; onImmediate: () => void }) {
   const draft = suggestion.draft;
-  return <section className="mt-5 border-t border-[#b8c4b9] pt-4" aria-label="Đề xuất truy vấn tạm thời"><h3 className="font-semibold">Đề xuất tạm thời</h3><p className="mt-2 text-sm"><span className="font-semibold">Nhu cầu:</span> {suggestion.value.need}</p><p className="mt-2 text-sm"><span className="font-semibold">Lý do:</span> {suggestion.value.reason}</p><label className="mt-3 grid gap-1 font-semibold">Truy vấn YouTube<input ref={errors.queryText ? firstError : undefined} aria-describedby={errors.queryText ? "province-query-error" : undefined} aria-invalid={Boolean(errors.queryText)} className="min-h-11 border border-slate-500 bg-white px-3 font-normal" value={draft.queryText} onChange={(event) => onChange({ ...draft, queryText: event.target.value })} /></label>{errors.queryText ? <p id="province-query-error" className="mt-1 text-sm text-red-800">{errors.queryText}</p> : null}<div className="mt-3 grid gap-3 sm:grid-cols-2"><label className="grid gap-1 font-semibold">Ưu tiên<input inputMode="numeric" className="min-h-11 border border-slate-500 bg-white px-3 font-normal" value={draft.priority} onChange={(event) => onChange({ ...draft, priority: event.target.value })} /></label><label className="grid gap-1 font-semibold">Chu kỳ (phút)<input inputMode="numeric" className="min-h-11 border border-slate-500 bg-white px-3 font-normal" value={draft.cadenceMinutes} onChange={(event) => onChange({ ...draft, cadenceMinutes: event.target.value })} /></label></div><div className="mt-4 flex flex-wrap gap-2"><button className="min-h-11 border border-emerald-900 px-4 font-semibold disabled:opacity-50" disabled={creating} onClick={onCreate} type="button">{creating ? "Đang tạo" : "Tạo truy vấn"}</button><button className="min-h-11 border border-slate-500 px-4 font-semibold" onClick={onDismiss} type="button">Bỏ qua đề xuất</button></div><p className="mt-3 text-sm text-slate-600">Tạo truy vấn chỉ lập lịch đề xuất, không chạy Discovery ngay.</p></section>;
+  return <section className="mt-5 border-t border-[#b8c4b9] pt-4" aria-label="Đề xuất truy vấn tạm thời"><h3 className="font-semibold">Đề xuất tạm thời</h3><p className="mt-2 text-sm"><span className="font-semibold">Nhu cầu:</span> {suggestion.value.need}</p><p className="mt-2 text-sm"><span className="font-semibold">Lý do:</span> {suggestion.value.reason}</p><label className="mt-3 grid gap-1 font-semibold">Truy vấn YouTube<input disabled={locked} ref={errors.queryText ? firstError : undefined} aria-describedby={errors.queryText ? "province-query-error" : undefined} aria-invalid={Boolean(errors.queryText)} className="min-h-11 border border-slate-500 bg-white px-3 font-normal disabled:opacity-60" value={draft.queryText} onChange={(event) => onChange({ ...draft, queryText: event.target.value })} /></label>{errors.queryText ? <p id="province-query-error" className="mt-1 text-sm text-red-800">{errors.queryText}</p> : null}<div className="mt-3 grid gap-3 sm:grid-cols-2"><label className="grid gap-1 font-semibold">Ưu tiên<input disabled={locked} inputMode="numeric" className="min-h-11 border border-slate-500 bg-white px-3 font-normal disabled:opacity-60" value={draft.priority} onChange={(event) => onChange({ ...draft, priority: event.target.value })} /></label><label className="grid gap-1 font-semibold">Chu kỳ (phút)<input disabled={locked} inputMode="numeric" className="min-h-11 border border-slate-500 bg-white px-3 font-normal disabled:opacity-60" value={draft.cadenceMinutes} onChange={(event) => onChange({ ...draft, cadenceMinutes: event.target.value })} /></label></div><div className="mt-4 flex flex-wrap gap-2"><button className="min-h-11 border border-emerald-900 px-4 font-semibold disabled:opacity-50" disabled={creating || locked} onClick={onCreate} type="button">{creating ? "Đang tạo" : "Tạo truy vấn"}</button><button className="min-h-11 border border-emerald-900 px-4 font-semibold disabled:opacity-50" disabled={creating} onClick={onImmediate} type="button">Chạy ngay</button><button className="min-h-11 border border-slate-500 px-4 font-semibold" onClick={onDismiss} type="button">Bỏ qua đề xuất</button></div><p className="mt-3 text-sm text-slate-600">Tạo truy vấn chỉ lập lịch đề xuất; Chạy ngay tạo truy vấn rồi xếp một lượt Discovery có xác nhận rõ ràng.</p></section>;
 }
 
 function QueryManagement({ queries, reload, setStatus }: { queries: AdminYoutubeDiscoveryQuery[]; reload: () => Promise<void>; setStatus: (value: string) => void }) {
@@ -316,6 +336,31 @@ function QueryManagement({ queries, reload, setStatus }: { queries: AdminYoutube
 }
 
 function MissionRow({ item }: { item: AdminYoutubeDiscoveryMissionCoverage | AdminYoutubeDiscoveryQuery | AdminYoutubeDiscoveryMissionCandidate }) { if ("candidateId" in item) return <article className="min-w-0 border-b border-[#b8c4b9] p-4"><p className="font-semibold">Ứng viên hạng {item.rank + 1}</p><p className="mt-1 text-sm">Trạng thái xem xét: {item.candidateState === "unavailable" ? "Chưa có khuyến nghị hiện tại" : item.candidateState}; khuyến nghị: {item.recommendation === "unavailable" ? "Chưa có" : item.recommendation}; giai đoạn: {item.rankingState}.</p><p className="mt-2 text-sm text-slate-600">Xếp hạng chỉ là bối cảnh vận hành, không phải xác minh, bằng chứng, hoàn tất thu thập hoặc phê duyệt xuất bản.</p>{item.reviewAvailable && item.recommendationId ? <Link className="mt-3 inline-flex min-h-11 items-center border border-emerald-900 px-4 font-semibold" href={`/knowledge/youtube-discovery-review?recommendationId=${encodeURIComponent(item.recommendationId)}`}>Mở hàng đợi xem xét</Link> : <p className="mt-2 text-sm text-slate-600">Bản ghi truy vết không có hành động xem xét.</p>}</article>; if ("actionId" in item) return <article className="min-w-0 border-b border-[#b8c4b9] p-4"><p className="font-semibold">Nhu cầu ưu tiên {item.priority}</p><dl className="mt-1 grid gap-1 text-sm"><div><dt className="inline font-semibold">Hành lang: </dt><dd className="inline">{item.corridor ?? "Chưa có"}</dd></div><div><dt className="inline font-semibold">Địa điểm: </dt><dd className="inline">{item.location ?? "Chưa có"}</dd></div><div><dt className="inline font-semibold">Tuyến: </dt><dd className="inline">{item.routeSegment ?? "Chưa có"}</dd></div><div><dt className="inline font-semibold">Phân loại: </dt><dd className="inline">{item.taxonomy ?? "Chưa có"}</dd></div><div><dt className="inline font-semibold">Độ mới: </dt><dd className="inline">{item.freshness === "unavailable" ? "Không khả dụng" : item.freshness === "sensitive" ? "Nhạy cảm" : "Ổn định"}</dd></div><div><dt className="inline font-semibold">Xung đột: </dt><dd className="inline">{item.conflict === "unavailable" ? "Không khả dụng" : item.conflict === "present" ? "Có" : "Không có"}</dd></div><div><dt className="inline font-semibold">Nhu cầu: </dt><dd className="inline">Không khả dụng</dd></div><div><dt className="inline font-semibold">Mùa vụ: </dt><dd className="inline">Không khả dụng</dd></div></dl><Link className="mt-3 inline-flex min-h-11 items-center border border-emerald-900 px-4 font-semibold" href={`/knowledge/youtube-discovery/mission/${encodeURIComponent(item.actionId)}`}>Xem dấu vết</Link></article>; return null; }
+
+export function ImmediateRuns({ queries, setStatus }: { queries: AdminYoutubeDiscoveryQuery[]; setStatus: (value: string) => void }) {
+  const [pending, setPending] = useState<Record<string, boolean>>({});
+  const [progress, setProgress] = useState<Record<string, NonNullable<ReturnType<typeof parseAdminYoutubeDiscoveryQueryProgress>>>>({});
+  const confirmations = useRef<Record<string, string>>({});
+  async function refresh(query: AdminYoutubeDiscoveryQuery, runId?: string) {
+    const suffix = runId ? `?${new URLSearchParams({ runId })}` : "";
+    const response = await fetch(`${origin()}/v1/admin/knowledge/youtube-discovery/${encodeURIComponent(query.id)}/progress${suffix}`, { credentials: "include", headers: { "x-request-id": crypto.randomUUID() }, cache: "no-store" });
+    if (response.status === 401) signIn();
+    const value = parseAdminYoutubeDiscoveryQueryProgress(await response.json().catch(() => null));
+    if (!response.ok || !value) throw new Error("progress");
+    if (runId && value.run.runId !== runId) throw new Error("progress_run");
+    setProgress((current) => ({ ...current, [query.id]: value }));
+    return value;
+  }
+  async function run(query: AdminYoutubeDiscoveryQuery) {
+    setPending((value) => ({ ...value, [query.id]: true }));
+    const confirmationKey = confirmations.current[query.id] ?? crypto.randomUUID().replaceAll("-", "");
+    confirmations.current[query.id] = confirmationKey;
+    try { const result = await post(`/v1/admin/knowledge/youtube-discovery/${encodeURIComponent(query.id)}/immediate`, { confirmationKey }); const admitted = parseAdminYoutubeDiscoveryImmediateRunResult(result.body); if (!result.response.ok || !admitted) throw new Error("admission"); const value = await refresh(query, admitted.runId); if (confirmations.current[query.id] === confirmationKey) delete confirmations.current[query.id]; setStatus(value.run.state === "queued" ? "Đã xếp lượt chạy ngay. Worker sẽ xử lý khi còn năng lực." : "Đã cập nhật tiến độ Discovery."); }
+    catch { setStatus("Chưa thể chạy ngay. Discovery có thể đang tạm dừng hoặc yêu cầu không khả dụng."); }
+    finally { setPending((value) => ({ ...value, [query.id]: false })); }
+  }
+  return <section className="border-t border-[#b8c4b9] p-4" aria-label="Chạy Discovery ngay"><h2 className="font-semibold">Chạy ngay</h2><div className="mt-3 grid gap-3">{queries.map((query) => { const value = progress[query.id]; const label = value?.run.nextRetryAt ? "Đang thử lại" : value?.run.state === "queued" ? "Đang chờ" : value?.run.state === "running" ? "Đang chạy" : value?.run.state === "completed" ? "Hoàn tất" : value?.run.state === "failed" ? "Thất bại" : value?.run.state === "cancelled" ? "Đã hủy" : null; return <article className="border border-[#b8c4b9] bg-white p-3" key={query.id}><p className="font-semibold">{query.queryText}</p><div className="mt-3 flex flex-wrap gap-2"><button className="min-h-11 border border-emerald-900 px-4 font-semibold disabled:opacity-50" disabled={!query.enabled || query.pausedReason !== null || pending[query.id]} onClick={() => void run(query)} type="button">{pending[query.id] ? "Đang xếp lượt chạy" : "Chạy ngay"}</button><button className="min-h-11 border border-slate-500 px-4 font-semibold disabled:opacity-50" disabled={pending[query.id]} onClick={() => void refresh(query, value?.run.runId).then((next) => setStatus(next.run.state === "queued" ? "Lượt chạy đang chờ Worker xử lý." : "Đã làm mới tiến độ Discovery.")).catch(() => setStatus("Chưa thể làm mới tiến độ Discovery lúc này."))} type="button">Làm mới tiến độ</button></div>{!query.enabled || query.pausedReason ? <p className="mt-2 text-sm text-slate-600">Truy vấn hoặc Discovery đang tạm dừng.</p> : null}{value && label ? <div className="mt-3 text-sm" aria-live="polite"><p>{label}. Bắt đầu: {value.run.claimedAt ? new Intl.DateTimeFormat("vi-VN", { timeStyle: "short" }).format(new Date(value.run.claimedAt)) : "chưa nhận"}; kết thúc: {value.run.terminalAt ? new Intl.DateTimeFormat("vi-VN", { timeStyle: "short" }).format(new Date(value.run.terminalAt)) : "chưa có"}. Ứng viên: {value.candidateCount}. Công việc: chờ {value.jobs.queued}, đang xử lý {value.jobs.running}, thử lại {value.jobs.retrying}, hoàn tất {value.jobs.completed}, thất bại {value.jobs.failed}, đã hủy {value.jobs.cancelled}.</p><p className="mt-1">Lần thử: {value.run.retryCount}.{value.run.nextRetryAt ? ` Sẽ thử lại sau ${new Intl.DateTimeFormat("vi-VN", { dateStyle: "short", timeStyle: "short" }).format(new Date(value.run.nextRetryAt))}.` : value.run.state === "failed" ? " Lượt chạy đã thất bại an toàn; hãy tạo xác nhận mới khi đã xử lý nguyên nhân." : ""}</p>{value.reviewAvailable ? <Link className="mt-3 inline-flex min-h-11 items-center border border-emerald-900 px-4 font-semibold" href="/knowledge/youtube-discovery-review">Xem video</Link> : null}</div> : null}</article>; })}</div></section>;
+}
 
 function Funnel({ value }: { value: NonNullable<ReturnType<typeof parseAdminYoutubeDiscoveryMissionFunnel>> }) {
   const counts = { discovered: value.discovered, enriched: value.enriched, triaged: value.triaged, recommended: value.recommended, pendingReview: value.pendingReview, accepted: value.accepted, deferred: value.deferred, skipped: value.skipped };

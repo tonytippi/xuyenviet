@@ -15,7 +15,7 @@ type DiscoveryWriter = Pick<ReturnType<typeof getDb>, "execute" | "insert" | "se
 
 export type CreateYoutubeDiscoveryPolicyVersionInput = Readonly<{ version: number; isCurrent: boolean; policy?: unknown; actor: AuditActor }>;
 export type CreateYoutubeDiscoveryQueryProposalInput = Readonly<{ origin: YoutubeDiscoveryQueryProposalOrigin; reason: YoutubeDiscoveryQueryProposalReason; priority: number; queryText: string; enabled?: boolean; cadenceMinutes: number; actor: AuditActor; systemSignal?: SafeDiscoveryQuerySignal }>;
-export type CreateYoutubeDiscoveryRunInput = Readonly<{ policyVersionId: string; queryProposalId?: string; scheduleIntervalAt?: Date }>;
+export type CreateYoutubeDiscoveryRunInput = Readonly<{ policyVersionId: string; queryProposalId?: string; scheduleIntervalAt?: Date; immediateOperatorUserId?: string; immediateConfirmationKey?: string; actor?: AuditActor }>;
 export type YoutubeDiscoveryRunClaim = Readonly<{ id: string; fencingToken: string; attemptCount: number; nextRunAt: Date; claimedAt: Date; leaseExpiresAt: Date; recoveredCount: number }>;
 export type YoutubeDiscoveryRunClaimResult = Readonly<{ claim: YoutubeDiscoveryRunClaim | null; recoveredCount: number; recoveredTerminalCount: number; contended: boolean }>;
 export type YoutubeDiscoveryRunDisposition = "completed" | "failed" | "cancelled" | "retrying" | "contended";
@@ -100,12 +100,13 @@ export async function createYoutubeDiscoveryRun(input: CreateYoutubeDiscoveryRun
       if (!proposal || !proposal.enabled) throw new Error("YouTube Discovery runs require an enabled query proposal.");
       queryText = proposal.queryText;
     }
-    const [created] = await transaction.insert(youtubeDiscoveryRuns).values({ policyVersionId: input.policyVersionId, queryProposalId: input.queryProposalId, queryText, scheduleIntervalAt: input.scheduleIntervalAt, state: "queued", maxRetryAttempts: policy.maxRetryAttempts, retryDelayMinutes: policy.retryDelayMinutes, maxConcurrentRuns: policy.maxConcurrentRuns }).onConflictDoNothing().returning();
+    const [created] = await transaction.insert(youtubeDiscoveryRuns).values({ policyVersionId: input.policyVersionId, queryProposalId: input.queryProposalId, queryText, scheduleIntervalAt: input.scheduleIntervalAt, immediateOperatorUserId: input.immediateOperatorUserId, immediateConfirmationKey: input.immediateConfirmationKey, state: "queued", maxRetryAttempts: policy.maxRetryAttempts, retryDelayMinutes: policy.retryDelayMinutes, maxConcurrentRuns: policy.maxConcurrentRuns }).onConflictDoNothing().returning();
     if (!created) {
       if (input.scheduleIntervalAt) return null;
+      if (input.immediateConfirmationKey && input.queryProposalId && input.immediateOperatorUserId) { const [existing] = await transaction.select().from(youtubeDiscoveryRuns).where(and(eq(youtubeDiscoveryRuns.queryProposalId, input.queryProposalId), eq(youtubeDiscoveryRuns.immediateOperatorUserId, input.immediateOperatorUserId), eq(youtubeDiscoveryRuns.immediateConfirmationKey, input.immediateConfirmationKey))).limit(1); if (existing) return existing; }
       throw new Error("YouTube Discovery run creation failed.");
     }
-    await recordAuditEvent({ actor: createSystemAuditActor("system-youtube-discovery"), operation: "create", targetType: "youtube_discovery_run", targetId: created.id, afterSummary: JSON.stringify(runAuditSummary(created)) }, transaction);
+    await recordAuditEvent({ actor: input.actor ?? createSystemAuditActor("system-youtube-discovery"), operation: "create", targetType: "youtube_discovery_run", targetId: created.id, afterSummary: JSON.stringify(runAuditSummary(created)) }, transaction);
     return created;
   });
 }
@@ -214,7 +215,7 @@ function nextBoundaryFromStatementNow(cadence: number | ReturnType<typeof sql>) 
   return nextBoundarySql(sql`statement_timestamp()`, sql`statement_timestamp()`, cadence);
 }
 
-export async function claimNextYoutubeDiscoveryRun(input: { workerId: string; leaseMs?: number }, database: DiscoveryWriter = getDb()): Promise<YoutubeDiscoveryRunClaimResult> {
+export async function claimNextYoutubeDiscoveryRun(input: { workerId: string; leaseMs?: number; immediateOnly?: boolean }, database: DiscoveryWriter = getDb()): Promise<YoutubeDiscoveryRunClaimResult> {
   const workerId = input.workerId.trim();
   if (!/^[a-zA-Z0-9_.:-]{1,160}$/.test(workerId)) throw new Error("YouTube Discovery worker ID is invalid.");
   const leaseMs = input.leaseMs ?? 300_000;
@@ -225,7 +226,8 @@ export async function claimNextYoutubeDiscoveryRun(input: { workerId: string; le
     const rows = await transaction.execute(sql`
       select candidate.id, candidate.policy_version_id, candidate.max_concurrent_runs from youtube_discovery_runs candidate
       left join youtube_discovery_query_proposals proposal on proposal.id = candidate.query_proposal_id
-      where candidate.state in ('queued', 'retrying') and candidate.next_run_at <= clock_timestamp()
+       where candidate.state in ('queued', 'retrying') and candidate.next_run_at <= clock_timestamp()
+         and (${input.immediateOnly ?? false} = false or candidate.immediate_confirmation_key is not null)
         and (candidate.query_proposal_id is null or proposal.enabled = true)
         and not exists (
           select 1 from youtube_discovery_runs active

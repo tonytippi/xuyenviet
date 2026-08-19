@@ -5,7 +5,7 @@ import { createRoot } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { parseAdminYoutubeDiscoveryMissionCoveragePage, type AdminKnowledgeProvinceCoverage } from "@xuyenviet/contracts";
-import { filterProvinceCoverage, ProvinceCoverage, YoutubeDiscoveryMissionQuality, validateMissionQueryDraft } from "../apps/admin/app/knowledge/youtube-discovery/mission/mission";
+import { filterProvinceCoverage, ImmediateRuns, ProvinceCoverage, YoutubeDiscoveryMissionQuality, validateMissionQueryDraft } from "../apps/admin/app/knowledge/youtube-discovery/mission/mission";
 
 const roots: ReturnType<typeof createRoot>[] = [];
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -79,6 +79,91 @@ describe("Mission UI interaction boundary", () => {
     await click("Tạo truy vấn");
     expect(fetch).toHaveBeenLastCalledWith("https://api.test/v1/admin/knowledge/youtube-discovery", expect.objectContaining({ method: "POST", body: JSON.stringify({ queryText: "kinh nghiệm lái xe Đà Nẵng", priority: 50, cadenceMinutes: 60 }) }));
     expect(container.textContent).not.toContain("Đề xuất tạm thời");
+  });
+
+  test("creates a suggestion query before explicit immediate admission and retains it across an admission retry", async () => {
+    const provinces: AdminKnowledgeProvinceCoverage[] = [{ canonicalProvinceId: "vn-21-da-nang", currentName: "Đà Nẵng", legacyNames: [], topics: [], freshnessSensitiveCount: 0, latestUpdatedAt: null }];
+    const suggestion = { canonicalProvinceId: "vn-21-da-nang", need: "Cần thêm thông tin", reason: "Chủ đề còn ít", queryText: "kinh nghiệm lái xe Đà Nẵng" };
+    const query = { id: "query-1", origin: "operator", reason: "operator_request", queryText: suggestion.queryText, priority: 50, enabled: true, cadenceMinutes: 60, nextRunAt: "2026-08-18T00:00:00.000Z", pausedReason: null };
+    const run = { runId: "run-1", state: "queued", createdAt: "2026-08-18T00:00:00.000Z" };
+    const fetch = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({ csrfToken: "csrf" }), { status: 200 })).mockResolvedValueOnce(new Response(JSON.stringify(suggestion), { status: 201 })).mockResolvedValueOnce(new Response(JSON.stringify({ csrfToken: "csrf" }), { status: 200 })).mockResolvedValueOnce(new Response(JSON.stringify(query), { status: 201 })).mockResolvedValueOnce(new Response(JSON.stringify({ csrfToken: "csrf" }), { status: 200 })).mockResolvedValueOnce(new Response(JSON.stringify({ code: "internal_error" }), { status: 503 })).mockResolvedValueOnce(new Response(JSON.stringify({ csrfToken: "csrf" }), { status: 200 })).mockResolvedValueOnce(new Response(JSON.stringify(run), { status: 201 }));
+    vi.stubEnv("NEXT_PUBLIC_API_ORIGIN", "https://api.test"); vi.stubGlobal("fetch", fetch);
+    const container = document.createElement("div"); document.body.append(container); const root = createRoot(container); roots.push(root);
+    await act(async () => { root.render(createElement(ProvinceCoverage, { provinces, setStatus: vi.fn() })); });
+    const click = async (name: string) => { await act(async () => { Array.from(container.querySelectorAll("button")).find((button) => button.textContent?.includes(name))!.click(); await Promise.resolve(); }); };
+    await click("Đà Nẵng"); await click("Đề xuất truy vấn tiếng Việt");
+    for (let index = 0; index < 10 && !container.textContent?.includes("Đề xuất tạm thời"); index += 1) await act(async () => { await Promise.resolve(); });
+    await click("Chạy ngay"); await click("Chạy ngay");
+    const paths = fetch.mock.calls.map(([url]) => String(url));
+    expect(paths.filter((path) => path === "https://api.test/v1/admin/knowledge/youtube-discovery")).toHaveLength(1);
+    const immediate = fetch.mock.calls.filter(([url]) => String(url).endsWith("/immediate"));
+    expect(immediate).toHaveLength(2);
+    expect(JSON.parse((immediate[1]![1] as RequestInit).body as string).confirmationKey).toBe(JSON.parse((immediate[0]![1] as RequestInit).body as string).confirmationKey);
+    expect(container.textContent).not.toContain("Đề xuất tạm thời");
+  });
+
+  test("reuses an immediate confirmation after admission or progress failure and clears it after success", async () => {
+    vi.stubEnv("NEXT_PUBLIC_API_ORIGIN", "https://api.test");
+    const query = { id: "proposal-1", origin: "operator" as const, queryText: "Da Lat route", reason: "operator_request" as const, priority: 50, enabled: true, cadenceMinutes: 60, nextRunAt: "2026-08-07T00:00:00.000Z", pausedReason: null };
+    const run = { runId: "run-1", state: "queued", createdAt: "2026-08-07T00:00:00.000Z" };
+    const progress = { run: { ...run, claimedAt: null, terminalAt: null, retryCount: 0, nextRetryAt: null, safeErrorCode: null }, candidateCount: 1, jobs: { queued: 0, running: 0, retrying: 0, completed: 1, failed: 0, cancelled: 0 }, reviewAvailable: true };
+    const fetch = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({ csrfToken: "csrf" }), { status: 200 })).mockResolvedValueOnce(new Response(JSON.stringify({ code: "internal_error" }), { status: 503 })).mockResolvedValueOnce(new Response(JSON.stringify({ csrfToken: "csrf" }), { status: 200 })).mockResolvedValueOnce(new Response(JSON.stringify(run), { status: 201 })).mockResolvedValueOnce(new Response(JSON.stringify({ code: "internal_error" }), { status: 503 })).mockResolvedValueOnce(new Response(JSON.stringify({ csrfToken: "csrf" }), { status: 200 })).mockResolvedValueOnce(new Response(JSON.stringify(run), { status: 201 })).mockResolvedValueOnce(new Response(JSON.stringify(progress), { status: 200 })).mockResolvedValueOnce(new Response(JSON.stringify({ csrfToken: "csrf" }), { status: 200 })).mockResolvedValueOnce(new Response(JSON.stringify(run), { status: 201 })).mockResolvedValueOnce(new Response(JSON.stringify(progress), { status: 200 }));
+    vi.stubGlobal("fetch", fetch);
+    const container = document.createElement("div"); document.body.append(container);
+    const root = createRoot(container); roots.push(root);
+    await act(async () => { root.render(createElement(ImmediateRuns, { queries: [query], setStatus: vi.fn() })); });
+    const click = async () => { await act(async () => { Array.from(container.querySelectorAll("button")).find((button) => button.textContent === "Chạy ngay")!.click(); await Promise.resolve(); }); };
+    await click(); await click(); await click();
+    for (let index = 0; index < 30 && !container.textContent?.includes("Đang chờ"); index += 1) await act(async () => { await Promise.resolve(); });
+    const bodies = () => fetch.mock.calls.filter(([url]) => String(url).endsWith("/immediate")).map(([, init]) => JSON.parse((init as RequestInit).body as string));
+    expect(bodies()[1].confirmationKey).toBe(bodies()[0].confirmationKey);
+    expect(bodies()[2].confirmationKey).toBe(bodies()[1].confirmationKey);
+    expect(container.textContent).toContain("Đang chờ");
+    expect(container.textContent).toContain("Xem video");
+    expect(container.querySelector("a")?.getAttribute("href")).toBe("/knowledge/youtube-discovery-review");
+    await click();
+    expect(bodies()[3].confirmationKey).not.toBe(bodies()[2].confirmationKey);
+  });
+
+  test("refreshes existing immediate-run progress and exposes the existing review flow", async () => {
+    vi.stubEnv("NEXT_PUBLIC_API_ORIGIN", "https://api.test");
+    const query = { id: "proposal-1", origin: "operator" as const, queryText: "Da Lat route", reason: "operator_request" as const, priority: 50, enabled: true, cadenceMinutes: 60, nextRunAt: "2026-08-07T00:00:00.000Z", pausedReason: null };
+    const progress = { run: { runId: "run-1", state: "completed", createdAt: "2026-08-07T00:00:00.000Z", claimedAt: "2026-08-07T00:00:00.000Z", terminalAt: "2026-08-07T00:01:00.000Z", retryCount: 1, nextRetryAt: null, safeErrorCode: null }, candidateCount: 2, jobs: { queued: 0, running: 0, retrying: 0, completed: 2, failed: 0, cancelled: 0 }, reviewAvailable: true };
+    const fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify(progress), { status: 200 }));
+    vi.stubGlobal("fetch", fetch);
+    const container = document.createElement("div"); document.body.append(container);
+    const root = createRoot(container); roots.push(root);
+    await act(async () => { root.render(createElement(ImmediateRuns, { queries: [query], setStatus: vi.fn() })); });
+    await act(async () => { Array.from(container.querySelectorAll("button")).find((button) => button.textContent === "Làm mới tiến độ")!.click(); await Promise.resolve(); });
+  });
+
+  test("shows Xem video only for a reviewable immediate projection", () => {
+    const query = { id: "proposal-1", origin: "operator" as const, queryText: "Da Lat route", reason: "operator_request" as const, priority: 50, enabled: true, cadenceMinutes: 60, nextRunAt: null, pausedReason: null };
+    const html = renderToStaticMarkup(createElement(ImmediateRuns, { queries: [query], setStatus: vi.fn() }));
+    expect(html).not.toContain("Xem video");
+  });
+
+  test("renders bounded immediate state and retry recovery context", async () => {
+    vi.stubEnv("NEXT_PUBLIC_API_ORIGIN", "https://api.test");
+    const query = { id: "proposal-1", origin: "operator" as const, queryText: "Da Lat route", reason: "operator_request" as const, priority: 50, enabled: true, cadenceMinutes: 60, nextRunAt: null, pausedReason: null };
+    const states = [
+      { state: "queued", nextRetryAt: null, safeErrorCode: null, label: "Đang chờ" },
+      { state: "running", nextRetryAt: null, safeErrorCode: null, label: "Đang chạy" },
+      { state: "queued", nextRetryAt: "2026-08-07T00:15:00.000Z", safeErrorCode: "search_timeout", label: "Đang thử lại" },
+      { state: "failed", nextRetryAt: null, safeErrorCode: "retry_exhausted", label: "Lượt chạy đã thất bại an toàn" },
+      { state: "cancelled", nextRetryAt: null, safeErrorCode: "policy_revoked", label: "Đã hủy" },
+      { state: "completed", nextRetryAt: null, safeErrorCode: null, label: "Hoàn tất" },
+    ] as const;
+    for (const current of states) {
+      const progress = { run: { runId: "run-1", state: current.state, createdAt: "2026-08-07T00:00:00.000Z", claimedAt: current.state === "queued" ? null : "2026-08-07T00:00:00.000Z", terminalAt: current.state === "failed" || current.state === "cancelled" || current.state === "completed" ? "2026-08-07T00:01:00.000Z" : null, retryCount: 1, nextRetryAt: current.nextRetryAt, safeErrorCode: current.safeErrorCode }, candidateCount: 0, jobs: { queued: 0, running: 0, retrying: 0, completed: 0, failed: 0, cancelled: 0 }, reviewAvailable: false };
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify(progress), { status: 200 })));
+      const container = document.createElement("div"); document.body.append(container); const root = createRoot(container); roots.push(root);
+      await act(async () => { root.render(createElement(ImmediateRuns, { queries: [query], setStatus: vi.fn() })); });
+      await act(async () => { Array.from(container.querySelectorAll("button")).find((button) => button.textContent === "Làm mới tiến độ")!.click(); await Promise.resolve(); });
+      expect(container.textContent).toContain(current.label);
+      expect(container.textContent).not.toContain("Xem video");
+      root.unmount(); roots.pop();
+    }
   });
 
   test("renders the bounded Vietnamese-first quality proof", () => {

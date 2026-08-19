@@ -37,6 +37,8 @@ beforeEach(async () => {
   port.listProvinceCoverage = vi.fn().mockResolvedValue({ items: [] });
   port.suggestProvinceQuery = vi.fn().mockResolvedValue(null);
   port.setEnabled = vi.fn().mockResolvedValue({ enabled: false, version: 2, createdAt: "2026-08-07T00:00:00.000Z", changed: true });
+  port.admitImmediateRun = vi.fn().mockResolvedValue({ runId: "run-1", state: "queued", createdAt: "2026-08-07T00:00:00.000Z" });
+  port.getQueryProgress = vi.fn().mockResolvedValue({ run: { runId: "run-1", state: "queued", createdAt: "2026-08-07T00:00:00.000Z", claimedAt: null, terminalAt: null, retryCount: 0, nextRetryAt: null, safeErrorCode: null }, candidateCount: 0, jobs: { queued: 0, running: 0, retrying: 0, completed: 0, failed: 0, cancelled: 0 }, reviewAvailable: false });
   port.healthOverview.mockResolvedValue({ asOf: "2026-08-07T00:00:00.000Z", lastUpdatedAt: null, policy: { enabled: null }, planning: { state: "no_run", at: null, lastUpdatedAt: null, nextRunAt: null, retryCount: null, category: "unavailable", freshness: "unavailable" }, querySchedule: { enabled: null, cadenceMinutes: null, nextRunAt: null, lastUpdatedAt: null, freshness: "unavailable" }, latestQueryRun: { state: "no_run", at: null, lastUpdatedAt: null, nextRunAt: null, retryCount: null, category: "unavailable", freshness: "unavailable" }, pausedRuns: [], throughput: { windowHours: 24, discovered: 0, enriched: 0, triaged: 0, recommended: 0, lastUpdatedAt: null, freshness: "unavailable" }, backlog: { pending: 0, deferred: 0, candidateQueued: 0, candidateRetrying: 0, candidateRunning: 0, oldestDeferredAt: null, deferredAge: "unavailable", lastUpdatedAt: null }, quality: { tooShort: 0, durationUnknown: 0, nonVietnamese: 0, languageUnknown: 0, foreignFallback: 0, vietnameseConsider: 0, considered: 0, vietnameseFitPercent: null, durationViolations: 0 }, incidents: [], usage: { availability: "missing", requests: 0, totalTokens: null, costMicros: null, lastUpdatedAt: null, freshness: "unavailable" } });
   identities = createPostgresApiIdentityRepository(getTestDatabaseUrl(), browserAuth.sessionLookupKey, browserAuth.oauthTransactionProtectionKey);
   const ApiModule = createApiModule(identities, { conversationSummaries: { async listOwnedConversationSummaryRows() { return []; } }, browserAuth, adminYoutubeDiscovery: port as unknown as AdminYoutubeDiscoveryPort });
@@ -101,6 +103,23 @@ describe("admin YouTube Discovery direct API", () => {
     expect(port.create).not.toHaveBeenCalled();
   });
 
+  test("protects exact immediate admissions with CSRF and fails closed for malformed or unavailable results", async () => {
+    const key = "a".repeat(16);
+    await request(app.getHttpServer()).post("/v1/admin/knowledge/youtube-discovery/proposal-1/immediate").send({ confirmationKey: key }).expect(401);
+    const traveler = await browserSession("traveler", "traveler");
+    await request(app.getHttpServer()).post("/v1/admin/knowledge/youtube-discovery/proposal-1/immediate").set({ Cookie: traveler.cookie, Origin: "https://admin.xuyenviet.app", "x-xuyenviet-csrf": traveler.csrf }).send({ confirmationKey: key }).expect(403);
+    const operator = await browserSession("operator", "operator");
+    const headers = { Cookie: operator.cookie, Origin: "https://admin.xuyenviet.app", "x-xuyenviet-csrf": operator.csrf };
+    await request(app.getHttpServer()).post("/v1/admin/knowledge/youtube-discovery/proposal-1/immediate").set(headers).send({ confirmationKey: "short" }).expect(400);
+    await request(app.getHttpServer()).post("/v1/admin/knowledge/youtube-discovery/proposal-1/immediate").set({ ...headers, "x-xuyenviet-csrf": "invalid" }).send({ confirmationKey: key }).expect(403);
+    await request(app.getHttpServer()).post("/v1/admin/knowledge/youtube-discovery/proposal-1/immediate").set(headers).send({ confirmationKey: key }).expect(201, { runId: "run-1", state: "queued", createdAt: "2026-08-07T00:00:00.000Z" });
+    expect(port.admitImmediateRun).toHaveBeenCalledWith(expect.objectContaining({ userId: "operator", email: "operator@example.com" }), "proposal-1", key);
+    port.admitImmediateRun.mockResolvedValueOnce(null);
+    await request(app.getHttpServer()).post("/v1/admin/knowledge/youtube-discovery/proposal-1/immediate").set(headers).send({ confirmationKey: "b".repeat(16) }).expect(503);
+    port.admitImmediateRun.mockResolvedValueOnce({ runId: "run-1", state: "retrying", createdAt: "2026-08-07T00:00:00.000Z", unsafe: true });
+    await request(app.getHttpServer()).post("/v1/admin/knowledge/youtube-discovery/proposal-1/immediate").set(headers).send({ confirmationKey: "c".repeat(16) }).expect(503);
+  });
+
   test("admits all five authenticated operator commands with the request principal", async () => {
     const operator = await browserSession("operator", "operator");
     const headers = { Cookie: operator.cookie, Origin: "https://admin.xuyenviet.app", "x-xuyenviet-csrf": operator.csrf };
@@ -115,6 +134,24 @@ describe("admin YouTube Discovery direct API", () => {
     expect(port.pause).toHaveBeenCalledWith(expect.objectContaining({ userId: "operator", email: "operator@example.com" }), "proposal-1");
     expect(port.resume).toHaveBeenCalledWith(expect.objectContaining({ userId: "operator", email: "operator@example.com" }), "proposal-1");
     expect(query.origin).toBe("operator");
+  });
+
+  test("protects safe immediate-run progress reads and fails closed before unsafe port output reaches the UI", async () => {
+    await request(app.getHttpServer()).get("/v1/admin/knowledge/youtube-discovery/proposal-1/progress").expect(401);
+    const traveler = await browserSession("traveler", "traveler");
+    await request(app.getHttpServer()).get("/v1/admin/knowledge/youtube-discovery/proposal-1/progress").set({ Cookie: traveler.cookie }).expect(403);
+    expect(port.getQueryProgress).not.toHaveBeenCalled();
+    const operator = await browserSession("operator", "operator");
+    const progress = { run: { runId: "run-1", state: "completed", createdAt: "2026-08-07T00:00:00.000Z", claimedAt: "2026-08-07T00:00:00.000Z", terminalAt: "2026-08-07T00:01:00.000Z", retryCount: 1, nextRetryAt: null, safeErrorCode: null }, candidateCount: 2, jobs: { queued: 0, running: 0, retrying: 0, completed: 2, failed: 0, cancelled: 0 }, reviewAvailable: true };
+    port.getQueryProgress.mockResolvedValueOnce(progress);
+    await request(app.getHttpServer()).get("/v1/admin/knowledge/youtube-discovery/proposal-1/progress?runId=run-1").set({ Cookie: operator.cookie }).expect(200, progress);
+    expect(port.getQueryProgress).toHaveBeenCalledWith("proposal-1", "run-1");
+    port.getQueryProgress.mockResolvedValueOnce(progress);
+    await request(app.getHttpServer()).get("/v1/admin/knowledge/youtube-discovery/proposal-1/progress").set({ Cookie: operator.cookie }).expect(200, progress);
+    expect(port.getQueryProgress).toHaveBeenCalledWith("proposal-1", null);
+    await request(app.getHttpServer()).get("/v1/admin/knowledge/youtube-discovery/proposal-1/progress?unsafe=yes").set({ Cookie: operator.cookie }).expect(400);
+    port.getQueryProgress.mockResolvedValueOnce({ ...progress, providerPayload: {} });
+    await request(app.getHttpServer()).get("/v1/admin/knowledge/youtube-discovery/proposal-1/progress?runId=run-1").set({ Cookie: operator.cookie }).expect(503);
   });
 
   test("forwards an authorized text edit to the proposal port", async () => {

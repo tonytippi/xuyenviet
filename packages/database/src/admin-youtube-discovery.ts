@@ -1,12 +1,12 @@
 import { and, asc, desc, eq, gt, inArray, lt, or, sql } from "drizzle-orm";
 import { YoutubeDiscoveryActionRequiredCursorValidationError, YoutubeDiscoveryBrowseCursorValidationError, YoutubeDiscoveryHealthCursorValidationError, YoutubeDiscoveryMissionCursorValidationError, YoutubeDiscoveryReviewCursorValidationError, type AdminYoutubeDiscoveryDependencies, type AdminYoutubeDiscoveryPort } from "@xuyenviet/domain";
-import type { AdminKnowledgeProvinceSuggestion, AdminYoutubeDiscoveryActionRequiredItem, AdminYoutubeDiscoveryHealthIncidentCursor, AdminYoutubeDiscoveryHealthIncidentDetail, AdminYoutubeDiscoveryMissionCandidate, AdminYoutubeDiscoveryPausedRun, RequestPrincipal } from "@xuyenviet/contracts";
+import type { AdminKnowledgeProvinceSuggestion, AdminYoutubeDiscoveryActionRequiredItem, AdminYoutubeDiscoveryHealthIncidentCursor, AdminYoutubeDiscoveryHealthIncidentDetail, AdminYoutubeDiscoveryImmediateRunResult, AdminYoutubeDiscoveryMissionCandidate, AdminYoutubeDiscoveryPausedRun, AdminYoutubeDiscoveryQueryProgress, RequestPrincipal } from "@xuyenviet/contracts";
 import { adminYoutubeDiscoveryActionRequiredPageSize, adminYoutubeDiscoveryBrowsePageSize, adminYoutubeDiscoveryHealthIncidentPageSize, adminYoutubeDiscoveryHealthStageWindowHours, adminYoutubeDiscoveryMissionPageSize, adminYoutubeDiscoveryReviewPageSize, encodeAdminYoutubeDiscoveryActionRequiredCursor, encodeAdminYoutubeDiscoveryBrowseCursor, encodeAdminYoutubeDiscoveryHealthIncidentCursor, encodeAdminYoutubeDiscoveryMissionCandidateCursor, encodeAdminYoutubeDiscoveryMissionQueryCursor, encodeAdminYoutubeDiscoveryReviewCursor, parseAdminKnowledgeProvinceSuggestion } from "@xuyenviet/contracts";
 import type { YoutubeCaptureEligibilityPort } from "@xuyenviet/domain";
 import { getDb } from "./client";
 import { createSystemAuditActor, createUserAuditActor, type AuditActor } from "./actors";
 import { recordAuditEvent } from "./audit-writers";
-import { createYoutubeDiscoveryPolicyVersion } from "./youtube-discovery";
+import { createYoutubeDiscoveryPolicyVersion, createYoutubeDiscoveryRun } from "./youtube-discovery";
 import { getAdminKnowledgeProvinceCoverage } from "./admin-knowledge-coverage";
 import { completeYoutubeDiscoveryProvinceSuggestion } from "./gateway";
 import { getAiGatewayPricingSnapshot, selectActiveAiGatewayModel } from "./models";
@@ -253,6 +253,30 @@ export function createPostgresAdminYoutubeDiscoveryPort(captureEligibility: Yout
         return { enabled: created.enabled, version: created.version, createdAt: created.createdAt.toISOString(), changed: true };
       });
     },
+    async admitImmediateRun(principal, queryId, confirmationKey): Promise<AdminYoutubeDiscoveryImmediateRunResult | null> {
+      if (!validId(queryId) || !/^[A-Za-z0-9_-]{16,128}$/.test(confirmationKey)) throw new Error("Invalid YouTube Discovery immediate confirmation.");
+      return db.transaction(async (transaction) => {
+        const [policy] = await transaction.select({ id: youtubeDiscoveryPolicyVersions.id, enabled: youtubeDiscoveryPolicyVersions.enabled }).from(youtubeDiscoveryPolicyVersions).where(eq(youtubeDiscoveryPolicyVersions.isCurrent, true)).limit(1).for("update");
+        if (!policy?.enabled) return null;
+        const [query] = await transaction.select({ id: youtubeDiscoveryQueryProposals.id, enabled: youtubeDiscoveryQueryProposals.enabled }).from(youtubeDiscoveryQueryProposals).where(eq(youtubeDiscoveryQueryProposals.id, queryId)).limit(1).for("update");
+        if (!query?.enabled) return null;
+        const [active] = await transaction.select({ id: youtubeDiscoveryRuns.id, state: youtubeDiscoveryRuns.state, createdAt: youtubeDiscoveryRuns.createdAt }).from(youtubeDiscoveryRuns).where(and(eq(youtubeDiscoveryRuns.queryProposalId, query.id), sql`${youtubeDiscoveryRuns.immediateConfirmationKey} is not null`, inArray(youtubeDiscoveryRuns.state, ["queued", "running", "retrying"]))).orderBy(asc(youtubeDiscoveryRuns.createdAt), asc(youtubeDiscoveryRuns.id)).limit(1).for("update");
+        if (active) return { runId: active.id, state: publicImmediateRunState(active.state), createdAt: active.createdAt.toISOString() };
+        const run = await createYoutubeDiscoveryRun({ policyVersionId: policy.id, queryProposalId: query.id, immediateOperatorUserId: principal.userId, immediateConfirmationKey: confirmationKey, actor: actorFor(principal) }, transaction);
+        return { runId: run.id, state: publicImmediateRunState(run.state), createdAt: run.createdAt.toISOString() };
+      });
+    },
+    async getQueryProgress(queryId, runId): Promise<AdminYoutubeDiscoveryQueryProgress | null> {
+      if (!validId(queryId) || runId !== null && !validId(runId)) throw new Error("Invalid YouTube Discovery query.");
+      const [run] = await db.select({ id: youtubeDiscoveryRuns.id, state: youtubeDiscoveryRuns.state, createdAt: youtubeDiscoveryRuns.createdAt, claimedAt: youtubeDiscoveryRuns.claimedAt, terminalAt: youtubeDiscoveryRuns.terminalAt, nextRunAt: youtubeDiscoveryRuns.nextRunAt, attemptCount: youtubeDiscoveryRuns.attemptCount, safeErrorCode: youtubeDiscoveryRuns.safeErrorCode }).from(youtubeDiscoveryRuns).where(and(eq(youtubeDiscoveryRuns.queryProposalId, queryId), sql`${youtubeDiscoveryRuns.immediateConfirmationKey} is not null`, runId ? eq(youtubeDiscoveryRuns.id, runId) : undefined)).orderBy(desc(youtubeDiscoveryRuns.createdAt), desc(youtubeDiscoveryRuns.id)).limit(1);
+      if (!run) return null;
+      const [[candidates], [jobs], [reviews]] = await Promise.all([
+        db.select({ count: sql<number>`count(*)` }).from(youtubeDiscoveryAppearances).where(eq(youtubeDiscoveryAppearances.runId, run.id)),
+        db.select({ queued: sql<number>`count(*) filter (where ${youtubeDiscoveryCandidateJobs.state} = 'queued')`, running: sql<number>`count(*) filter (where ${youtubeDiscoveryCandidateJobs.state} = 'running')`, retrying: sql<number>`count(*) filter (where ${youtubeDiscoveryCandidateJobs.state} = 'retrying')`, completed: sql<number>`count(*) filter (where ${youtubeDiscoveryCandidateJobs.state} = 'completed')`, failed: sql<number>`count(*) filter (where ${youtubeDiscoveryCandidateJobs.state} = 'failed')`, cancelled: sql<number>`count(*) filter (where ${youtubeDiscoveryCandidateJobs.state} = 'cancelled')` }).from(youtubeDiscoveryCandidateJobs).where(eq(youtubeDiscoveryCandidateJobs.runId, run.id)),
+        db.select({ count: sql<number>`count(*)` }).from(youtubeDiscoveryRecommendations).innerJoin(youtubeDiscoveryCandidateReviewStates, and(eq(youtubeDiscoveryCandidateReviewStates.candidateId, youtubeDiscoveryRecommendations.candidateId), eq(youtubeDiscoveryCandidateReviewStates.recommendationId, youtubeDiscoveryRecommendations.id))).where(and(eq(youtubeDiscoveryRecommendations.runId, run.id), eq(youtubeDiscoveryRecommendations.recommendation, "consider"), eq(youtubeDiscoveryCandidateReviewStates.state, "pending"))),
+      ]);
+      return { run: { runId: run.id, state: run.state === "retrying" ? "queued" : run.state, createdAt: run.createdAt.toISOString(), claimedAt: run.claimedAt?.toISOString() ?? null, terminalAt: run.terminalAt?.toISOString() ?? null, retryCount: run.attemptCount, nextRetryAt: run.state === "retrying" ? run.nextRunAt.toISOString() : null, safeErrorCode: run.safeErrorCode }, candidateCount: Number(candidates?.count ?? 0), jobs: { queued: Number(jobs?.queued ?? 0), running: Number(jobs?.running ?? 0), retrying: Number(jobs?.retrying ?? 0), completed: Number(jobs?.completed ?? 0), failed: Number(jobs?.failed ?? 0), cancelled: Number(jobs?.cancelled ?? 0) }, reviewAvailable: Number(reviews?.count ?? 0) > 0 };
+    },
     async getHealthIncident(groupId, cursor) {
       if (!validHealthGroup(groupId) || cursor && (!validHealthCursor(cursor) || cursor.groupId !== groupId)) throw new YoutubeDiscoveryHealthCursorValidationError("Invalid YouTube Discovery Health cursor.");
       const rows = [...await healthRuns(db), ...await candidateHealthIncidents(db)]; const admitted = admittedIncidentRows(rows, Date.now()).get(groupId);
@@ -288,6 +312,7 @@ async function qualityOverview(db: AdminYoutubeDiscoveryDatabase) {
 function browseItem(row: { recommendationId: string; canonicalUrl: string; title: string | null; channelName: string | null; publishedAt: Date | null; durationSeconds: number | null; recommendation: "skip" | "defer" | "consider"; reason: "eligible_score_band" | "below_defer_band" | "between_defer_and_consider_band" | "already_compatible" | "canonical_mismatch" | "not_current_run_enriched"; score: string; factors: string[]; penalties: string[]; signals: string[]; createdAt: string }) { return { recommendationId: row.recommendationId, canonicalUrl: row.canonicalUrl, title: displayText(row.title), channelName: displayText(row.channelName), publishedAt: row.publishedAt?.toISOString() ?? null, durationSeconds: row.durationSeconds, recommendation: row.recommendation, reason: row.reason, score: Number(row.score), factors: row.factors as ("relevance" | "expected_value" | "freshness_fit")[], penalties: row.penalties as ("commercial_risk" | "duplicate_risk")[], signals: row.signals as ("recent_discussion" | "stale_or_changed_warning" | "practical_question_demand" | "creator_responsiveness" | "commercial_risk" | "contradictory_discussion")[], createdAt: `${row.createdAt.slice(0, 23)}Z` }; }
 function displayText(value: string | null) { const normalized = value?.trim(); return normalized || null; }
 function validId(value: string) { return value.trim() === value && value.length > 0 && value.length <= 128; }
+function publicImmediateRunState(state: typeof youtubeDiscoveryRuns.$inferSelect.state): "queued" | "running" | "completed" | "failed" | "cancelled" { return state === "retrying" ? "queued" : state; }
 export async function reconcileYoutubeDiscoveryKnowledgeHandoffs(handoff: NonNullable<AdminYoutubeDiscoveryDependencies["knowledgeHandoff"]>, db: AdminYoutubeDiscoveryDatabase = getDb()) {
   const references = await db.select({ candidateId: youtubeDiscoveryCandidateReviewStates.candidateId, recommendationId: youtubeDiscoveryCandidateReviewStates.recommendationId, canonicalUrl: youtubeDiscoveryCandidates.canonicalUrl, reference: youtubeDiscoveryKnowledgeHandoffs.reference }).from(youtubeDiscoveryCandidateReviewStates)
     .innerJoin(youtubeDiscoveryRecommendations, and(eq(youtubeDiscoveryRecommendations.id, youtubeDiscoveryCandidateReviewStates.recommendationId), eq(youtubeDiscoveryRecommendations.candidateId, youtubeDiscoveryCandidateReviewStates.candidateId)))

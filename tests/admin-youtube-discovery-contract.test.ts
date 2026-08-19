@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { encodeAdminYoutubeDiscoveryActionRequiredCursor, encodeAdminYoutubeDiscoveryBrowseCursor, encodeAdminYoutubeDiscoveryHealthIncidentCursor, encodeAdminYoutubeDiscoveryMissionCandidateCursor, encodeAdminYoutubeDiscoveryMissionCoverageCursor, encodeAdminYoutubeDiscoveryMissionQueryCursor, encodeAdminYoutubeDiscoveryReviewCursor, parseAdminYoutubeDiscoveryAcceptCommand, parseAdminYoutubeDiscoveryAcceptReviewResult, parseAdminYoutubeDiscoveryActionRequiredCursor, parseAdminYoutubeDiscoveryActionRequiredQueue, parseAdminYoutubeDiscoveryBrowseCursor, parseAdminYoutubeDiscoveryBrowsePage, parseAdminYoutubeDiscoveryDeferCommand, parseAdminYoutubeDiscoveryDeferReviewResult, parseAdminYoutubeDiscoveryEnablementCommand, parseAdminYoutubeDiscoveryEnablementResult, parseAdminYoutubeDiscoveryForeignFallbackList, parseAdminYoutubeDiscoveryHealthIncidentDetail, parseAdminYoutubeDiscoveryHealthIncidentCursor, parseAdminYoutubeDiscoveryHealthOverview, parseAdminYoutubeDiscoveryMissionCandidatePage, parseAdminYoutubeDiscoveryMissionCoveragePage, parseAdminYoutubeDiscoveryMissionDetail, parseAdminYoutubeDiscoveryMissionFunnel, parseAdminYoutubeDiscoveryMissionQueryPage, parseAdminYoutubeDiscoveryQuery, parseAdminYoutubeDiscoveryQueryList, parseAdminYoutubeDiscoveryReviewCursor, parseAdminYoutubeDiscoveryReviewDetail, parseAdminYoutubeDiscoveryReviewQueue, parseAdminYoutubeDiscoverySkipCommand, parseAdminYoutubeDiscoverySkipReviewResult } from "@xuyenviet/contracts";
+import { encodeAdminYoutubeDiscoveryActionRequiredCursor, encodeAdminYoutubeDiscoveryBrowseCursor, encodeAdminYoutubeDiscoveryHealthIncidentCursor, encodeAdminYoutubeDiscoveryMissionCandidateCursor, encodeAdminYoutubeDiscoveryMissionCoverageCursor, encodeAdminYoutubeDiscoveryMissionQueryCursor, encodeAdminYoutubeDiscoveryReviewCursor, parseAdminYoutubeDiscoveryAcceptCommand, parseAdminYoutubeDiscoveryAcceptReviewResult, parseAdminYoutubeDiscoveryActionRequiredCursor, parseAdminYoutubeDiscoveryActionRequiredQueue, parseAdminYoutubeDiscoveryBrowseCursor, parseAdminYoutubeDiscoveryBrowsePage, parseAdminYoutubeDiscoveryDeferCommand, parseAdminYoutubeDiscoveryDeferReviewResult, parseAdminYoutubeDiscoveryEnablementCommand, parseAdminYoutubeDiscoveryEnablementResult, parseAdminYoutubeDiscoveryForeignFallbackList, parseAdminYoutubeDiscoveryHealthIncidentDetail, parseAdminYoutubeDiscoveryHealthIncidentCursor, parseAdminYoutubeDiscoveryHealthOverview, parseAdminYoutubeDiscoveryImmediateRunCommand, parseAdminYoutubeDiscoveryImmediateRunResult, parseAdminYoutubeDiscoveryMissionCandidatePage, parseAdminYoutubeDiscoveryMissionCoveragePage, parseAdminYoutubeDiscoveryMissionDetail, parseAdminYoutubeDiscoveryMissionFunnel, parseAdminYoutubeDiscoveryMissionQueryPage, parseAdminYoutubeDiscoveryQuery, parseAdminYoutubeDiscoveryQueryList, parseAdminYoutubeDiscoveryQueryProgress, parseAdminYoutubeDiscoveryReviewCursor, parseAdminYoutubeDiscoveryReviewDetail, parseAdminYoutubeDiscoveryReviewQueue, parseAdminYoutubeDiscoverySkipCommand, parseAdminYoutubeDiscoverySkipReviewResult } from "@xuyenviet/contracts";
 
 const query = { id: "proposal-1", origin: "operator" as const, queryText: "Da Lat route", reason: "operator_request" as const, priority: 50, enabled: true, cadenceMinutes: 60, nextRunAt: "2026-08-07T00:00:00.000Z", pausedReason: null };
 
@@ -26,6 +26,22 @@ describe("admin YouTube Discovery contract", () => {
     expect(parseAdminYoutubeDiscoveryEnablementResult(result)).toEqual(result);
     expect(parseAdminYoutubeDiscoveryEnablementResult({ ...result, policy: {} })).toBeNull();
     expect(parseAdminYoutubeDiscoveryEnablementResult({ ...result, createdAt: "2026-08-07T00:00:00Z" })).toBeNull();
+  });
+
+  test("requires an exact immediate confirmation and bounded safe progress", () => {
+    const command = { confirmationKey: "a".repeat(16) };
+    const result = { runId: "run-1", state: "queued" as const, createdAt: "2026-08-07T00:00:00.000Z" };
+    const progress = { run: { ...result, claimedAt: null, terminalAt: null, retryCount: 0, nextRetryAt: null, safeErrorCode: null }, candidateCount: 0, jobs: { queued: 0, running: 0, retrying: 0, completed: 0, failed: 0, cancelled: 0 }, reviewAvailable: false };
+    expect(parseAdminYoutubeDiscoveryImmediateRunCommand(command)).toEqual(command);
+    expect(parseAdminYoutubeDiscoveryImmediateRunCommand({ confirmationKey: "short" })).toBeNull();
+    expect(parseAdminYoutubeDiscoveryImmediateRunCommand({ ...command, queryText: "unsafe" })).toBeNull();
+    expect(parseAdminYoutubeDiscoveryImmediateRunResult(result)).toEqual(result);
+    expect(parseAdminYoutubeDiscoveryQueryProgress(progress)).toEqual(progress);
+    expect(parseAdminYoutubeDiscoveryQueryProgress({ ...progress, providerPayload: {} })).toBeNull();
+    expect(parseAdminYoutubeDiscoveryQueryProgress({ ...progress, run: { ...progress.run, state: "queued", nextRetryAt: "2026-08-07T00:15:00.000Z", safeErrorCode: "search_timeout" } })).not.toBeNull();
+    expect(parseAdminYoutubeDiscoveryQueryProgress({ ...progress, run: { ...progress.run, state: "retrying", nextRetryAt: "2026-08-07T00:15:00.000Z", safeErrorCode: "search_timeout" } })).toBeNull();
+    expect(parseAdminYoutubeDiscoveryQueryProgress({ ...progress, run: { ...progress.run, providerPayload: {} } })).toBeNull();
+    expect(parseAdminYoutubeDiscoveryQueryProgress({ ...progress, run: { ...progress.run, state: "retrying" } })).toBeNull();
   });
 
   test("requires exact bounded review projections and an opaque versioned cursor", () => {
