@@ -1,7 +1,8 @@
 import { and, asc, desc, eq, sql } from "drizzle-orm";
+import { type PlanningExecutionRef, type PlanningMode } from "@xuyenviet/contracts";
 
 import { getDb } from "./client";
-import { chatContext, chatContextFieldValues, conversations, tripPlanItems, tripProjectConstraints, tripProjects, type ChatContextField, type TripPlanAnchorRole, type TripPlanItemKind, type TripPlanItemState, type TripPlanItemType } from "./schema";
+import { chatContext, chatContextFieldValues, conversations, planningContextSessions, tripChangeProposals, tripPlanItems, tripProjectConstraints, tripProjects, type ChatContextField, type TripPlanAnchorRole, type TripPlanItemKind, type TripPlanItemState, type TripPlanItemType } from "./schema";
 
 export const tripAnswerContextVersion = 1 as const;
 const maxCurrentConversationFacts = 18;
@@ -36,6 +37,9 @@ export type TripAnswerContextPlanItem = {
   label: string;
   ordinal: number;
   parentItemId: string | null;
+  canonicalRoutePathId: string | null;
+  transportOriginLabel: string | null;
+  transportDestinationLabel: string | null;
 };
 export type TripAnswerContext = {
   version: typeof tripAnswerContextVersion;
@@ -56,6 +60,50 @@ export type AnswerContextDigest = Partial<TripAnswerContext> & { hasProjectScope
 type ContextRow = { field: ChatContextField; value: string; createdAt: Date; id: string };
 type LegacyProjectFields = { origin: string | null; destination: string | null; startDate: string | null; endDate: string | null; travelers: string | null; notes: string | null };
 
+export type PlanningModeResolution =
+  | { kind: "resolved"; executionRef: PlanningExecutionRef; proposal: { id: string; rationale: string; operations: unknown } | null }
+  | { kind: "clarification"; question: string; executionRef: PlanningExecutionRef };
+
+type PlanningModeCandidate = { id: string; updatedAt: Date; rationale: string; operations: unknown };
+
+/** Resolves only request-local intent; stored Trip and proposal state remains authoritative. */
+export function resolvePlanningMode(input: { tripProjectId: string | null; aggregateVersion: number | null; sessionRevision: number | null; pendingProposals: PlanningModeCandidate[]; question: string }): PlanningModeResolution {
+  if (!input.tripProjectId) return resolved("unscoped_answer", input, null);
+  const refersToProposal = /(?:proposal|đề xuất|phương án)/iu.test(input.question);
+  const identifiesProposal = /(?:proposal|đề xuất|phương án)\s+(?:này|đang chờ|vừa nêu)/iu.test(input.question);
+  const exploresChange = /(?:nếu\s+(?:ghé|đổi|thay)|giả sử\s+(?:ghé|đổi|thay)|thay\s+vì)/iu.test(input.question);
+  if (refersToProposal && exploresChange) return clarification(input, "Bạn muốn xem đề xuất đang chờ hay khám phá một thay đổi mới?");
+  if (refersToProposal) {
+    if (input.pendingProposals.length === 0) return clarification(input, "Hiện chưa có đề xuất đang chờ. Bạn muốn khám phá thay đổi nào cho chuyến đi?");
+    if (!identifiesProposal || input.pendingProposals.length !== 1) return clarification(input, "Bạn muốn xem đề xuất đang chờ nào?");
+    const proposal = input.pendingProposals[0]!;
+    return resolved("validate_proposal", input, proposal);
+  }
+  return resolved(exploresChange ? "explore_change" : "current_plan", input, null);
+}
+
+function clarification(input: { tripProjectId: string | null; aggregateVersion: number | null; sessionRevision: number | null }, question: string): PlanningModeResolution {
+  return { kind: "clarification", question, executionRef: { mode: "current_plan", tripProjectId: input.tripProjectId, tripAggregateVersion: input.aggregateVersion, proposalId: null, proposalUpdatedAt: null, sessionRevision: input.sessionRevision } };
+}
+
+function resolved(mode: PlanningMode, input: { tripProjectId: string | null; aggregateVersion: number | null; sessionRevision: number | null }, proposal: PlanningModeCandidate | null): PlanningModeResolution {
+  return { kind: "resolved", executionRef: { mode, tripProjectId: input.tripProjectId, tripAggregateVersion: input.aggregateVersion, proposalId: proposal?.id ?? null, proposalUpdatedAt: proposal?.updatedAt.toISOString() ?? null, sessionRevision: input.sessionRevision }, proposal: proposal ? { id: proposal.id, rationale: proposal.rationale, operations: proposal.operations } : null };
+}
+
+export async function resolveOwnedPlanningMode(input: { userId: string; conversationId: string; tripProjectId?: string; question: string; sessionRevision: number | null }): Promise<PlanningModeResolution> {
+  const db = getDb();
+  if (!input.tripProjectId) return resolvePlanningMode({ tripProjectId: null, aggregateVersion: null, sessionRevision: input.sessionRevision, pendingProposals: [], question: input.question });
+  const [scope] = await db.select({ id: tripProjects.id, aggregateVersion: tripProjects.aggregateVersion }).from(tripProjects)
+    .innerJoin(conversations, and(eq(conversations.tripProjectId, tripProjects.id), eq(conversations.userId, tripProjects.userId)))
+    .where(and(eq(tripProjects.id, input.tripProjectId), eq(tripProjects.userId, input.userId), eq(conversations.id, input.conversationId))).limit(1);
+  // Do not reveal whether an invalid project or proposal exists.
+  if (!scope) return resolvePlanningMode({ tripProjectId: null, aggregateVersion: null, sessionRevision: input.sessionRevision, pendingProposals: [], question: input.question });
+  const pendingProposals = await db.select({ id: tripChangeProposals.id, updatedAt: tripChangeProposals.updatedAt, rationale: tripChangeProposals.rationale, operations: tripChangeProposals.operations }).from(tripChangeProposals)
+    .where(and(eq(tripChangeProposals.userId, input.userId), eq(tripChangeProposals.tripProjectId, scope.id), eq(tripChangeProposals.status, "pending"), sql`(${tripChangeProposals.expiresAt} is null or ${tripChangeProposals.expiresAt} > now())`))
+    .orderBy(asc(tripChangeProposals.createdAt), asc(tripChangeProposals.id)).limit(2);
+  return resolvePlanningMode({ tripProjectId: scope.id, aggregateVersion: scope.aggregateVersion, sessionRevision: input.sessionRevision, pendingProposals, question: input.question });
+}
+
 export async function loadAnswerContext({ userId, conversationId, tripProjectId }: { userId: string; conversationId: string; tripProjectId?: string }): Promise<AnswerContextDigest> {
   const db = getDb();
   if (!tripProjectId) {
@@ -75,31 +123,22 @@ export async function loadAnswerContext({ userId, conversationId, tripProjectId 
   // cannot distinguish a missing project from an ownership/link mismatch.
   if (!scope) return emptyContext(true, []);
 
-  const [itemRows, constraintRows, projectRows, conversationRows] = await Promise.all([
-    db.select({ id: tripPlanItems.id, version: tripPlanItems.version, kind: tripPlanItems.kind, anchorRole: tripPlanItems.anchorRole, type: tripPlanItems.type, state: tripPlanItems.state, label: tripPlanItems.label, ordinal: tripPlanItems.ordinal, parentItemId: tripPlanItems.parentItemId })
+  const [itemRows, constraintRows, conversationRows] = await Promise.all([
+    db.select({ id: tripPlanItems.id, version: tripPlanItems.version, kind: tripPlanItems.kind, anchorRole: tripPlanItems.anchorRole, type: tripPlanItems.type, state: tripPlanItems.state, label: tripPlanItems.label, ordinal: tripPlanItems.ordinal, parentItemId: tripPlanItems.parentItemId, canonicalRoutePathId: tripPlanItems.canonicalRoutePathId, transportOriginLabel: tripPlanItems.transportOriginLabel, transportDestinationLabel: tripPlanItems.transportDestinationLabel })
       .from(tripPlanItems).where(and(eq(tripPlanItems.tripProjectId, tripProjectId), eq(tripPlanItems.userId, userId)))
       .orderBy(sql`${tripPlanItems.parentItemId} asc nulls first`, asc(tripPlanItems.ordinal), asc(tripPlanItems.id)).limit(maxPlanItems),
     db.select().from(tripProjectConstraints).where(and(eq(tripProjectConstraints.tripProjectId, tripProjectId), eq(tripProjectConstraints.userId, userId))).limit(1),
-    loadLatestContextRows(db, and(eq(chatContext.userId, userId), eq(chatContext.tripProjectId, tripProjectId), eq(chatContext.scope, "trip_project"), eq(chatContext.status, "active"))),
     loadLatestContextRows(db, and(eq(chatContext.userId, userId), eq(chatContext.conversationId, conversationId), eq(chatContext.scope, "conversation"), eq(chatContext.status, "active"))),
   ]);
   const planItems = itemRows.map((row) => ({ ...row, label: bound(row.label, 160) }));
   const structuredAnchors = anchorsFromPlan(planItems);
-  const projectFacts = dedupeLatest(projectRows);
   const conversationFacts = dedupeLatest(conversationRows);
   const legacy = scope satisfies LegacyProjectFields;
   const anchors = new Map<ChatContextField, string>(structuredAnchors);
-  const structuredFields = new Set(anchors.keys());
   const conflicts: AnswerContextConflict[] = [];
-  // Structured anchors are canonical. Project chat and legacy aliases fill only gaps.
+  // Only applied Trip fields may supply current-plan anchors. Chat values remain
+  // conversational context and cannot become committed plan authority.
   for (const [field, value] of legacyFacts(legacy)) setLowerPriority(anchors, conflicts, field, value, "legacy_project");
-  for (const [field, value] of orderedEntries(projectFacts)) {
-    const typedField = field as ChatContextField;
-    // Project-scoped chat is the migration-era correction for an absent structured field.
-    // It may replace a legacy alias, but never a structured anchor.
-    if (!structuredFields.has(typedField)) anchors.set(typedField, value);
-    else setLowerPriority(anchors, conflicts, typedField, value, "project_chat");
-  }
   const currentConversationFacts: AnswerContextFact[] = [];
   for (const [field, value] of orderedEntries(conversationFacts)) {
     const canonical = anchors.get(field as ChatContextField);

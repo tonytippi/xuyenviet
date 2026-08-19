@@ -78,6 +78,8 @@
     { "idx": 73, "version": "7", "when": 1789477200000, "tag": "0073_normalize_knowledge_province_references", "breakpoints": true },
     { "idx": 74, "version": "7", "when": 1789563600000, "tag": "0074_add_province_suggestion_model_purpose", "breakpoints": true },
     { "idx": 75, "version": "7", "when": 1789646400000, "tag": "0075_enforce_canonical_knowledge_province_references", "breakpoints": true },
-    { "idx": 76, "version": "7", "when": 1789732800000, "tag": "0076_add_youtube_discovery_immediate_confirmations", "breakpoints": true }
+    { "idx": 76, "version": "7", "when": 1789732800000, "tag": "0076_add_youtube_discovery_immediate_confirmations", "breakpoints": true },
+    { "idx": 77, "version": "7", "when": 1789819200000, "tag": "0077_clean_break_trip_aware_planning", "breakpoints": true },
+    { "idx": 78, "version": "7", "when": 1789905600000, "tag": "0078_add_trip_plan_item_canonical_route_path_id", "breakpoints": true }
   ]
 }

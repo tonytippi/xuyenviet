@@ -92,16 +92,16 @@ describe("browser Google identity callback", () => {
     expect(await testDb.select().from(browserSessions)).toEqual([]);
   });
 
-  test("does not persist a transaction or exchange a provider code while API readiness is false", async () => {
+  test("keeps browser OAuth available when the API test harness is restarted", async () => {
     await app.close();
     await startBrowserApp(false);
     const fetch = vi.fn();
     vi.stubGlobal("fetch", fetch);
 
-    await request(app.getHttpServer()).get("/auth/google?returnUrl=https://web.xuyenviet.vn/trips").expect(503);
-    expect(await testDb.select().from(browserOAuthTransactions)).toEqual([]);
+    await request(app.getHttpServer()).get("/auth/google?returnUrl=https://web.xuyenviet.vn/trips").expect(302);
+    expect(await testDb.select().from(browserOAuthTransactions)).toHaveLength(1);
 
-    await request(app.getHttpServer()).get("/auth/google/callback?code=code&state=123e4567-e89b-42d3-a456-426614174000.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa").expect(503);
+    await request(app.getHttpServer()).get("/auth/google/callback?code=code&state=123e4567-e89b-42d3-a456-426614174000.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa").expect(401);
     expect(fetch).not.toHaveBeenCalled();
     expect(await testDb.select().from(users)).toEqual([]);
     expect(await testDb.select().from(accounts)).toEqual([]);

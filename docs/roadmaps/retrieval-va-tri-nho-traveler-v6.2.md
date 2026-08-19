@@ -6,7 +6,7 @@
 > persisted qualification profiles, read policies, cutover records, compatibility
 > modes, or a legacy rollback window are superseded. The active implementation uses
 > one direct required-need path, at most one new planning-context table, one forward
-> migration (`0073_clean_break_trip_aware_planning.sql`), and the repository's guarded
+> migration (`0077_clean_break_trip_aware_planning.sql`), and the repository's guarded
 > reset/migrate/seed flow for explicitly disposable targets. If a non-disposable target
 > or durable user data is discovered, implementation must stop and return to an
 > expand-migrate-contract design. See AD-37/AD-38 and

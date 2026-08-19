@@ -7,6 +7,7 @@ import { aiAskCommands, conversations, domainOutbox, messages, schema, tripAnswe
 import { acquireAiAskCommand, aiAskRefreshRequiredMessage, discardAiAskCommandsForDeletedConversations, finalizeAiAskCommand, maxAiAskConsumerStatusMessageIds, readAiAskCommandTerminalResult, readOwnedCompletedAiAskConsumerStatuses, terminalizeAiAskCommand, terminalResultsEqual, validateAiAskIdempotencyKey } from "@/features/ai/ai-ask-commands";
 
 import { resetTestDatabase, testDb } from "./helpers/db";
+import { saveOwnedPlanningContextSession } from "@xuyenviet/database";
 
 const key = "idempotency_key_123";
 
@@ -66,6 +67,15 @@ describe("AI Ask command ledger", () => {
     const terminal = await acquireAiAskCommand({ userId: "owner", idempotencyKey: key, question: "Đi Huế", conversationId: conversation.id });
     expect(terminal).toEqual({ kind: "terminal_replay", result });
     expect(await testDb.select().from(messages)).toHaveLength(1);
+  });
+
+  test("does not enqueue context extraction for an explicit partial reply while collecting", async () => {
+    await testDb.insert(users).values({ id: "owner", email: "owner@example.com" });
+    const [conversation] = await testDb.insert(conversations).values({ id: "conversation", userId: "owner" }).returning({ id: conversations.id });
+    await saveOwnedPlanningContextSession("owner", conversation.id, null, { intent: "trip_planning", slots: { destination: "Đà Nẵng" }, slotSourceMessageIds: { destination: "message-1" }, missingSlots: ["origin", "start_date", "adults"], status: "collecting", sourceMessageIds: ["message-1"], revision: 1 });
+
+    await expect(acquireAiAskCommand({ userId: "owner", idempotencyKey: "clarification_partial_key", question: "Xuất phát từ Hà Nội", conversationId: conversation.id })).resolves.toMatchObject({ kind: "admitted" });
+    await expect(testDb.select().from(domainOutbox)).resolves.toEqual([]);
   });
 
   test("replays a completed command without another user or assistant message", async () => {
@@ -166,8 +176,8 @@ describe("AI Ask command ledger", () => {
     ]);
 
     await expect(readOwnedCompletedAiAskConsumerStatuses("owner", [finalized.assistantMessageId])).resolves.toEqual([
-      { assistantMessageId: finalized.assistantMessageId, category: "context_extraction", state: "pending" },
       { assistantMessageId: finalized.assistantMessageId, category: "answer_annotation", state: "failed" },
+      { assistantMessageId: finalized.assistantMessageId, category: "context_extraction", state: "pending" },
     ]);
     await expect(readOwnedCompletedAiAskConsumerStatuses("other", [finalized.assistantMessageId])).resolves.toEqual([]);
     const safeProjection = JSON.stringify(await readOwnedCompletedAiAskConsumerStatuses("owner", [finalized.assistantMessageId]));

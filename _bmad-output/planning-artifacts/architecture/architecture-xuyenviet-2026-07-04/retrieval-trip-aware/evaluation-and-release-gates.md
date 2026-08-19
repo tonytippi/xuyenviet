@@ -33,7 +33,7 @@ Every critical fixture expects zero hard-off-route contribution, unrelated-need 
 
 ### Data shape
 
-- Migration `0073_clean_break_trip_aware_planning.sql` is the only initial Epic 21 migration.
+- Migration `0077_clean_break_trip_aware_planning.sql` is the only initial Epic 21 migration.
 - At most one new table exists: `planning_context_sessions`, with one bounded JSON document per active conversation session.
 - `assistant_retrieval_decisions` stores one bounded JSON snapshot for required needs, outcomes, selected evidence handles, excluded counts/reasons, web scope decisions, and rendered handles.
 - Existing conversation/message, Trip, proposal, recommendation, AI Ask command, Usage, provenance, feedback, and audit tables are reused.

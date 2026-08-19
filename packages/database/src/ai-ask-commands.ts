@@ -1,11 +1,13 @@
 import { createHash } from "node:crypto";
 
 import { and, asc, eq, inArray } from "drizzle-orm";
+import { parsePlanningContextSession, type PlanningExecutionRef } from "@xuyenviet/contracts";
 
 import { getDb } from "./client";
-import { aiAskCommands, conversations, domainOutbox, messageImageAttachments, messages, tripProjects } from "./schema";
+import { aiAskCommands, conversations, domainOutbox, messageImageAttachments, messages, planningContextSessions, tripChangeProposals, tripProjects } from "./schema";
 import { enqueueAiAskFollowUpInTransaction } from "./domain-outbox";
 import { resolveOwnedPrimaryConversationInTransaction } from "./primary-conversation";
+import { isPlanningClarificationBlocked } from "./planning-context";
 
 const keyPattern = /^[A-Za-z0-9_-]{16,128}$/;
 const commandLifetimeMs = 24 * 60 * 60 * 1000;
@@ -134,7 +136,9 @@ export async function acquireAiAskCommand(input: AcquireAiAskCommandInput): Prom
     if (attachment) await transaction.insert(messageImageAttachments).values({ conversationId: conversation.id, messageId: message.id, userId: input.userId, originalFileName: attachment.fileName, mimeType: attachment.mimeType, byteSize: attachment.byteSize, storageKey: null });
     await transaction.update(conversations).set({ updatedAt: new Date() }).where(eq(conversations.id, conversation.id));
     await transaction.update(aiAskCommands).set({ userMessageId: message.id, updatedAt: new Date() }).where(eq(aiAskCommands.id, inserted.id));
-    await enqueueAiAskFollowUpInTransaction(transaction, {
+    const [planningSession] = await transaction.select({ payload: planningContextSessions.payload }).from(planningContextSessions).where(and(eq(planningContextSessions.userId, input.userId), eq(planningContextSessions.conversationId, conversation.id))).limit(1);
+    const clarificationBlocked = isPlanningClarificationBlocked(planningSession ? parsePlanningContextSession(planningSession.payload) : null, question);
+    if (!clarificationBlocked) await enqueueAiAskFollowUpInTransaction(transaction, {
       eventType: "ai_ask.context_extraction.v1",
       envelope: {
         version: 1,
@@ -230,7 +234,7 @@ export async function readOwnedCompletedAiAskConsumerStatuses(userId: string, as
   return [...statuses.values()].slice(0, acceptedAssistantMessageIds.length * aiAskConsumerStatusCategories.length);
 }
 
-export async function finalizeAiAskCommand<T extends { result: AiAskTerminalResult; assistantMessageId: string; tripAnswerContextSnapshotId?: string | null }>(commandId: string, persist: (transaction: Transaction, command: { userId: string; conversationId: string; tripProjectId: string | null; userMessageId: string }) => Promise<T>): Promise<T | { result: AiAskTerminalResult; discarded: true }> {
+export async function finalizeAiAskCommand<T extends { result: AiAskTerminalResult; assistantMessageId: string; tripAnswerContextSnapshotId?: string | null }>(commandId: string, persist: (transaction: Transaction, command: { userId: string; conversationId: string; tripProjectId: string | null; userMessageId: string }) => Promise<T>, options?: { suppressFollowUps?: boolean; revokeContextExtraction?: boolean; planningExecutionRef?: PlanningExecutionRef | null }): Promise<T | { result: AiAskTerminalResult; discarded: true }> {
   return getDb().transaction(async (transaction) => {
     const [unlocked] = await transaction.select().from(aiAskCommands).where(eq(aiAskCommands.id, commandId)).limit(1);
     if (!unlocked) throw new Error("AI Ask command was not found.");
@@ -249,12 +253,21 @@ export async function finalizeAiAskCommand<T extends { result: AiAskTerminalResu
     const [project] = command.tripProjectId
       ? await transaction.select({ id: tripProjects.id, aggregateVersion: tripProjects.aggregateVersion }).from(tripProjects).where(and(eq(tripProjects.id, command.tripProjectId), eq(tripProjects.userId, command.userId))).limit(1)
       : [];
-    if (!conversation || !command.userMessageId || conversation.lifecycleVersion !== command.conversationLifecycleVersion || (command.tripProjectId !== null && (!project || project.aggregateVersion !== command.tripProjectAggregateVersion))) {
+    const planningFenceValid = await hasCurrentPlanningExecutionRef(transaction, command, options?.planningExecutionRef);
+    if (!conversation || !command.userMessageId || conversation.lifecycleVersion !== command.conversationLifecycleVersion || (command.tripProjectId !== null && (!project || project.aggregateVersion !== command.tripProjectAggregateVersion)) || !planningFenceValid) {
       const result = refreshRequiredResult(conversation?.id);
       await transaction.update(aiAskCommands).set({ status: "discarded", terminalResult: result, terminalAt: new Date(), assistantMessageId: null, userMessageId: null, conversationId: null, tripProjectId: null, conversationLifecycleVersion: null, tripProjectAggregateVersion: null, tripAnswerContextSnapshotId: null, normalizedQuestion: "[discarded]", attachmentMetadata: null, updatedAt: new Date() }).where(and(eq(aiAskCommands.id, command.id), eq(aiAskCommands.status, "pending")));
       return { result, discarded: true };
     }
 
+    // Admission may have observed an older ready session. Remove its owned
+    // extraction work in the same terminal transaction before a blocked turn
+    // can become visible to workers.
+    if (options?.revokeContextExtraction) await transaction.delete(domainOutbox).where(and(
+      eq(domainOutbox.originatingCommandId, command.id),
+      eq(domainOutbox.userId, command.userId),
+      eq(domainOutbox.eventType, "ai_ask.context_extraction.v1"),
+    ));
     const completed = await persist(transaction, { userId: command.userId, conversationId: conversation.id, tripProjectId: command.tripProjectId, userMessageId: command.userMessageId });
     await transaction.update(aiAskCommands).set({ status: "completed", terminalResult: completed.result, assistantMessageId: completed.assistantMessageId, tripAnswerContextSnapshotId: completed.tripAnswerContextSnapshotId ?? null, terminalAt: new Date(), updatedAt: new Date() }).where(and(eq(aiAskCommands.id, command.id), eq(aiAskCommands.status, "pending")));
     const envelope = {
@@ -267,10 +280,22 @@ export async function finalizeAiAskCommand<T extends { result: AiAskTerminalResu
       ...(command.tripProjectId ? { tripProjectId: command.tripProjectId, tripProjectAggregateVersion: command.tripProjectAggregateVersion! } : {}),
       conversationLifecycleVersion: command.conversationLifecycleVersion!,
     };
-    await enqueueAiAskFollowUpInTransaction(transaction, { eventType: "ai_ask.answer_annotation.v1", envelope });
-    if (command.tripProjectId) await enqueueAiAskFollowUpInTransaction(transaction, { eventType: "ai_ask.trip_proposal_draft.v1", envelope });
+    if (!options?.suppressFollowUps) {
+      await enqueueAiAskFollowUpInTransaction(transaction, { eventType: "ai_ask.answer_annotation.v1", envelope });
+      if (command.tripProjectId) await enqueueAiAskFollowUpInTransaction(transaction, { eventType: "ai_ask.trip_proposal_draft.v1", envelope });
+    }
     return completed;
   });
+}
+
+async function hasCurrentPlanningExecutionRef(transaction: Transaction, command: { userId: string; conversationId: string | null; tripProjectId: string | null; tripProjectAggregateVersion: number | null }, reference: PlanningExecutionRef | null | undefined) {
+  if (!reference || !command.conversationId) return true;
+  if (reference.tripProjectId !== command.tripProjectId || reference.tripAggregateVersion !== command.tripProjectAggregateVersion) return false;
+  const [session] = await transaction.select({ revision: planningContextSessions.revision }).from(planningContextSessions).where(and(eq(planningContextSessions.userId, command.userId), eq(planningContextSessions.conversationId, command.conversationId))).limit(1).for("update");
+  if ((session?.revision ?? null) !== reference.sessionRevision) return false;
+  if (reference.proposalId === null) return true;
+  const [proposal] = await transaction.select({ id: tripChangeProposals.id, status: tripChangeProposals.status, updatedAt: tripChangeProposals.updatedAt }).from(tripChangeProposals).where(and(eq(tripChangeProposals.id, reference.proposalId), eq(tripChangeProposals.userId, command.userId), eq(tripChangeProposals.tripProjectId, reference.tripProjectId ?? ""))).limit(1).for("update");
+  return proposal?.status === "pending" && proposal.updatedAt.toISOString() === reference.proposalUpdatedAt;
 }
 
 export async function discardAiAskCommandsForDeletedConversations(transaction: Transaction, userId: string, conversationIds: string[]) {

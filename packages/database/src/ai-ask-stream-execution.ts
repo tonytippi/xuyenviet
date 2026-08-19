@@ -11,11 +11,14 @@ import { aiAskInitialAnswerPromptVersion, aiAskInitialAnswerPurpose, buildAiAskM
 import { persistAssistantAnswerProvenance, type AssistantMessageProvenanceItem } from "./provenance";
 import { conversations, messages, tripAnswerContextSnapshots } from "./schema";
 import { assembleContextPrioritySourceBundle, renderSourceBundlePromptSection } from "./source-bundle";
+import { resolveOwnedPlanningMode } from "./answer-context";
 import { writeAiUsageEvent } from "./usage";
+import { prepareOwnedPlanningClarification } from "./planning-context";
 
 type AiAskStreamTestDependencies = {
   assembleContextPrioritySourceBundle: typeof assembleContextPrioritySourceBundle;
   renderSourceBundlePromptSection: typeof renderSourceBundlePromptSection;
+  prepareOwnedPlanningClarification: typeof prepareOwnedPlanningClarification;
   buildSourceBundlePromptSection?: (bundle: Awaited<ReturnType<typeof assembleContextPrioritySourceBundle>>) => string;
 };
 
@@ -27,7 +30,7 @@ export function setAiAskStreamTestDependencies(dependencies: Partial<AiAskStream
 
 function getAiAskStreamDependencies(): AiAskStreamTestDependencies {
   const overrides = (globalThis as typeof globalThis & { [aiAskStreamTestDependenciesKey]?: Partial<AiAskStreamTestDependencies> })[aiAskStreamTestDependenciesKey];
-  return { assembleContextPrioritySourceBundle, renderSourceBundlePromptSection, ...overrides };
+  return { assembleContextPrioritySourceBundle, renderSourceBundlePromptSection, prepareOwnedPlanningClarification, ...overrides };
 }
 
 type StreamEvent =
@@ -56,22 +59,11 @@ export function createAiAskStreamExecutionPort(telemetry: OperationalTelemetrySi
       if (acquisition.kind === "pending_replay") return { kind: "replay", event: { type: "in_progress", conversationId: acquisition.conversationId, userMessage: acquisition.userMessage } };
       if (acquisition.kind === "terminal_replay") return { kind: "replay", event: acquisition.result as StreamEvent };
 
-      let selectedModel: NonNullable<Awaited<ReturnType<typeof selectActiveAiGatewayModel>>> | null;
-      try {
-        selectedModel = await selectActiveAiGatewayModel({ purpose: aiAskInitialAnswerPurpose, requiredCapabilities: { textInput: true, streaming: true, imageInput: Boolean(input.image) } });
-      } catch {
-        const result: StreamEvent = { type: "error", conversationId: acquisition.conversationId, userMessage: acquisition.userMessage, errorMessage: "Không thể chuẩn bị luồng trả lời lúc này. Hãy thử lại sau." };
-        return { kind: "admitted", execution: eventsFromTerminal(acquisition.commandId, "failed", result) };
-      }
-      if (!selectedModel) {
-        const result: StreamEvent = { type: "error", conversationId: acquisition.conversationId, userMessage: acquisition.userMessage, errorMessage: input.image ? "Selected AI model does not support streaming image input." : "No active streaming AI Ask model is configured." };
-        return { kind: "admitted", execution: eventsFromTerminal(acquisition.commandId, "failed", result) };
-      }
       const imageDataUrl = input.image ? `data:${input.image.mimeType};base64,${Buffer.from(input.image.bytes).toString("base64")}` : null;
       // A browser connection only owns its NDJSON relay. Once the command and user
       // message are committed, generation must run to a durable terminal result even
       // when navigation or a reload closes that relay.
-      return { kind: "admitted", execution: streamEvents({ abortSignal: new AbortController().signal, session: { userId: principal.userId, email: "" }, question: acquisition.question, tripProjectId: acquisition.tripProjectId ?? undefined, imageDataUrl, selectedModel, command: acquisition, correlationId, telemetry }) };
+      return { kind: "admitted", execution: streamEvents({ abortSignal: new AbortController().signal, session: { userId: principal.userId, email: "" }, question: acquisition.question, tripProjectId: acquisition.tripProjectId ?? undefined, imageDataUrl, command: acquisition, correlationId, telemetry }) };
     },
   };
 }
@@ -138,7 +130,6 @@ async function streamAnswer({
   question,
   tripProjectId,
   imageDataUrl,
-  selectedModel,
   command,
   correlationId,
   telemetry,
@@ -149,7 +140,6 @@ async function streamAnswer({
   question: string;
   tripProjectId?: string;
   imageDataUrl: string | null;
-  selectedModel: NonNullable<Awaited<ReturnType<typeof selectActiveAiGatewayModel>>>;
   command: Extract<Awaited<ReturnType<typeof acquireAiAskCommand>>, { kind: "admitted" }>;
   correlationId: string;
   telemetry: OperationalTelemetrySink;
@@ -167,28 +157,91 @@ async function streamAnswer({
 
     await sink.emit({ type: "preparing" });
 
+    let clarification: Awaited<ReturnType<typeof prepareOwnedPlanningClarification>>;
+    try {
+      clarification = await dependencies.prepareOwnedPlanningClarification(session.userId, saved.conversationId, question, saved.userMessage.id);
+    } catch {
+      clarification = { kind: "retry" };
+    }
+    if (clarification.kind === "question") {
+      const finalization = await finalizeAiAskCommand(command.commandId, async (transaction, fencedCommand) => {
+        const [assistantMessage] = await transaction.insert(messages).values({ conversationId: fencedCommand.conversationId, userId: fencedCommand.userId, role: "assistant", content: clarification.question }).returning({ id: messages.id });
+        await transaction.update(conversations).set({ updatedAt: new Date() }).where(eq(conversations.id, fencedCommand.conversationId));
+        await writeAiUsageEvent(transaction, { initiatedByUserId: fencedCommand.userId, executorSystem: "system-ai-orchestration", tripProjectId: fencedCommand.tripProjectId, conversationId: fencedCommand.conversationId, userMessageId: fencedCommand.userMessageId, assistantMessageId: assistantMessage.id, purpose: aiAskInitialAnswerPurpose, provider: "local", model: "planning-context", promptVersion: "planning-clarification-v1", status: "success", latencyMs: 0 });
+        return { assistantMessageId: assistantMessage.id, result: { type: "done" as const, conversationId: fencedCommand.conversationId, userMessage: saved!.userMessage, assistantMessage: { id: assistantMessage.id, content: clarification.question } } };
+      }, { suppressFollowUps: true, revokeContextExtraction: true });
+      const retained = await readAiAskCommandTerminalResult(command.commandId) as StreamEvent;
+      await sink.emit(retained);
+      emitAiAskTelemetry(telemetry, correlationId, command.commandId, retained.type === "done" ? "success" : "failure", 0, undefined, "ai_ask.clarification");
+      return;
+    }
+    if (clarification.kind === "retry") {
+      const result: StreamEvent = { type: "error", conversationId: saved.conversationId, userMessage: saved.userMessage, errorMessage: "Mình chưa thể ghi nhận thông tin chuyến đi. Vui lòng thử lại." };
+      await writeAiUsageEvent(db, { initiatedByUserId: session.userId, executorSystem: "system-ai-orchestration", tripProjectId: tripProjectId ?? null, conversationId: saved.conversationId, userMessageId: saved.userMessage.id, purpose: aiAskInitialAnswerPurpose, provider: "local", model: "planning-context", promptVersion: "planning-clarification-v1", status: "failure", latencyMs: 0, errorCode: "planning_clarification_retry" });
+      const retained = await terminalizeAiAskCommand(command.commandId, "failed", result) as StreamEvent;
+      await sink.emit(retained);
+      emitAiAskTelemetry(telemetry, correlationId, command.commandId, "failure", 0, undefined, "ai_ask.clarification");
+      return;
+    }
+    const planningMode = await resolveOwnedPlanningMode({ userId: session.userId, conversationId: saved.conversationId, tripProjectId, question, sessionRevision: clarification.kind === "ready" ? clarification.session.revision : null });
+    if (planningMode.kind === "clarification") {
+      const finalization = await finalizeAiAskCommand(command.commandId, async (transaction, fencedCommand) => {
+        const [assistantMessage] = await transaction.insert(messages).values({ conversationId: fencedCommand.conversationId, userId: fencedCommand.userId, role: "assistant", content: planningMode.question }).returning({ id: messages.id });
+        await transaction.update(conversations).set({ updatedAt: new Date() }).where(eq(conversations.id, fencedCommand.conversationId));
+        await writeAiUsageEvent(transaction, { initiatedByUserId: fencedCommand.userId, executorSystem: "system-ai-orchestration", tripProjectId: fencedCommand.tripProjectId, conversationId: fencedCommand.conversationId, userMessageId: fencedCommand.userMessageId, assistantMessageId: assistantMessage.id, purpose: aiAskInitialAnswerPurpose, provider: "local", model: "planning-mode", promptVersion: "planning-mode-v1", status: "success", latencyMs: 0 });
+        return { assistantMessageId: assistantMessage.id, result: { type: "done" as const, conversationId: fencedCommand.conversationId, userMessage: saved!.userMessage, assistantMessage: { id: assistantMessage.id, content: planningMode.question } } };
+      }, { suppressFollowUps: true, revokeContextExtraction: true, planningExecutionRef: planningMode.executionRef });
+      await sink.emit(("discarded" in finalization ? finalization.result : await readAiAskCommandTerminalResult(command.commandId)) as StreamEvent);
+      return;
+    }
+
+    let selectedModel: NonNullable<Awaited<ReturnType<typeof selectActiveAiGatewayModel>>> | null;
+    try {
+      selectedModel = await selectActiveAiGatewayModel({ purpose: aiAskInitialAnswerPurpose, requiredCapabilities: { textInput: true, streaming: true, imageInput: Boolean(imageDataUrl) } });
+    } catch {
+      const result: StreamEvent = { type: "error", conversationId: saved.conversationId, userMessage: saved.userMessage, errorMessage: "Không thể chuẩn bị luồng trả lời lúc này. Hãy thử lại sau." };
+      await sink.emit(await terminalizeAiAskCommand(command.commandId, "failed", result) as StreamEvent);
+      return;
+    }
+    if (!selectedModel) {
+      const result: StreamEvent = {
+        type: "error",
+        conversationId: saved.conversationId,
+        userMessage: saved.userMessage,
+        errorMessage: imageDataUrl ? "Selected AI model does not support streaming image input." : "No active streaming AI Ask model is configured.",
+      };
+      await sink.emit(await terminalizeAiAskCommand(command.commandId, "failed", result) as StreamEvent);
+      return;
+    }
+
     const pricingSnapshot = getAiGatewayPricingSnapshot(selectedModel);
     const sourceBundle = await dependencies.assembleContextPrioritySourceBundle({
       userId: session.userId,
       conversationId: saved.conversationId,
-      tripProjectId,
+      tripProjectId: planningMode.executionRef.tripProjectId ?? undefined,
       question,
       userMessageId: saved.userMessage.id,
-      webSearchUsageContext: { userId: session.userId, conversationId: saved.conversationId, userMessageId: saved.userMessage.id, tripProjectId: tripProjectId ?? null },
+      webSearchUsageContext: { userId: session.userId, conversationId: saved.conversationId, userMessageId: saved.userMessage.id, tripProjectId: planningMode.executionRef.tripProjectId },
       abortSignal,
+      planningExecutionRef: planningMode.executionRef,
+      pendingProposal: planningMode.proposal,
     });
     const renderedSourceBundle = dependencies.buildSourceBundlePromptSection
-      ? { section: dependencies.buildSourceBundlePromptSection(sourceBundle), tripContext: { version: 1 as const, aggregateVersion: null, included: [], excluded: [], conflicts: [], serialization: "{}", promptDigest: "0".repeat(64) }, promptUsage: { tripProjectFactIndexes: [], chatFactIndexes: [], knowledgeCardIds: [], webRanks: [], generalReasoningUsed: false, sourceHandles: [] } }
+      ? { section: dependencies.buildSourceBundlePromptSection(sourceBundle), tripContext: { version: 1 as const, aggregateVersion: null, included: [], excluded: [], conflicts: [], serialization: "{}", promptDigest: "0".repeat(64) }, promptUsage: { tripProjectFactIndexes: [], chatFactIndexes: [], knowledgeCardIds: [], webRanks: [], generalReasoningUsed: false, sourceHandles: [] }, retrievalDecision: sourceBundle.retrievalDecision }
       : dependencies.renderSourceBundlePromptSection(sourceBundle);
+    const finalizedSourceBundle = { ...sourceBundle, retrievalDecision: renderedSourceBundle.retrievalDecision };
     const contextSection = renderedSourceBundle.section;
     const gatewayMessages = buildAiAskMessages({ question, history: saved.history, contextSection });
     const finalGatewayMessages = imageDataUrl ? attachImageToFinalUserMessage(gatewayMessages, imageDataUrl) : gatewayMessages;
+    const bufferedDeltas: string[] = [];
+    const protectDeltas = planningMode.executionRef.mode !== "unscoped_answer";
     const gatewayResult = await streamInitialAiAskAnswer({
       model: selectedModel.gatewayModelName,
       messages: finalGatewayMessages,
       abortSignal,
       onDelta: async (content) => {
-        await sink.emit({ type: "delta", content });
+        if (protectDeltas) bufferedDeltas.push(content);
+        else await sink.emit({ type: "delta", content });
       },
     });
 
@@ -264,9 +317,10 @@ async function streamAnswer({
     }
 
     const savedTurn = saved;
-    const assistantContent = ensureAiAskFreshnessWarning(gatewayResult.content, sourceBundle);
+    const assistantContent = ensureAiAskFreshnessWarning(gatewayResult.content, finalizedSourceBundle);
     if (assistantContent.appendedWarning && !assistantContent.replacedUnsafeContent) {
-      await sink.emit({ type: "delta", content: assistantContent.appendedWarning });
+      if (protectDeltas) bufferedDeltas.push(assistantContent.appendedWarning);
+      else await sink.emit({ type: "delta", content: assistantContent.appendedWarning });
     }
     const finalization = await finalizeAiAskCommand(command.commandId, async (transaction, fencedCommand) => {
         const [assistantMessage] = await transaction
@@ -296,7 +350,7 @@ async function streamAnswer({
           userMessageId: fencedCommand.userMessageId,
           assistantMessageId: assistantMessage.id,
           tripAnswerContextSnapshotId: snapshot.id,
-          sourceBundle,
+          sourceBundle: finalizedSourceBundle,
           promptUsage: renderedSourceBundle.promptUsage,
           reportedSourceHandles: gatewayResult.reportedSourceHandles,
         });
@@ -326,14 +380,15 @@ async function streamAnswer({
         });
         const completed = { id: assistantMessage.id, content: assistantContent.content, provenance };
         return { assistantMessageId: assistantMessage.id, tripAnswerContextSnapshotId: snapshot.id, result: { type: "done" as const, conversationId: fencedCommand.conversationId, userMessage: savedTurn.userMessage, assistantMessage: completed }, completed };
-      });
+      }, { planningExecutionRef: planningMode.executionRef });
 
     if (!("discarded" in finalization)) {
+          for (const content of bufferedDeltas) await sink.emit({ type: "delta", content });
           await sink.emit(await readAiAskCommandTerminalResult(command.commandId) as StreamEvent);
     } else {
        await sink.emit(finalization.result as StreamEvent);
     }
-    emitAiAskTelemetry(telemetry, correlationId, command.commandId, "success", gatewayResult.latencyMs, gatewayResult.requestMetadata.providerRequestId ?? undefined);
+    emitAiAskTelemetry(telemetry, correlationId, command.commandId, "discarded" in finalization ? "failure" : "success", gatewayResult.latencyMs, gatewayResult.requestMetadata.providerRequestId ?? undefined);
   } catch {
     emitAiAskTelemetry(telemetry, correlationId, command.commandId, "failure", 0);
     console.error("AI Ask stream answer failed", {

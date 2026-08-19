@@ -44,10 +44,10 @@ describe.sequential("YouTube Discovery recommendation persistence", () => {
     await expect(testDb.delete(youtubeDiscoveryRecommendations)).rejects.toThrow();
     await testDb.insert(youtubeDiscoveryKnowledgeHandoffs).values({ candidateId: candidate.id, recommendationId: initialReviewState!.recommendationId, reference: "retention-handoff", reconciling: true });
     await testDb.update(youtubeDiscoveryCandidates).set({ updatedAt: new Date(0) }).where(eq(youtubeDiscoveryCandidates.id, candidate.id));
-    expect(await retainYoutubeDiscoveryRecords(testDb)).toBe(1);
-    await expect(testDb.select().from(youtubeDiscoveryRecommendations)).resolves.toEqual([]);
-    await expect(testDb.select().from(youtubeDiscoveryCandidateReviewStates)).resolves.toEqual([]);
-    await expect(testDb.select().from(youtubeDiscoveryKnowledgeHandoffs)).resolves.toEqual([]);
+    expect(await retainYoutubeDiscoveryRecords(testDb)).toBe(0);
+    await expect(testDb.select().from(youtubeDiscoveryRecommendations)).resolves.toHaveLength(2);
+    await expect(testDb.select().from(youtubeDiscoveryCandidateReviewStates)).resolves.toEqual([{ ...initialReviewState!, state: "deferred" }]);
+    await expect(testDb.select().from(youtubeDiscoveryKnowledgeHandoffs)).resolves.toHaveLength(1);
   });
 
   test("retains recommended history and excludes expired derived signals", async () => {

@@ -13,7 +13,7 @@ user data. Do not reset it; stop for an expand-migrate-contract design.
 ### Acceptance Criteria
 
 **Given** an explicitly disposable target
-**When** migration `0073_clean_break_trip_aware_planning.sql` runs
+**When** migration `0077_clean_break_trip_aware_planning.sql` runs
 **Then** Epic 21 adds only `planning_context_sessions`
 **And** existing conversation, message, retrieval-decision, Trip, Usage, provenance, feedback, and audit tables are reused without forcing unrelated schema cleanup.
 
@@ -25,7 +25,7 @@ user data. Do not reset it; stop for an expand-migrate-contract design.
 ### Tasks
 
 - [ ] NEW `packages/contracts/src/planning-context.ts` and UPDATE `packages/contracts/src/index.ts`: define the bounded flat session payload and validation limits only.
-- [ ] UPDATE `packages/database/src/schema.ts`; NEW `drizzle/migrations/0073_clean_break_trip_aware_planning.sql`: add only the owner-linked session table and establish the final Epic 21 schema. This migration is final after Story 21.1.
+- [ ] UPDATE `packages/database/src/schema.ts`; NEW `drizzle/migrations/0077_clean_break_trip_aware_planning.sql`: add only the owner-linked session table and establish the final Epic 21 schema. This migration is final after Story 21.1.
 - [ ] NEW `packages/database/src/planning-context.ts` and UPDATE `packages/database/src/index.ts`: implement owner-scoped load and compare-and-set save using the existing database transaction pattern.
 - [ ] INSPECT `scripts/db-reset.ts` and `scripts/db-seed.ts`; change them only if an existing disposable-target guard or seed path fails the tests.
 - [ ] NEW `tests/planning-context.test.ts` and `tests/planning-context.integration.test.ts`; UPDATE `tests/drizzle-migration-plan.test.ts`: cover bounds, CAS, owner isolation, cascade, migration `0073`, and the one-table limit.
@@ -56,7 +56,7 @@ pnpm typecheck
 
 ### Tasks
 
-- [ ] UPDATE `packages/database/src/planning-context.ts`: add a small deterministic reducer for explicit slot values, missing slots, completion, supersession, and revision fencing; do not add graph, claim, or attempt tables.
+- [ ] UPDATE `packages/database/src/planning-context.ts`: add a small deterministic reducer for explicit slot values, missing slots, completion, supersession, revision fencing, and a flat per-supported-slot source-message-ID map. Persist only the user message ID that supplied each explicit slot; retain `sourceMessageIds` only as its bounded aggregate list, and do not add graph, claim, or attempt tables.
 - [ ] UPDATE `packages/database/src/ai-ask-commands.ts`: suppress the existing background context-extraction effect for a blocked profiled turn and reuse the current terminal command fence.
 - [ ] UPDATE `packages/database/src/ai-ask-stream-execution.ts`: run clarification before source assembly and return the clarification result without entering retrieval/provider/follow-up branches.
 - [ ] UPDATE `apps/web/src/features/ai/ai-ask-composer.tsx`: show concise Vietnamese clarification, retry, pending, focus, keyboard, touch, and mobile behavior using existing UI state.
@@ -117,10 +117,16 @@ pnpm typecheck
 **Then** canonical references change atomically
 **And** no background publisher, registry table, Worker operation, or runtime activation state is introduced.
 
+**Given** Story 21.4 persists an owner-confirmed canonical route path
+**When** its schema change runs after final Story 21.1 migration `0073`
+**Then** exactly `drizzle/migrations/0078_add_trip_plan_item_canonical_route_path_id.sql` adds nullable `canonical_route_path_id` to existing `trip_plan_items`
+**And** it adds no other column, table, backfill, or persisted manifest state.
+
 ### Tasks
 
 - [ ] NEW `packages/database/src/route-coverage.ts`: define and startup-validate one small typed code-owned route/coverage manifest plus its pure resolver.
 - [ ] UPDATE `packages/contracts/src/planning-context.ts`: add canonical path references and resolver result types only.
+- [ ] NEW `drizzle/migrations/0078_add_trip_plan_item_canonical_route_path_id.sql`; UPDATE `packages/database/src/schema.ts`: add only nullable `canonical_route_path_id` to existing `trip_plan_items`. Do not amend `0077` or add another migration.
 - [ ] UPDATE `packages/database/src/trip-plan-commands.ts` and `packages/database/src/traveler-proposal-commands.ts`: support owner-authorized, version-fenced set/clear operations using existing Trip storage.
 - [ ] UPDATE `packages/database/src/source-bundle.ts`: consume the pure resolver and surface bounded route limitations without live-navigation claims.
 - [ ] NEW `tests/route-authority.test.ts` and `tests/route-authority.integration.test.ts`: cover `RP-01` through `RP-08`, owner isolation, reopen persistence, and stale references.
@@ -207,7 +213,7 @@ pnpm build
 **Given** a completed unscoped answer contains at least one supported explicit planning value
 **When** existing recommendation state is projected
 **Then** it is simply `eligible`, `accepted`, `dismissed`, or `invalidated`
-**And** ambiguous, stale, unresolved, or assumption-only values are never eligible.
+**And** each eligible value is authorized by the bounded planning session's flat per-slot source-message-ID map as originating from the current completed unscoped terminal turn; ambiguous, stale, unresolved, or assumption-only values are never eligible.
 
 **Given** the traveler accepts an eligible recommendation
 **When** the existing idempotent command runs
@@ -217,7 +223,7 @@ pnpm build
 ### Tasks
 
 - [ ] UPDATE `packages/database/src/traveler-proposal-commands.ts`: expose the existing database-owned operation validation needed to create a pending proposal; do not move or redesign the Worker proposal module.
-- [ ] UPDATE `packages/database/src/trip-recommendations.ts`: reuse the current aggregate and idempotency behavior for the four states, map only supported explicit values into existing proposal operations, validate them through `traveler-proposal-commands.ts`, and insert the pending proposal in the accept transaction.
+- [ ] UPDATE `packages/database/src/trip-recommendations.ts`: reuse the current aggregate and idempotency behavior for the four states, authorize only supported explicit values whose flat planning-session slot source-message ID equals the current completed unscoped terminal user message ID, map them into existing proposal operations, validate them through `traveler-proposal-commands.ts`, and insert the pending proposal in the accept transaction. Do not read transcript, assistant prose, prompt, assumptions, or provider payload for conversion provenance.
 - [ ] UPDATE `packages/database/src/ai-ask-commands.ts` and `packages/database/src/ai-ask-stream-execution.ts`: refresh recommendation eligibility only after successful answer terminalization.
 - [ ] UPDATE `packages/contracts/src/index.ts`, `apps/api/src/conversations/traveler-commands.controller.ts`, `apps/api/src/openapi.controller.ts`, `apps/web/src/features/ai/direct-api-client.ts`, and `apps/web/src/features/ai/ai-ask-composer.tsx`: evolve existing endpoints/UI without adding a parallel endpoint.
 - [ ] UPDATE `tests/trip-recommendations.test.ts`, `tests/trip-recommendations.integration.test.ts`, `tests/trip-recommendations-api.integration.test.ts`, and `tests/traveler-ui-foundation.test.ts`: cover eligibility, dismissal, stale context, idempotent accept, pending proposal, deletion race, and no transcript copy.

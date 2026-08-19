@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { createAiAskStreamExecutionPort, setAiAskStreamTestDependencies } from "../packages/database/src/ai-ask-stream-execution";
 import { assembleContextPrioritySourceBundle } from "../packages/database/src/source-bundle";
 import { choosePrivateTripRecommendation, createPostgresTripRecommendationReadRepository } from "../packages/database/src/trip-recommendations";
-import { aiAskCommands, aiGatewayModels, assistantResponseProvenance, chatContext, conversations, domainOutbox, messages, tripAnswerContextSnapshots, tripProjects, users } from "../packages/database/src/schema";
+import { aiAskCommands, aiGatewayModels, assistantResponseProvenance, chatContext, conversations, domainOutbox, messages, planningContextSessions, tripAnswerContextSnapshots, tripProjects, users } from "../packages/database/src/schema";
 import { resetTestDatabase, testDb } from "./helpers/db";
 
 describe("private recommendation next-turn answer context", () => {
@@ -15,9 +15,11 @@ describe("private recommendation next-turn answer context", () => {
     await testDb.insert(users).values({ id: "owner", email: "owner@example.com" });
     await testDb.insert(conversations).values({ id: "ordinary-conversation", userId: "owner" });
     await testDb.insert(messages).values({ id: "recommendation-message", conversationId: "ordinary-conversation", userId: "owner", role: "user", content: "Tôi muốn đi Đà Lạt" });
-    const [historicalCommand] = await testDb.insert(aiAskCommands).values({ userId: "owner", scopeKind: "conversation", scopeId: "ordinary-conversation", idempotencyKey: "recommendation-source-key", requestDigest: "a".repeat(64), normalizedQuestion: "Tôi muốn đi Đà Lạt", selectedScopeDigest: "b".repeat(64), status: "completed", conversationId: "ordinary-conversation", terminalAt: new Date(), terminalResult: { type: "done" }, expiresAt: new Date(Date.now() + 60_000) }).returning({ id: aiAskCommands.id });
+    await testDb.insert(messages).values({ id: "recommendation-answer", conversationId: "ordinary-conversation", userId: "owner", role: "assistant", content: "Đà Lạt phù hợp." });
+    const [historicalCommand] = await testDb.insert(aiAskCommands).values({ userId: "owner", scopeKind: "conversation", scopeId: "ordinary-conversation", idempotencyKey: "recommendation-source-key", requestDigest: "a".repeat(64), normalizedQuestion: "Tôi muốn đi Đà Lạt", selectedScopeDigest: "b".repeat(64), status: "completed", conversationId: "ordinary-conversation", userMessageId: "recommendation-message", assistantMessageId: "recommendation-answer", terminalAt: new Date(), terminalResult: { type: "done" }, expiresAt: new Date(Date.now() + 60_000) }).returning({ id: aiAskCommands.id });
     await testDb.insert(domainOutbox).values({ originatingCommandId: historicalCommand!.id, eventType: "ai_ask.context_extraction.v1", eventVersion: 1, aggregateType: "ai_ask_command", aggregateId: historicalCommand!.id, userId: "owner", conversationId: "ordinary-conversation", userMessageId: "recommendation-message", conversationLifecycleVersion: 1, dedupeKey: "private-recommendation-extraction", payload: {}, status: "completed", completedAt: new Date() });
     await testDb.insert(chatContext).values({ userId: "owner", conversationId: "ordinary-conversation", sourceMessageId: "recommendation-message", field: "destination", scope: "conversation", value: "Đà Lạt" });
+    await testDb.insert(planningContextSessions).values({ userId: "owner", conversationId: "ordinary-conversation", revision: 1, payload: { intent: "trip_planning", slots: { origin: "Hồ Chí Minh", destination: "Đà Lạt", start_date: "2026-09-01", adults: "2" }, slotSourceMessageIds: { origin: "recommendation-message", destination: "recommendation-message", start_date: "recommendation-message", adults: "recommendation-message" }, missingSlots: [], status: "ready", sourceMessageIds: ["recommendation-message"], revision: 1 } });
     await testDb.insert(tripProjects).values({ id: "existing-project", userId: "owner", title: "Chuyến đi đã lưu" });
 
     const recommendation = await createPostgresTripRecommendationReadRepository().loadOwnedTripRecommendations("owner", "ordinary-conversation");

@@ -222,7 +222,7 @@ context.
 
 ## Clean-Break Boundary
 
-- Migration `0073_clean_break_trip_aware_planning.sql` is the only Epic 21 migration and is finalized in Story 21.1.
+- Migration `0077_clean_break_trip_aware_planning.sql` is the only Epic 21 migration and is finalized in Story 21.1.
 - The target must be explicitly disposable; otherwise implementation stops before destructive action.
 - Later stories do not amend `0073` and do not automatically reset a database.
 - There is no backfill, dual write, shadow mode, runtime read policy, gate profile, approval row, cutover record, cleanup report, or legacy rollback target.

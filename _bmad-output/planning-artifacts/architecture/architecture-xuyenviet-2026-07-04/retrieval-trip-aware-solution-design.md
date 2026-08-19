@@ -31,7 +31,7 @@ runtime registry, evaluation subsystem, or release database is permitted.
 
 ## Data Shape
 
-Migration `0073_clean_break_trip_aware_planning.sql` adds only
+Migration `0077_clean_break_trip_aware_planning.sql` adds only
 `planning_context_sessions`. The row belongs to one user/conversation and stores the
 bounded `PlanningContextSessionPayload` from `contracts.md`. Existing
 `assistant_retrieval_decisions.knowledgePolicySnapshot` stores the bounded required-need

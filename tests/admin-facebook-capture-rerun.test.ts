@@ -9,15 +9,19 @@ import { appendSourceCaptureVersion } from "@/features/knowledge/source-captures
 import { resetTestDatabase, seedTestOperator, testDb } from "./helpers/db";
 
 async function createFailedCapture() {
-  await testDb.insert(sources).values({ id: "source", kind: "facebook", label: "Facebook post", sourceType: "community", verificationStatus: "unverified", official: false, partner: false, eligibility: "eligible", submittedByUserId: "operator" });
-  const capture = await appendSourceCaptureVersion(testDb, { sourceId: "source", captureKind: "facebook", rawText: "Đèo Hải Vân có điểm dừng ngắm cảnh.", metadata: { kind: "submitted" } });
+  await testDb.insert(sources).values({ id: "source", kind: "facebook", url: "https://facebook.com/posts/source", canonicalUrl: "https://facebook.com/posts/source", label: "Facebook post", sourceType: "community", verificationStatus: "unverified", official: false, partner: false, eligibility: "eligible", submittedByUserId: "operator" });
+  const capture = await appendSourceCaptureVersion(testDb, { sourceId: "source", captureKind: "facebook", rawText: "Đèo Hải Vân có điểm dừng ngắm cảnh.", metadata: facebookCaptureMetadata() });
   const [job] = await testDb.select().from(knowledgeIngestionJobs).where(eq(knowledgeIngestionJobs.captureVersionId, capture.id));
   if (!job) throw new Error("expected ingestion job");
   await testDb.update(knowledgeIngestionJobs).set({ status: "failed", discoveryTerminal: true, attemptCount: 3, candidateCount: 1, completedCandidateCount: 1, needsOperatorCandidateCount: 1, lastErrorCode: "discovery_gateway_http_error" }).where(eq(knowledgeIngestionJobs.id, job.id));
   await testDb.insert(knowledgeIngestionCandidates).values({ ingestionJobId: job.id, sourceId: "source", captureVersionId: capture.id, fingerprint: "f".repeat(64), type: "place", title: "Điểm dừng", summary: "Có điểm dừng ngắm cảnh.", conditions: [], spanStart: 0, spanEnd: 1, extractionPromptVersion: "test", processingStatus: "completed", aiDisposition: "needs_operator", outcomeReasonCode: "verification_required" });
   await testDb.insert(rawSourceMaterial).values({ id: "raw", sourceId: "source" });
-  await testDb.insert(facebookCaptureReviews).values({ id: "review", sourceId: "source", rawSourceMaterialId: "raw", captureVersionId: capture.id, status: "extraction_failed" });
+  await testDb.insert(facebookCaptureReviews).values({ id: "review", sourceId: "source", rawSourceMaterialId: "raw", captureVersionId: capture.id, status: "extraction_failed", reviewerUserId: "operator", reviewedAt: new Date(), extractionError: "Extraction failed" });
   return { capture, job };
+}
+
+function facebookCaptureMetadata() {
+  return { kind: "facebook_operator" as const, captureMethod: "playwright_operator_browser" as const, capturedAt: "2026-01-01T00:00:00.000Z", sourceUrl: "https://facebook.com/posts/source", finalUrl: "https://facebook.com/posts/source" };
 }
 
 describe("Facebook capture ingestion rerun", () => {
@@ -49,7 +53,7 @@ describe("Facebook capture ingestion rerun", () => {
 
   test("refuses to rerun a capture that is no longer current", async () => {
     const { capture } = await createFailedCapture();
-    await appendSourceCaptureVersion(testDb, { sourceId: "source", captureKind: "facebook", rawText: "Capture mới.", metadata: { kind: "submitted" } });
+    await appendSourceCaptureVersion(testDb, { sourceId: "source", captureKind: "facebook", rawText: "Capture mới.", metadata: facebookCaptureMetadata() });
 
     await expect(createPostgresAdminFacebookCapturePort().rerunIngestion({ userId: "operator", email: "operator@example.com", sessionId: "session", roles: ["admin"], authorizationVersion: 1 }, "review")).resolves.toEqual({ status: "stale_review" });
     await expect(testDb.select({ status: knowledgeIngestionJobs.status }).from(knowledgeIngestionJobs).where(eq(knowledgeIngestionJobs.captureVersionId, capture.id))).resolves.toEqual([{ status: "failed" }]);
@@ -57,7 +61,7 @@ describe("Facebook capture ingestion rerun", () => {
 
   test("returns only the current capture and its candidates on the detail projection", async () => {
     await createFailedCapture();
-    const newerCapture = await appendSourceCaptureVersion(testDb, { sourceId: "source", captureKind: "facebook", rawText: "Nội dung Facebook mới.", metadata: { kind: "submitted" } });
+    const newerCapture = await appendSourceCaptureVersion(testDb, { sourceId: "source", captureKind: "facebook", rawText: "Nội dung Facebook mới.", metadata: facebookCaptureMetadata() });
     const port = createPostgresAdminFacebookCapturePort();
 
     const detail = await port.detail("review");

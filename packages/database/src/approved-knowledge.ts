@@ -1,6 +1,7 @@
 import { searchApprovedKnowledgeWithCandidateCount, type KnowledgeSearchEvidence, type KnowledgeSearchResult } from "./knowledge-search";
 
-const activeKnowledgeResultLimit = 3;
+// Retrieval capacity is bounded by the prompt renderer, not a card-count sufficiency target.
+const activeKnowledgeResultLimit = 30;
 const maxKnowledgeSectionLength = 2_400;
 const maxFieldLength = 280;
 const maxConditionLength = 160;
@@ -95,9 +96,13 @@ function renderStateAwareKnowledgePromptSection(items: StateAwareKnowledgeBundle
   ];
 
   const renderedItems: StateAwareKnowledgeBundleItem[] = [];
+  const omittedItems: StateAwareKnowledgeBundleItem[] = [];
   for (const [index, item] of eligibleItems.entries()) {
     const nextLines = formatKnowledgeItem(index + 1, item);
-    if ([...lines, ...nextLines, "END_ACTIVE_XUYENVIET_KNOWLEDGE_DATA"].join("\n").length > maxKnowledgeSectionLength) break;
+    if ([...lines, ...nextLines, "END_ACTIVE_XUYENVIET_KNOWLEDGE_DATA"].join("\n").length > maxKnowledgeSectionLength) {
+      omittedItems.push(item);
+      continue;
+    }
     lines.push(...nextLines);
     renderedItems.push(item);
   }
@@ -105,7 +110,7 @@ function renderStateAwareKnowledgePromptSection(items: StateAwareKnowledgeBundle
   return {
     section: lines.length > 3 ? [...lines, "END_ACTIVE_XUYENVIET_KNOWLEDGE_DATA"].join("\n") : "",
     renderedItems,
-    omittedItems: eligibleItems.slice(renderedItems.length),
+    omittedItems,
   };
 }
 

@@ -1067,7 +1067,7 @@ export const tripProjectConstraints = pgTable("trip_project_constraints", {
 // The self-reference constraints below are made DEFERRABLE INITIALLY DEFERRED by
 // the baseline migration; Drizzle's PostgreSQL foreign-key API does not expose deferrability.
 export const tripPlanItems = pgTable("trip_plan_items", {
-  id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()), tripProjectId: text("trip_project_id").notNull(), userId: text("user_id").notNull(), kind: text("kind").$type<TripPlanItemKind>().notNull(), anchorRole: text("anchor_role").$type<TripPlanAnchorRole>(), type: text("type").$type<TripPlanItemType>(), state: text("state").$type<TripPlanItemState>().notNull(), label: text("label").notNull(), notes: text("notes"), plannedAt: timestamp("planned_at", { mode: "date" }), ordinal: integer("ordinal").notNull(), version: integer("version").default(1).notNull(), parentItemId: text("parent_item_id").references((): AnyPgColumn => tripPlanItems.id, { onDelete: "restrict" }), backupTargetItemId: text("backup_target_item_id").references((): AnyPgColumn => tripPlanItems.id, { onDelete: "restrict" }), transportOriginLabel: text("transport_origin_label"), transportDestinationLabel: text("transport_destination_label"), accommodationPlaceAreaLabel: text("accommodation_place_area_label"), createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(), updatedAt: timestamp("updated_at", { mode: "date" }).defaultNow().notNull(),
+  id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()), tripProjectId: text("trip_project_id").notNull(), userId: text("user_id").notNull(), kind: text("kind").$type<TripPlanItemKind>().notNull(), anchorRole: text("anchor_role").$type<TripPlanAnchorRole>(), type: text("type").$type<TripPlanItemType>(), state: text("state").$type<TripPlanItemState>().notNull(), label: text("label").notNull(), notes: text("notes"), plannedAt: timestamp("planned_at", { mode: "date" }), ordinal: integer("ordinal").notNull(), version: integer("version").default(1).notNull(), parentItemId: text("parent_item_id").references((): AnyPgColumn => tripPlanItems.id, { onDelete: "restrict" }), backupTargetItemId: text("backup_target_item_id").references((): AnyPgColumn => tripPlanItems.id, { onDelete: "restrict" }), transportOriginLabel: text("transport_origin_label"), transportDestinationLabel: text("transport_destination_label"), canonicalRoutePathId: text("canonical_route_path_id"), accommodationPlaceAreaLabel: text("accommodation_place_area_label"), createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(), updatedAt: timestamp("updated_at", { mode: "date" }).defaultNow().notNull(),
 }, (row) => [foreignKey({ columns: [row.tripProjectId, row.userId], foreignColumns: [tripProjects.id, tripProjects.userId], name: "trip_plan_items_owner_fk" }).onDelete("cascade"), index("trip_plan_items_owner_project_order_idx").on(row.userId, row.tripProjectId, row.parentItemId, row.ordinal), uniqueIndex("trip_plan_items_root_ordinal_idx").on(row.tripProjectId, row.ordinal).where(sql`${row.parentItemId} is null`), uniqueIndex("trip_plan_items_child_ordinal_idx").on(row.tripProjectId, row.parentItemId, row.ordinal).where(sql`${row.parentItemId} is not null`), check("trip_plan_items_shape_check", sql`(${row.kind} = 'anchor' and ${row.anchorRole} in ('origin','destination','region','required_stop','accommodation') and ${row.type} is null) or (${row.kind} in ('leg','activity') and ${row.anchorRole} is null and ${row.type} in ('transport','visit','food','rest','accommodation'))`), check("trip_plan_items_state_check", sql`${row.state} in ('idea','planned','confirmed','backup')`), check("trip_plan_items_version_check", sql`${row.version} >= 1`), check("trip_plan_items_ordinal_check", sql`${row.ordinal} >= 0`), check("trip_plan_items_backup_check", sql`(${row.state} = 'backup' and ${row.backupTargetItemId} is not null) or (${row.state} <> 'backup' and ${row.backupTargetItemId} is null)`), check("trip_plan_items_label_check", sql`length(btrim(${row.label})) between 1 and 160 and position(chr(10) in ${row.label}) = 0 and position(chr(13) in ${row.label}) = 0`), check("trip_plan_items_notes_check", sql`${row.notes} is null or (length(btrim(${row.notes})) between 1 and 1000 and position(chr(10) in ${row.notes}) = 0 and position(chr(13) in ${row.notes}) = 0)`), check("trip_plan_items_location_check", sql`(${row.type} = 'transport' or (${row.transportOriginLabel} is null and ${row.transportDestinationLabel} is null)) and (${row.type} = 'accommodation' or ${row.accommodationPlaceAreaLabel} is null) and (${row.transportOriginLabel} is null or (length(btrim(${row.transportOriginLabel})) between 1 and 160 and position(chr(10) in ${row.transportOriginLabel}) = 0 and position(chr(13) in ${row.transportOriginLabel}) = 0)) and (${row.transportDestinationLabel} is null or (length(btrim(${row.transportDestinationLabel})) between 1 and 160 and position(chr(10) in ${row.transportDestinationLabel}) = 0 and position(chr(13) in ${row.transportDestinationLabel}) = 0)) and (${row.accommodationPlaceAreaLabel} is null or (length(btrim(${row.accommodationPlaceAreaLabel})) between 1 and 160 and position(chr(10) in ${row.accommodationPlaceAreaLabel}) = 0 and position(chr(13) in ${row.accommodationPlaceAreaLabel}) = 0))`)]);
 
 // Story 7.4: Chat/Trips-owned Trip Change Proposals. Persisted AI-drafted plan
@@ -1216,6 +1216,28 @@ export const messages = pgTable(
     check("messages_content_not_empty_check", sql`length(btrim(${message.content})) > 0`),
     check("messages_user_content_length_check", sql`${message.role} <> 'user' or char_length(${message.content}) <= 2000`),
     check("messages_answer_annotations_array_check", sql`jsonb_typeof(${message.answerAnnotations}) = 'array'`),
+  ],
+);
+
+export const planningContextSessions = pgTable(
+  "planning_context_sessions",
+  {
+    userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    conversationId: text("conversation_id").notNull(),
+    payload: jsonb("payload").$type<unknown>().notNull(),
+    revision: integer("revision").notNull(),
+    updatedAt: timestamp("updated_at", { mode: "date" }).defaultNow().notNull(),
+  },
+  (session) => [
+    primaryKey({ columns: [session.userId, session.conversationId] }),
+    foreignKey({
+      columns: [session.conversationId, session.userId],
+      foreignColumns: [conversations.id, conversations.userId],
+      name: "planning_context_sessions_conversation_owner_fk",
+    }).onDelete("cascade"),
+    index("planning_context_sessions_conversation_idx").on(session.conversationId),
+    check("planning_context_sessions_revision_check", sql`${session.revision} >= 1 and (${session.payload} ->> 'revision')::integer = ${session.revision}`),
+    check("planning_context_sessions_payload_check", sql`jsonb_typeof(${session.payload}) = 'object' and octet_length(${session.payload}::text) <= 8192`),
   ],
 );
 

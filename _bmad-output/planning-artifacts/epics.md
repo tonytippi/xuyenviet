@@ -3770,7 +3770,7 @@ shadow comparison, read-policy cutover, or compatibility cleanup.
 data or a non-disposable environment is discovered, stop and produce an
 expand-migrate-contract change. Epic 21 may add at most one table,
 `planning_context_sessions`, and one migration,
-`0073_clean_break_trip_aware_planning.sql`.
+`0077_clean_break_trip_aware_planning.sql`.
 
 **Authoritative sequence:** `21.1 -> 21.2 -> 21.3 -> 21.4 -> 21.5 -> 21.6 -> 21.7`.
 
@@ -3784,7 +3784,7 @@ So that later stories build on a single authority instead of compatibility machi
 
 **Given** the configured target is explicitly disposable
 **When** the guarded reset, migration, and seed flow runs
-**Then** migration `0073_clean_break_trip_aware_planning.sql` creates at most the one new `planning_context_sessions` table and reuses existing conversation, message, Trip, recommendation, retrieval-decision, Usage, provenance, feedback, and audit storage
+**Then** migration `0077_clean_break_trip_aware_planning.sql` creates at most the one new `planning_context_sessions` table and reuses existing conversation, message, Trip, recommendation, retrieval-decision, Usage, provenance, feedback, and audit storage
 **And** no backfill, dual-write, shadow, read-policy, gate-profile, cutover, or rollback-control table is created.
 
 **Given** the target is not explicitly disposable or contains durable user data
@@ -3937,7 +3937,7 @@ chat context into a reviewable Trip. Implementation uses one disposable-data mig
 one planning-session table, existing owners, and no rollout control plane.
 
 **Boundary:** Stop if the target is not explicitly disposable or durable user data is
-found. Migration `0073_clean_break_trip_aware_planning.sql` is finalized in Story 21.1;
+found. Migration `0077_clean_break_trip_aware_planning.sql` is finalized in Story 21.1;
 later stories may not amend it or add another Epic 21 migration.
 
 **Sequence:** `21.1 -> 21.2 -> 21.3 -> 21.4 -> 21.5 -> 21.6 -> 21.7 -> 21.8`.

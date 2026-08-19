@@ -62,6 +62,8 @@ export * from "./admin-knowledge-review";
 export * from "./admin-knowledge-coverage";
 export * from "./trip-plan-commands";
 export * from "./plan-references";
+export * from "./planning-context";
+export * from "./route-coverage";
 export * from "./traveler-proposal-commands";
 export * from "./trip-recommendations";
 
