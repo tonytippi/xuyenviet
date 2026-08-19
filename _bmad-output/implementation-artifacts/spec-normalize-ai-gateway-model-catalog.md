@@ -60,6 +60,11 @@ context:
 - [x] `tests/` -- bổ sung/cập nhật regression cho migration/selector/mapping admin: một model dùng nhiều purpose, atomic remap, capability/inactive rejection, archive safety, historical model IDs/pricing snapshot; cập nhật fixture trực tiếp cũ.
 - [x] `_bmad-output/implementation-artifacts/spec-normalize-ai-gateway-model-catalog.md` và `sprint-status.yaml` -- ghi trạng thái thực thi, kết quả verification, review và thay đổi phạm vi nếu có.
 
+### Review Findings
+
+- [x] [Review][Patch] Catalog model can still be hard-deleted after unmapping [drizzle/migrations/0081_prevent_ai_gateway_model_deletion.sql:1]
+- [x] [Review][Patch] Required migration and administrative-remap regression coverage is absent [tests/ai-model-catalog-normalization.integration.test.ts:8]
+
 **Acceptance Criteria:**
 - Given các model-purpose record hiện có, when migration hoàn tất, then mọi purpose có một record `ai_purposes` trỏ tới model default trước đó, `ai_gateway_models` không còn routing fields, và mọi FK lịch sử vẫn trỏ đúng cùng catalog model ID.
 - Given một catalog model active đáp ứng capability, when admin map model đó cho nhiều purpose, then mỗi purpose chọn model này ở runtime mà metadata và giá chỉ được lưu/quản trị một lần.
