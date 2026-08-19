@@ -5,7 +5,7 @@ import { createRoot } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { parseAdminYoutubeDiscoveryMissionCoveragePage, type AdminKnowledgeProvinceCoverage } from "@xuyenviet/contracts";
-import { filterProvinceCoverage, ImmediateRuns, ProvinceCoverage, YoutubeDiscoveryMissionQuality, validateMissionQueryDraft } from "../apps/admin/app/knowledge/youtube-discovery/mission/mission";
+import { filterProvinceCoverage, immediateRunRecovery, ImmediateRuns, ProvinceCoverage, YoutubeDiscoveryMissionQuality, validateMissionQueryDraft } from "../apps/admin/app/knowledge/youtube-discovery/mission/mission";
 
 const roots: ReturnType<typeof createRoot>[] = [];
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -150,6 +150,7 @@ describe("Mission UI interaction boundary", () => {
       { state: "queued", nextRetryAt: null, safeErrorCode: null, label: "Đang chờ" },
       { state: "running", nextRetryAt: null, safeErrorCode: null, label: "Đang chạy" },
       { state: "queued", nextRetryAt: "2026-08-07T00:15:00.000Z", safeErrorCode: "search_timeout", label: "Đang thử lại" },
+      { state: "failed", nextRetryAt: null, safeErrorCode: "eligibility_unavailable", label: "Thất bại" },
       { state: "failed", nextRetryAt: null, safeErrorCode: "retry_exhausted", label: "Lượt chạy đã thất bại an toàn" },
       { state: "cancelled", nextRetryAt: null, safeErrorCode: "policy_revoked", label: "Đã hủy" },
       { state: "completed", nextRetryAt: null, safeErrorCode: null, label: "Hoàn tất" },
@@ -161,9 +162,24 @@ describe("Mission UI interaction boundary", () => {
       await act(async () => { root.render(createElement(ImmediateRuns, { queries: [query], setStatus: vi.fn() })); });
       await act(async () => { Array.from(container.querySelectorAll("button")).find((button) => button.textContent === "Làm mới tiến độ")!.click(); await Promise.resolve(); });
       expect(container.textContent).toContain(current.label);
+       if (current.nextRetryAt) expect(container.textContent).toContain("Hệ thống sẽ tự thử lại theo thời điểm đã hiển thị.");
+       if (current.safeErrorCode === "eligibility_unavailable") expect(container.textContent).toContain("Chưa thể xác nhận điều kiện của ứng viên.");
+       if (current.safeErrorCode === "retry_exhausted") expect(container.textContent).toContain("Đã hết số lần thử tự động.");
+      if (current.safeErrorCode === "policy_revoked") expect(container.textContent).toContain("Discovery đã bị dừng theo chính sách.");
+      expect(container.textContent).not.toContain(current.safeErrorCode ?? "__no_error_code__");
       expect(container.textContent).not.toContain("Xem video");
       root.unmount(); roots.pop();
     }
+  });
+
+  test("maps every safe error code to bounded Vietnamese recovery copy", () => {
+    const codes = ["stage_transient", "search_transient", "search_timeout", "enrichment_transient", "execution_timeout", "triage_transient", "triage_timeout", "eligibility_unavailable", "recommendation_transient", "persistence_contended", "retry_exhausted", "lease_retry_exhausted", "policy_revoked"] as const;
+    for (const code of codes) {
+      const recovery = immediateRunRecovery(code, null);
+      expect(recovery).toBeTruthy();
+      expect(recovery).not.toContain(code);
+    }
+    expect(immediateRunRecovery("retry_exhausted", "2026-08-07T00:15:00.000Z")).toContain("tự thử lại");
   });
 
   test("renders the bounded Vietnamese-first quality proof", () => {

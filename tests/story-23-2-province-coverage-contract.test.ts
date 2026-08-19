@@ -1,11 +1,11 @@
 import { describe, expect, test, vi } from "vitest";
 
-import { governedKnowledgeProvinceIds, parseAdminKnowledgeProvinceCoverageList, parseAdminKnowledgeProvinceSuggestion, parseAdminKnowledgeProvinceSuggestionCommand } from "@xuyenviet/contracts";
+import { governedKnowledgeProvinceIds, knowledgeProvinceCoverageNames, parseAdminKnowledgeProvinceCoverageList, parseAdminKnowledgeProvinceSuggestion, parseAdminKnowledgeProvinceSuggestionCommand } from "@xuyenviet/contracts";
 import { AdminAiModelCatalogPolicyError, updateAdminAiGatewayModel } from "@xuyenviet/domain";
 
 describe("Story 23.2 province coverage contracts", () => {
-  const coverage = { canonicalProvinceId: "vn-01-ha-noi", currentName: "Hà Nội", legacyNames: [], topics: [{ topic: "place", count: 2 }], freshnessSensitiveCount: 1, latestUpdatedAt: "2026-08-17T00:00:00.000Z" };
-  const completeCoverage = { items: governedKnowledgeProvinceIds.map((canonicalProvinceId) => ({ ...coverage, canonicalProvinceId })) };
+  const coverage = { topics: [{ topic: "place", count: 2 }], freshnessSensitiveCount: 1, latestUpdatedAt: "2026-08-17T00:00:00.000Z" };
+  const completeCoverage = { items: governedKnowledgeProvinceIds.map((canonicalProvinceId) => ({ ...coverage, canonicalProvinceId, ...knowledgeProvinceCoverageNames(canonicalProvinceId)! })) };
 
   test("accepts only metadata-only canonical province coverage", () => {
     expect(parseAdminKnowledgeProvinceCoverageList(completeCoverage)).toEqual(completeCoverage);
@@ -14,6 +14,11 @@ describe("Story 23.2 province coverage contracts", () => {
     expect(parseAdminKnowledgeProvinceCoverageList({ items: completeCoverage.items.map((item, index) => index === 0 ? { ...item, locationName: "unsafe" } : item) })).toBeNull();
     expect(parseAdminKnowledgeProvinceCoverageList({ items: completeCoverage.items.map((item, index) => index === 0 ? { ...item, topics: [{ topic: "place", count: -1 }] } : item) })).toBeNull();
     expect(parseAdminKnowledgeProvinceCoverageList({ items: completeCoverage.items.map((item, index) => index === 0 ? { ...item, currentName: null } : item) })).toBeNull();
+    expect(parseAdminKnowledgeProvinceCoverageList({ items: completeCoverage.items.map((item, index) => index === 0 ? { ...item, currentName: "Cao Bằng" } : item) })).toBeNull();
+    const lamDong = completeCoverage.items.find((item) => item.canonicalProvinceId === "vn-26-lam-dong")!;
+    expect(parseAdminKnowledgeProvinceCoverageList({ items: completeCoverage.items.map((item) => item.canonicalProvinceId === lamDong.canonicalProvinceId ? { ...item, legacyNames: [...item.legacyNames].reverse() } : item) })).toBeNull();
+    expect(parseAdminKnowledgeProvinceCoverageList({ items: completeCoverage.items.map((item) => item.canonicalProvinceId === lamDong.canonicalProvinceId ? { ...item, legacyNames: item.legacyNames.slice(1) } : item) })).toBeNull();
+    expect(parseAdminKnowledgeProvinceCoverageList({ items: completeCoverage.items.map((item) => item.canonicalProvinceId === lamDong.canonicalProvinceId ? { ...item, legacyNames: [...item.legacyNames, "Không chính thức"] } : item) })).toBeNull();
     expect(parseAdminKnowledgeProvinceCoverageList({ items: completeCoverage.items.map((item, index) => index === 0 ? { ...item, canonicalProvinceId: "vn-99-foreign" } : item) })).toBeNull();
   });
 
@@ -29,9 +34,9 @@ describe("Story 23.2 province coverage contracts", () => {
   });
 
   test("requires exact canonical suggestion input and output", () => {
-    expect(parseAdminKnowledgeProvinceSuggestionCommand({ canonicalProvinceId: coverage.canonicalProvinceId })).toEqual({ canonicalProvinceId: coverage.canonicalProvinceId });
-    expect(parseAdminKnowledgeProvinceSuggestionCommand({ canonicalProvinceId: coverage.canonicalProvinceId, demand: "unsafe" })).toBeNull();
-    const suggestion = { canonicalProvinceId: coverage.canonicalProvinceId, need: "Cần bổ sung thông tin đường đi", reason: "Chủ đề hiện có còn ít", queryText: "kinh nghiệm lái xe Hà Nội" };
+    expect(parseAdminKnowledgeProvinceSuggestionCommand({ canonicalProvinceId: "vn-01-ha-noi" })).toEqual({ canonicalProvinceId: "vn-01-ha-noi" });
+    expect(parseAdminKnowledgeProvinceSuggestionCommand({ canonicalProvinceId: "vn-01-ha-noi", demand: "unsafe" })).toBeNull();
+    const suggestion = { canonicalProvinceId: "vn-01-ha-noi", need: "Cần bổ sung thông tin đường đi", reason: "Chủ đề hiện có còn ít", queryText: "kinh nghiệm lái xe Hà Nội" };
     expect(parseAdminKnowledgeProvinceSuggestion(suggestion)).toEqual(suggestion);
     expect(parseAdminKnowledgeProvinceSuggestion({ ...suggestion, providerPayload: {} })).toBeNull();
     expect(parseAdminKnowledgeProvinceSuggestion({ ...suggestion, canonicalProvinceId: "vn-99-foreign" })).toBeNull();

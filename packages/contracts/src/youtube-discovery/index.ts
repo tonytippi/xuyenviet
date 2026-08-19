@@ -1,3 +1,5 @@
+import { governedKnowledgeProvinceIds, matchesKnowledgeProvinceCoverageNames } from "../knowledge-geography";
+
 export type YoutubeDiscoveryPolicyAuditSummary = Readonly<{
   version: number;
   queryBuilderVersion: number;
@@ -86,7 +88,6 @@ export function parseAdminYoutubeDiscoveryQueryList(value: unknown): AdminYoutub
 }
 
 export const adminYoutubeDiscoveryMissionPageSize = 20;
-export const governedKnowledgeProvinceIds = ["vn-01-ha-noi", "vn-02-cao-bang", "vn-03-lang-son", "vn-04-quang-ninh", "vn-05-bac-ninh", "vn-06-hung-yen", "vn-07-hai-phong", "vn-08-ninh-binh", "vn-09-phu-tho", "vn-10-thai-nguyen", "vn-11-tuyen-quang", "vn-12-lao-cai", "vn-13-lai-chau", "vn-14-dien-bien", "vn-15-son-la", "vn-16-thanh-hoa", "vn-17-nghe-an", "vn-18-ha-tinh", "vn-19-quang-tri", "vn-20-hue", "vn-21-da-nang", "vn-22-quang-ngai", "vn-23-gia-lai", "vn-24-dak-lak", "vn-25-khanh-hoa", "vn-26-lam-dong", "vn-27-ho-chi-minh", "vn-28-dong-nai", "vn-29-tay-ninh", "vn-30-can-tho", "vn-31-vinh-long", "vn-32-dong-thap", "vn-33-ca-mau", "vn-34-an-giang"] as const;
 export type AdminKnowledgeProvinceCoverage = Readonly<{ canonicalProvinceId: string; currentName: string; legacyNames: string[]; topics: Array<{ topic: string; count: number }>; freshnessSensitiveCount: number; latestUpdatedAt: string | null }>;
 export type AdminKnowledgeProvinceCoverageList = Readonly<{ items: AdminKnowledgeProvinceCoverage[] }>;
 export type AdminKnowledgeProvinceSuggestionCommand = Readonly<{ canonicalProvinceId: string }>;
@@ -97,7 +98,8 @@ export function parseAdminKnowledgeProvinceCoverageList(value: unknown): AdminKn
   const items = value.items;
   const ids = new Set<string>();
   for (const item of items) {
-    if (!record(item) || !exactKeys(item, ["canonicalProvinceId", "currentName", "legacyNames", "topics", "freshnessSensitiveCount", "latestUpdatedAt"]) || typeof item.canonicalProvinceId !== "string" || !governedKnowledgeProvinceIds.includes(item.canonicalProvinceId as typeof governedKnowledgeProvinceIds[number]) || !requiredText(item.currentName, 160) || !Array.isArray(item.legacyNames) || item.legacyNames.length > 29 || !item.legacyNames.every((name) => requiredText(name, 160)) || !Array.isArray(item.topics) || item.topics.length > 13 || !item.topics.every((topic) => record(topic) && exactKeys(topic, ["topic", "count"]) && requiredText(topic.topic, 80) && nonNegativeInteger(topic.count)) || !nonNegativeInteger(item.freshnessSensitiveCount) || item.latestUpdatedAt !== null && !isoTimestamp(item.latestUpdatedAt)) return null;
+    if (!record(item) || !exactKeys(item, ["canonicalProvinceId", "currentName", "legacyNames", "topics", "freshnessSensitiveCount", "latestUpdatedAt"]) || typeof item.canonicalProvinceId !== "string") return null;
+    if (!matchesKnowledgeProvinceCoverageNames(item.canonicalProvinceId, item.currentName, item.legacyNames) || !Array.isArray(item.topics) || item.topics.length > 13 || !item.topics.every((topic) => record(topic) && exactKeys(topic, ["topic", "count"]) && requiredText(topic.topic, 80) && nonNegativeInteger(topic.count)) || !nonNegativeInteger(item.freshnessSensitiveCount) || item.latestUpdatedAt !== null && !isoTimestamp(item.latestUpdatedAt)) return null;
     ids.add(item.canonicalProvinceId);
   }
   return ids.size === governedKnowledgeProvinceIds.length ? value as AdminKnowledgeProvinceCoverageList : null;

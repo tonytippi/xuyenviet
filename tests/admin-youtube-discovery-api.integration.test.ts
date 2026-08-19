@@ -4,7 +4,7 @@ import request from "supertest";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import { createPostgresApiIdentityRepository, type BrowserIdentityRepository } from "@xuyenviet/database";
-import { governedKnowledgeProvinceIds } from "@xuyenviet/contracts";
+import { governedKnowledgeProvinceIds, knowledgeProvinceCoverageNames } from "@xuyenviet/contracts";
 import { YoutubeDiscoveryMissionCursorValidationError, YoutubeDiscoveryReviewCursorValidationError, type AdminYoutubeDiscoveryPort } from "@xuyenviet/domain";
 import { createApiModule } from "../apps/api/src/app.module";
 import { csrfHash, csrfNonce } from "../apps/api/src/auth/browser-auth";
@@ -51,8 +51,8 @@ afterEach(async () => { await app.close(); await identities.close(); });
 
 describe("admin YouTube Discovery direct API", () => {
   test("admits exact protected province coverage and fails closed before unsafe port data reaches the Mission", async () => {
-    const coverage = { canonicalProvinceId: "vn-01-ha-noi", currentName: "Hà Nội", legacyNames: [], topics: [], freshnessSensitiveCount: 0, latestUpdatedAt: null };
-    const valid = { items: governedKnowledgeProvinceIds.map((canonicalProvinceId) => ({ ...coverage, canonicalProvinceId })) };
+    const coverage = { topics: [], freshnessSensitiveCount: 0, latestUpdatedAt: null };
+    const valid = { items: governedKnowledgeProvinceIds.map((canonicalProvinceId) => ({ ...coverage, canonicalProvinceId, ...knowledgeProvinceCoverageNames(canonicalProvinceId)! })) };
     await request(app.getHttpServer()).get("/v1/admin/knowledge/youtube-discovery/province-coverage").expect(401);
     const traveler = await browserSession("traveler", "traveler");
     await request(app.getHttpServer()).get("/v1/admin/knowledge/youtube-discovery/province-coverage").set({ Cookie: traveler.cookie }).expect(403);
@@ -66,6 +66,8 @@ describe("admin YouTube Discovery direct API", () => {
     port.listProvinceCoverage.mockResolvedValueOnce({ items: valid.items.slice(1) });
     await request(app.getHttpServer()).get("/v1/admin/knowledge/youtube-discovery/province-coverage").set({ Cookie: operator.cookie }).expect(503);
     port.listProvinceCoverage.mockResolvedValueOnce({ items: [...valid.items.slice(0, -1), valid.items[0]] });
+    await request(app.getHttpServer()).get("/v1/admin/knowledge/youtube-discovery/province-coverage").set({ Cookie: operator.cookie }).expect(503);
+    port.listProvinceCoverage.mockResolvedValueOnce({ items: valid.items.map((item, index) => index === 0 ? { ...item, currentName: "Cao Bằng" } : item) });
     await request(app.getHttpServer()).get("/v1/admin/knowledge/youtube-discovery/province-coverage").set({ Cookie: operator.cookie }).expect(503);
     port.listProvinceCoverage.mockRejectedValueOnce(new Error("unavailable"));
     await request(app.getHttpServer()).get("/v1/admin/knowledge/youtube-discovery/province-coverage").set({ Cookie: operator.cookie }).expect(503);
