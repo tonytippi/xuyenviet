@@ -4,6 +4,7 @@ import postgres from "postgres";
 import { describe, expect, test } from "vitest";
 
 import { getTestDatabaseUrl } from "./helpers/env-file";
+import { invalidateTestDatabaseTableCache, resetTestDatabase } from "./helpers/db";
 
 const testDatabaseUrl = getTestDatabaseUrl();
 
@@ -12,6 +13,7 @@ describe("Story 11.2 provenance cutover migration", () => {
     const sql = postgres(testDatabaseUrl, { max: 1 });
     try {
       await sql.unsafe("drop schema public cascade; drop schema if exists drizzle cascade; create schema public");
+      invalidateTestDatabaseTableCache();
 
       expectMigrationFailure({});
       await expect(sql`select to_regclass('public.assistant_provenance_withdrawal_backfill_state') as state_table`).resolves.toEqual([{ state_table: null }]);
@@ -35,6 +37,7 @@ describe("Story 11.2 provenance cutover migration", () => {
         )
       `).rejects.toThrow(/coordinated v1 writer/);
     } finally {
+      await resetTestDatabase();
       await sql.end();
     }
   });

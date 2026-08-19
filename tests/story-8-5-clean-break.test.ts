@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 
 import { eq, inArray, like } from "drizzle-orm";
 import postgres from "postgres";
-import { afterEach, beforeEach, describe, expect, test } from "vitest";
+import { beforeEach, describe, expect, test } from "vitest";
 
 import {
   assistantRetrievalDecisions,
@@ -59,10 +59,6 @@ describe("Story 8.5 clean-break seed", () => {
       },
       stdio: "inherit",
     });
-  });
-
-  afterEach(async () => {
-    await resetTestDatabase();
   });
 
   test("seeds only the operator and preserves source provenance", async () => {

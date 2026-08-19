@@ -8,7 +8,7 @@ CREATE TABLE "knowledge_province_references" (
   CONSTRAINT "knowledge_province_references_current_unit_fk" FOREIGN KEY ("current_unit_id") REFERENCES "knowledge_province_references"("id") ON DELETE RESTRICT,
   CONSTRAINT "knowledge_province_references_display_name_check" CHECK (length(btrim("display_name")) between 1 and 160),
   CONSTRAINT "knowledge_province_references_version_check" CHECK (length(btrim("version")) between 1 and 80),
-  CONSTRAINT "knowledge_province_references_effective_date_check" CHECK ("effective_date" ~ '^\\d{4}-\\d{2}-\\d{2}$'),
+  CONSTRAINT "knowledge_province_references_effective_date_check" CHECK ("effective_date" ~ '^\d{4}-\d{2}-\d{2}$'),
   CONSTRAINT "knowledge_province_references_source_check" CHECK ("official_source_url" ~ '^https://')
 );
 CREATE UNIQUE INDEX "knowledge_province_references_name_version_idx" ON "knowledge_province_references" ("display_name", "version");

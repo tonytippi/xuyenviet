@@ -14,20 +14,29 @@ const testSql = postgres(testDatabaseUrl.toString(), { max: 1 });
 
 export const testDb = drizzle(testSql, { schema });
 
-export async function resetTestDatabase() {
-  const tables = await testSql<{ table_name: string }[]>`
-    select table_name
-    from information_schema.tables
-    where table_schema = 'public'
-      and table_type = 'BASE TABLE'
-    order by table_name
-  `;
+let publicBaseTables: string[] | undefined;
 
-  if (tables.length === 0) {
+export function invalidateTestDatabaseTableCache() {
+  publicBaseTables = undefined;
+}
+
+export async function resetTestDatabase() {
+  if (!publicBaseTables) {
+    const tables = await testSql<{ table_name: string }[]>`
+      select table_name
+      from information_schema.tables
+      where table_schema = 'public'
+        and table_type = 'BASE TABLE'
+      order by table_name
+    `;
+    publicBaseTables = tables.map(({ table_name: tableName }) => tableName);
+  }
+
+  if (publicBaseTables.length === 0) {
     return;
   }
 
-  const tableList = tables.map(({ table_name: tableName }) => `"${tableName.replaceAll('"', '""')}"`).join(", ");
+  const tableList = publicBaseTables.map((tableName) => `"${tableName.replaceAll('"', '""')}"`).join(", ");
 
   await testSql.unsafe(`truncate table ${tableList} restart identity cascade`);
   const currentUnits = knowledgeProvinceReferenceFixture.filter((reference) => reference.id === reference.currentUnitId);

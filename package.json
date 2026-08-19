@@ -14,6 +14,7 @@
     "test:run": "vitest run",
     "test:unit": "vitest run --project unit",
     "test:integration": "vitest run --project integration",
+    "test:integration:worker-boundary": "vitest run --project integration tests/worker-adapter-boundary.test.ts",
     "typecheck": "tsc --noEmit && pnpm --filter @xuyenviet/web typecheck && pnpm --filter @xuyenviet/admin typecheck && pnpm --filter @xuyenviet/worker-domain typecheck && pnpm --filter @xuyenviet/api typecheck && pnpm --filter @xuyenviet/worker typecheck",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "node --env-file=apps/api/.env.local --import tsx scripts/migrate-api-schema.ts",

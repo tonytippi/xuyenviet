@@ -5,7 +5,7 @@ import ts from "typescript";
 
 import { eq, inArray, sql } from "drizzle-orm";
 import postgres from "postgres";
-import { afterEach, beforeEach, describe, expect, test } from "vitest";
+import { beforeAll, beforeEach, describe, expect, test } from "vitest";
 
 import {
   accounts,
@@ -28,7 +28,7 @@ import { recordAuditEvent } from "@/features/audit/events";
 import { resolveDatabaseTargetIdentity } from "../scripts/db-env";
 import { loadFacebookSeedUrls } from "../scripts/facebook-seed-urls";
 import { loadYoutubeSeedUrls } from "../scripts/youtube-seed-urls";
-import { resetTestDatabase, testDb } from "./helpers/db";
+import { invalidateTestDatabaseTableCache, resetTestDatabase, testDb } from "./helpers/db";
 import { getTestDatabaseUrl } from "./helpers/env-file";
 
 const catalogIds = systemAuditActorCatalog.map(({ id }) => id);
@@ -45,8 +45,9 @@ async function resolveTestDatabaseIdentity(): Promise<string> {
 }
 
 describe.sequential("Story 8.6 actor isolation", () => {
-  beforeEach(async () => {
+  beforeAll(async () => {
     await testDb.execute(sql.raw("drop schema public cascade; drop schema drizzle cascade; create schema public"));
+    invalidateTestDatabaseTableCache();
     const migrationDatabaseUrl = new URL(testDatabaseUrl);
     migrationDatabaseUrl.searchParams.set("options", "-c xuyenviet.provenance_old_writers_quiesced=v1");
     execFileSync("pnpm", ["exec", "drizzle-kit", "migrate"], {
@@ -55,6 +56,10 @@ describe.sequential("Story 8.6 actor isolation", () => {
       env: { ...process.env, APP_ENV: "local", DATABASE_URL: migrationDatabaseUrl.toString() },
       stdio: "inherit",
     });
+  });
+
+  beforeEach(async () => {
+    await resetTestDatabase();
     const expectedIdentity = await resolveTestDatabaseIdentity();
     execFileSync("pnpm", ["exec", "tsx", "scripts/db-seed.ts"], {
       cwd: process.cwd(),
@@ -69,10 +74,6 @@ describe.sequential("Story 8.6 actor isolation", () => {
       },
       stdio: "inherit",
     });
-  });
-
-  afterEach(async () => {
-    await resetTestDatabase();
   });
 
   test("accepts the real user and every catalog executor while rejecting malformed actor shapes before writing", async () => {
