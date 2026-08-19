@@ -33,11 +33,12 @@
 #   - done: Completed
 
 generated: 2026-07-25
-last_updated: 08-19-2026
+last_updated: 08-19-2026 13:41
 project: xuyenviet
 project_key: NOKEY
 tracking_system: file-system
-story_location: /home/sonnh/projects/xuyenviet/_bmad-output/implementation-artifacts
+story_location: 
+  /home/sonnh/projects/xuyenviet/_bmad-output/implementation-artifacts
 
 development_status:
   # Completed baselines have no active implementation stories in the current epic inventory.
@@ -307,7 +308,8 @@ development_status:
   # Epic 14 owns NestJS direct browser API consolidation and retirement.
   epic-14: done
   # 2026-08-03: Completed Nest-owned Google OAuth, encrypted one-time transactions, opaque browser sessions, direct request-principal admission, session-bound CSRF, exact CORS, renewal, and idempotent logout. Serial direct-auth integration coverage, root typecheck, build, and diff checks passed; lint has only existing unrelated warnings. Final adversarial and edge-case closure reviews found no high or medium findings.
-  14-1-establish-nestjs-google-oauth-opaque-browser-sessions-and-direct-api-admission: done
+  14-1-establish-nestjs-google-oauth-opaque-browser-sessions-and-direct-api-admission: 
+    done
   # 2026-08-03: Direct AI Ask and traveler-shell read cutover implemented. Direct-client/API contract verification, typecheck, build, and diff check passed; lint has only five existing unrelated warnings. No deployment or ingress evidence is claimed; ready for code review.
   # 2026-08-03: User approved atomic traveler direct-API/Auth.js-retirement scope after the
   # original read-only cutover exposed a two-owner command contradiction. Replacement spec:
@@ -476,7 +478,7 @@ development_status:
   23-1-normalize-current-and-legacy-province-references: done
   23-2-show-province-coverage-and-propose-vietnamese-queries: done
   23-3-run-confirmed-queries-immediately-and-show-progress: done
-  epic-23-retrospective: optional
+  epic-23-retrospective: done
 
   # 2026-08-16: Product Owner approved a clean-break rebaseline before users or
   # durable traveler data exist. Canonical dispatch remains in spec-epic-21,
@@ -495,10 +497,30 @@ development_status:
 
 action_items:
   - epic: 5
-    action: Replace zero placeholder AI Gateway pricing with verified provider pricing before cost reporting is trusted.
+    action: Replace zero placeholder AI Gateway pricing with verified provider 
+      pricing before cost reporting is trusted.
     owner: Tony and Winston
     status: open
   - epic: 5
-    action: Add live Tavily quality, cost, rate-limit, and failure monitoring before relying on web fallback for public scale.
+    action: Add live Tavily quality, cost, rate-limit, and failure monitoring 
+      before relying on web fallback for public scale.
     owner: Winston and Tony
     status: open
+  - id: "epic-23-retro-item-3-make-the-province-coverage-response-cont"
+    epic: 23
+    action: "Make the Province Coverage response contract validate each canonical
+      province ID against the official current-name and legacy-alias fixture. Add
+      rejected mismatched-name/alias contract cases and preserve metadata-only response
+      limits."
+    owner: "Amelia"
+    status: open
+    ref: "/home/sonnh/projects/xuyenviet/_bmad-output/implementation-artifacts/epic-23-retro-2026-08-19.md"
+  - id: "epic-23-retro-item-4-render-a-bounded-vietnamese-recovery-exp"
+    epic: 23
+    action: "Render a bounded Vietnamese recovery explanation for every allowed immediate-run
+      safeErrorCode, while retaining generic fallback copy and without displaying
+      raw diagnostics. Add accessible UI assertions for retry, failed, and cancelled
+      contexts."
+    owner: "Sally and Amelia"
+    status: open
+    ref: "/home/sonnh/projects/xuyenviet/_bmad-output/implementation-artifacts/epic-23-retro-2026-08-19.md"
